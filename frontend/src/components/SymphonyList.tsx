@@ -38,6 +38,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect }: Props)
   return (
     <div className="rounded-xl border border-border bg-card p-6">
       <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
+      <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
@@ -102,6 +103,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect }: Props)
             ))}
           </tbody>
         </table>
+      </div>
     </div>
   );
 }

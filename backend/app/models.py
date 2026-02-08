@@ -78,6 +78,7 @@ class DailyMetrics(Base):
     annualized_return = Column(Float, default=0.0)
     time_weighted_return = Column(Float, default=0.0)
     money_weighted_return = Column(Float, default=0.0)
+    money_weighted_return_period = Column(Float, default=0.0)
     win_rate = Column(Float, default=0.0)
     num_wins = Column(Integer, default=0)
     num_losses = Column(Integer, default=0)

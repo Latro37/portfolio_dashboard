@@ -299,7 +299,7 @@ def get_performance(
                 "cumulative_return_pct": m.cumulative_return_pct if m else 0,
                 "daily_return_pct": m.daily_return_pct if m else 0,
                 "time_weighted_return": m.time_weighted_return if m else 0,
-                "money_weighted_return": m.money_weighted_return if m else 0,
+                "money_weighted_return": getattr(m, "money_weighted_return_period", m.money_weighted_return) if m else 0,
                 "current_drawdown": m.current_drawdown if m else 0,
             }
             for p, m in results
@@ -327,7 +327,7 @@ def get_performance(
             "cumulative_return_pct": m.cumulative_return_pct if m else 0,
             "daily_return_pct": m.daily_return_pct if m else 0,
             "time_weighted_return": m.time_weighted_return if m else 0,
-            "money_weighted_return": m.money_weighted_return if m else 0,
+            "money_weighted_return": getattr(m, "money_weighted_return_period", m.money_weighted_return) if m else 0,
             "current_drawdown": m.current_drawdown if m else 0,
         }
 

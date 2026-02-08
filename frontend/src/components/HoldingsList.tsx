@@ -16,13 +16,13 @@ export function HoldingsList({ holdings }: Props) {
   if (!holdings || !holdings.holdings.length) return null;
 
   return (
-    <Card className="border-border/50">
-      <CardHeader className="pb-1">
+    <Card className="border-border/50 max-h-[500px] flex flex-col">
+      <CardHeader className="pb-1 flex-shrink-0">
         <CardTitle className="text-xl font-medium text-foreground/70">
           Holdings &middot; {holdings.date}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3 overflow-y-auto">
         {holdings.holdings.map((h, i) => (
           <div key={h.symbol} className="flex items-center gap-3">
             <div

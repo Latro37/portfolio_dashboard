@@ -104,7 +104,9 @@ def compute_all_metrics(
             row["annualized_return"] = 0.0
 
         # --- Money-Weighted Return (XIRR approximation) ---
-        row["money_weighted_return"] = round(_compute_mwr(dates[: i + 1], pv[: i + 1], ext_flows) * 100, 4)
+        mwr_ann, mwr_period = _compute_mwr(dates[: i + 1], pv[: i + 1], ext_flows)
+        row["money_weighted_return"] = round(mwr_ann * 100, 4)
+        row["money_weighted_return_period"] = round(mwr_period * 100, 4)
 
         # --- Win / Loss ---
         num_wins = len(pos_rets)
@@ -178,19 +180,20 @@ def _compute_mwr(
     dates_list: List[date],
     pv_list: List[float],
     ext_flows: Dict[date, float],
-) -> float:
-    """Approximate money-weighted return via modified Dietz or simple XIRR.
+) -> tuple[float, float]:
+    """Approximate money-weighted return via modified Dietz.
 
-    Falls back to 0 if solver fails.
+    Returns (annualized_mwr, period_mwr) as decimals.
+    Falls back to (0, 0) if solver fails.
     """
     if len(dates_list) < 2:
-        return 0.0
+        return 0.0, 0.0
 
     d0 = dates_list[0]
     dn = dates_list[-1]
     total_days = (dn - d0).days
     if total_days <= 0:
-        return 0.0
+        return 0.0, 0.0
 
     # Modified Dietz method
     pv_start = pv_list[0]
@@ -206,12 +209,13 @@ def _compute_mwr(
 
     denom = pv_start + weighted_flow
     if abs(denom) < 1e-6:
-        return 0.0
+        return 0.0, 0.0
 
     mdr = (pv_end - pv_start - total_flow) / denom
     # Annualize
+    annualized = mdr
     if total_days > 0:
         years = total_days / 365.25
         if mdr > -1:
-            return (1 + mdr) ** (1 / years) - 1
-    return mdr
+            annualized = (1 + mdr) ** (1 / years) - 1
+    return annualized, mdr

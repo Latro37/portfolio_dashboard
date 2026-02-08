@@ -22,21 +22,21 @@ export function HoldingsPie({ holdings }: Props) {
   }));
 
   return (
-    <Card className="border-border/50">
+    <Card className="border-border/50 max-h-[500px]">
       <CardHeader className="pb-2">
         <CardTitle className="text-xl font-medium text-foreground/70">
           Holdings Allocation
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={240}>
+        <ResponsiveContainer width="100%" height={380}>
           <PieChart>
             <Pie
               data={data}
               cx="50%"
               cy="50%"
-              innerRadius={60}
-              outerRadius={100}
+              innerRadius={90}
+              outerRadius={155}
               paddingAngle={2}
               dataKey="value"
               stroke="none"
@@ -51,6 +51,7 @@ export function HoldingsPie({ holdings }: Props) {
                 border: "1px solid #27272a",
                 borderRadius: 8,
                 fontSize: 13,
+                color: "#f4f4f5",
               }}
               formatter={(value: any, name: any) => [`${Number(value).toFixed(1)}%`, name]}
             />
