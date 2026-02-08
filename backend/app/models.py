@@ -4,34 +4,50 @@ from sqlalchemy import Column, Integer, Float, Text, Date, UniqueConstraint
 from app.database import Base
 
 
+class Account(Base):
+    """Discovered Composer sub-accounts (auto-populated on startup)."""
+    __tablename__ = "accounts"
+
+    id = Column(Text, primary_key=True)  # Composer account_uuid
+    credential_name = Column(Text, nullable=False)  # user label from accounts.json
+    account_type = Column(Text, nullable=False)  # raw: INDIVIDUAL, IRA_ROTH, etc.
+    display_name = Column(Text, nullable=False)  # friendly: "Primary — Stocks"
+    status = Column(Text, nullable=False, default="UNKNOWN")
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Text, nullable=False, index=True)
     date = Column(Date, nullable=False, index=True)
     symbol = Column(Text, nullable=False, index=True)
     action = Column(Text, nullable=False)  # buy / sell
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
     total_amount = Column(Float, nullable=False)
-    order_id = Column(Text, unique=True, nullable=False)
+    order_id = Column(Text, nullable=False)
+
+    __table_args__ = (UniqueConstraint("account_id", "order_id", name="uq_tx_account_order"),)
 
 
 class HoldingsHistory(Base):
     __tablename__ = "holdings_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Text, nullable=False, index=True)
     date = Column(Date, nullable=False, index=True)
     symbol = Column(Text, nullable=False)
     quantity = Column(Float, nullable=False)
 
-    __table_args__ = (UniqueConstraint("date", "symbol", name="uq_holdings_date_symbol"),)
+    __table_args__ = (UniqueConstraint("account_id", "date", "symbol", name="uq_holdings_acct_date_symbol"),)
 
 
 class CashFlow(Base):
     __tablename__ = "cash_flows"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Text, nullable=False, index=True)
     date = Column(Date, nullable=False, index=True)
     type = Column(Text, nullable=False)  # deposit / withdrawal / fee_cat / fee_taf / dividend
     amount = Column(Float, nullable=False)  # signed
@@ -41,6 +57,7 @@ class CashFlow(Base):
 class DailyPortfolio(Base):
     __tablename__ = "daily_portfolio"
 
+    account_id = Column(Text, primary_key=True)
     date = Column(Date, primary_key=True)
     portfolio_value = Column(Float, nullable=False)
     cash_balance = Column(Float, default=0.0)
@@ -52,6 +69,7 @@ class DailyPortfolio(Base):
 class DailyMetrics(Base):
     __tablename__ = "daily_metrics"
 
+    account_id = Column(Text, primary_key=True)
     date = Column(Date, primary_key=True)
     daily_return_pct = Column(Float, default=0.0)
     cumulative_return_pct = Column(Float, default=0.0)
@@ -87,5 +105,6 @@ class BenchmarkData(Base):
 class SyncState(Base):
     __tablename__ = "sync_state"
 
+    account_id = Column(Text, primary_key=True)
     key = Column(Text, primary_key=True)
     value = Column(Text, nullable=False)

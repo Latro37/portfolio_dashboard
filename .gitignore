@@ -1,6 +1,7 @@
 # Environment
 .env
 *.env.local
+accounts.json
 
 # Python
 __pycache__/

@@ -50,90 +50,92 @@ def _map_cash_flow_type(type_code: str, subtype: str) -> Optional[str]:
     return None
 
 
-def get_sync_state(db: Session) -> dict:
-    """Read sync state from DB."""
-    rows = db.query(SyncState).all()
+def get_sync_state(db: Session, account_id: str) -> dict:
+    """Read sync state from DB for a specific sub-account."""
+    rows = db.query(SyncState).filter_by(account_id=account_id).all()
     return {r.key: r.value for r in rows}
 
 
-def set_sync_state(db: Session, key: str, value: str):
-    existing = db.query(SyncState).filter_by(key=key).first()
+def set_sync_state(db: Session, account_id: str, key: str, value: str):
+    existing = db.query(SyncState).filter_by(account_id=account_id, key=key).first()
     if existing:
         existing.value = value
     else:
-        db.add(SyncState(key=key, value=value))
+        db.add(SyncState(account_id=account_id, key=key, value=value))
     db.commit()
 
 
-def full_backfill(db: Session, client: ComposerClient = None):
-    """One-time full backfill of all historical data."""
-    if client is None:
-        client = ComposerClient()
+def _safe_step(label: str, fn, *args, **kwargs):
+    """Run a sync step, logging and continuing on failure."""
+    try:
+        fn(*args, **kwargs)
+    except Exception as e:
+        logger.warning("Sync step '%s' failed (continuing): %s", label, e)
 
-    logger.info("Starting full backfill...")
+
+def full_backfill(db: Session, client: ComposerClient, account_id: str):
+    """One-time full backfill of all historical data for a sub-account."""
+    logger.info("Starting full backfill for account %s...", account_id)
 
     # 1. Sync transactions
-    _sync_transactions(db, client, since="2020-01-01")
+    _safe_step("transactions", _sync_transactions, db, client, account_id, since="2020-01-01")
 
     # 2. Sync cash flows (deposits, fees, dividends)
-    _sync_cash_flows(db, client, since="2020-01-01")
+    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since="2020-01-01")
 
     # 3. Sync portfolio history (daily values)
-    _sync_portfolio_history(db, client)
+    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
 
     # 4. Reconstruct and store holdings history
-    _sync_holdings_history(db, client)
+    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
 
     # 5. Fetch benchmark data
-    _sync_benchmark(db)
+    _safe_step("benchmark", _sync_benchmark, db, account_id)
 
     # 6. Compute and store all metrics
-    _recompute_metrics(db)
+    _safe_step("metrics", _recompute_metrics, db, account_id)
 
-    set_sync_state(db, "initial_backfill_done", "true")
-    set_sync_state(db, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
-    logger.info("Full backfill complete")
+    set_sync_state(db, account_id, "initial_backfill_done", "true")
+    set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
+    logger.info("Full backfill complete for account %s", account_id)
 
 
-def incremental_update(db: Session, client: ComposerClient = None):
-    """Update data from the last sync date to today."""
-    if client is None:
-        client = ComposerClient()
-
-    state = get_sync_state(db)
+def incremental_update(db: Session, client: ComposerClient, account_id: str):
+    """Update data from the last sync date to today for a sub-account."""
+    state = get_sync_state(db, account_id)
     last_date = state.get("last_sync_date")
     if not last_date:
-        logger.info("No last sync date found — running full backfill instead")
-        full_backfill(db, client)
+        logger.info("No last sync date found for %s — running full backfill instead", account_id)
+        full_backfill(db, client, account_id)
         return
 
-    logger.info("Incremental update from %s", last_date)
+    logger.info("Incremental update for %s from %s", account_id, last_date)
 
     # Sync new data from last_date
-    _sync_transactions(db, client, since=last_date)
-    _sync_cash_flows(db, client, since=last_date)
-    _sync_portfolio_history(db, client)
-    _sync_holdings_history(db, client)
-    _sync_benchmark(db)
-    _recompute_metrics(db)
+    _safe_step("transactions", _sync_transactions, db, client, account_id, since=last_date)
+    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since=last_date)
+    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
+    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
+    _safe_step("benchmark", _sync_benchmark, db, account_id)
+    _safe_step("metrics", _recompute_metrics, db, account_id)
 
-    set_sync_state(db, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
-    logger.info("Incremental update complete")
+    set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
+    logger.info("Incremental update complete for %s", account_id)
 
 
 # ------------------------------------------------------------------
 # Internal sync helpers
 # ------------------------------------------------------------------
 
-def _sync_transactions(db: Session, client: ComposerClient, since: str):
+def _sync_transactions(db: Session, client: ComposerClient, account_id: str, since: str):
     """Fetch trade activity and upsert into transactions table."""
-    trades = client.get_trade_activity(since=since)
+    trades = client.get_trade_activity(account_id, since=since)
     new_count = 0
     for t in trades:
         order_id = t.get("order_id", "")
         if not order_id:
             continue
-        exists = db.query(Transaction).filter_by(order_id=order_id).first()
+        exists = db.query(Transaction).filter_by(account_id=account_id, order_id=order_id).first()
         if exists:
             continue
         # Parse date
@@ -147,6 +149,7 @@ def _sync_transactions(db: Session, client: ComposerClient, since: str):
             continue
 
         db.add(Transaction(
+            account_id=account_id,
             date=tx_date,
             symbol=t["symbol"],
             action=t["action"],
@@ -158,16 +161,16 @@ def _sync_transactions(db: Session, client: ComposerClient, since: str):
         new_count += 1
 
     db.commit()
-    logger.info("Transactions synced: %d new", new_count)
+    logger.info("Transactions synced for %s: %d new", account_id, new_count)
 
 
-def _sync_cash_flows(db: Session, client: ComposerClient, since: str):
+def _sync_cash_flows(db: Session, client: ComposerClient, account_id: str, since: str):
     """Fetch non-trade activity and upsert into cash_flows table."""
-    rows = client.get_non_trade_activity(since=since)
+    rows = client.get_non_trade_activity(account_id, since=since)
 
     # Build set of existing (date, type, amount) for dedup
     existing = set()
-    for cf in db.query(CashFlow).all():
+    for cf in db.query(CashFlow).filter_by(account_id=account_id).all():
         existing.add((str(cf.date), cf.type, round(cf.amount, 4)))
 
     new_count = 0
@@ -185,6 +188,7 @@ def _sync_cash_flows(db: Session, client: ComposerClient, since: str):
             continue
 
         db.add(CashFlow(
+            account_id=account_id,
             date=cf_date,
             type=mapped_type,
             amount=r["amount"],
@@ -194,15 +198,15 @@ def _sync_cash_flows(db: Session, client: ComposerClient, since: str):
         new_count += 1
 
     db.commit()
-    logger.info("Cash flows synced: %d new", new_count)
+    logger.info("Cash flows synced for %s: %d new", account_id, new_count)
 
 
-def _sync_portfolio_history(db: Session, client: ComposerClient):
+def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str):
     """Fetch portfolio history and upsert into daily_portfolio table."""
-    history = client.get_portfolio_history()
+    history = client.get_portfolio_history(account_id)
 
     # Load cash flows for cumulative calculations
-    all_cf = db.query(CashFlow).order_by(CashFlow.date).all()
+    all_cf = db.query(CashFlow).filter_by(account_id=account_id).order_by(CashFlow.date).all()
 
     # Build cumulative deposit/fee/dividend by date
     cum_deposits = 0.0
@@ -235,12 +239,26 @@ def _sync_portfolio_history(db: Session, client: ComposerClient):
             "total_dividends": round(cum_dividends, 2),
         }
 
+    # If no cash flows found, fall back to total-stats API for net_deposits
+    if not all_cf:
+        try:
+            total_stats = client.get_total_stats(account_id)
+            fallback_deposits = float(total_stats.get("net_deposits", 0))
+            logger.info(
+                "No cash flow data for %s — using total-stats net_deposits=%.2f as fallback",
+                account_id, fallback_deposits,
+            )
+        except Exception:
+            fallback_deposits = 0.0
+    else:
+        fallback_deposits = None
+
     # Forward-fill cumulative values for dates without cash flow events
     last_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
 
     # Try to get current cash balance
     try:
-        cash_balance = client.get_cash_balance()
+        cash_balance = client.get_cash_balance(account_id)
     except Exception:
         cash_balance = 0.0
 
@@ -256,34 +274,40 @@ def _sync_portfolio_history(db: Session, client: ComposerClient):
         if ds in cum_by_date:
             last_cum = cum_by_date[ds]
 
-        existing = db.query(DailyPortfolio).filter_by(date=d).first()
+        # Use fallback deposits if no cash flow data exists
+        deposits_val = fallback_deposits if fallback_deposits is not None else last_cum["net_deposits"]
+        fees_val = last_cum["total_fees"]
+        dividends_val = last_cum["total_dividends"]
+
+        existing = db.query(DailyPortfolio).filter_by(account_id=account_id, date=d).first()
         if existing:
             existing.portfolio_value = entry["portfolio_value"]
-            existing.net_deposits = last_cum["net_deposits"]
-            existing.total_fees = last_cum["total_fees"]
-            existing.total_dividends = last_cum["total_dividends"]
+            existing.net_deposits = deposits_val
+            existing.total_fees = fees_val
+            existing.total_dividends = dividends_val
             # Only set cash_balance for today
             if ds == datetime.now().strftime("%Y-%m-%d"):
                 existing.cash_balance = cash_balance
         else:
             db.add(DailyPortfolio(
+                account_id=account_id,
                 date=d,
                 portfolio_value=entry["portfolio_value"],
                 cash_balance=cash_balance if ds == datetime.now().strftime("%Y-%m-%d") else 0.0,
-                net_deposits=last_cum["net_deposits"],
-                total_fees=last_cum["total_fees"],
-                total_dividends=last_cum["total_dividends"],
+                net_deposits=deposits_val,
+                total_fees=fees_val,
+                total_dividends=dividends_val,
             ))
             new_count += 1
 
     db.commit()
-    logger.info("Daily portfolio synced: %d new rows", new_count)
+    logger.info("Daily portfolio synced for %s: %d new rows", account_id, new_count)
 
 
-def _sync_holdings_history(db: Session, client: ComposerClient):
+def _sync_holdings_history(db: Session, client: ComposerClient, account_id: str):
     """Reconstruct holdings from transactions and store snapshots."""
-    # Get all transactions from DB
-    txs = db.query(Transaction).order_by(Transaction.date).all()
+    # Get all transactions from DB for this account
+    txs = db.query(Transaction).filter_by(account_id=account_id).order_by(Transaction.date).all()
     tx_dicts = [
         {"date": str(t.date), "symbol": t.symbol, "action": t.action, "quantity": t.quantity}
         for t in txs
@@ -297,24 +321,26 @@ def _sync_holdings_history(db: Session, client: ComposerClient):
     new_count = 0
     for snap in snapshots:
         d = date.fromisoformat(snap["date"])
-        # Delete existing entries for this date and re-insert
-        db.query(HoldingsHistory).filter_by(date=d).delete()
+        # Delete existing entries for this account+date and re-insert
+        db.query(HoldingsHistory).filter_by(account_id=account_id, date=d).delete()
         for sym, qty in snap["holdings"].items():
-            db.add(HoldingsHistory(date=d, symbol=sym, quantity=qty))
+            db.add(HoldingsHistory(account_id=account_id, date=d, symbol=sym, quantity=qty))
             new_count += 1
 
     db.commit()
-    logger.info("Holdings history synced: %d rows across %d dates", new_count, len(snapshots))
+    logger.info("Holdings history synced for %s: %d rows across %d dates", account_id, new_count, len(snapshots))
 
 
-def _sync_benchmark(db: Session):
+def _sync_benchmark(db: Session, account_id: str):
     """Fetch SPY daily closes from yfinance and store."""
     import yfinance as yf
     settings = get_settings()
     ticker = settings.benchmark_ticker
 
-    # Find date range from daily_portfolio
-    first = db.query(func.min(DailyPortfolio.date)).scalar()
+    # Find date range from daily_portfolio for this account
+    first = db.query(func.min(DailyPortfolio.date)).filter(
+        DailyPortfolio.account_id == account_id
+    ).scalar()
     if not first:
         return
 
@@ -341,10 +367,12 @@ def _sync_benchmark(db: Session):
     logger.info("Benchmark data synced: %d new rows", new_count)
 
 
-def _recompute_metrics(db: Session):
-    """Recompute all daily metrics from stored data."""
-    # Load daily portfolio
-    portfolio_rows = db.query(DailyPortfolio).order_by(DailyPortfolio.date).all()
+def _recompute_metrics(db: Session, account_id: str):
+    """Recompute all daily metrics from stored data for a sub-account."""
+    # Load daily portfolio for this account
+    portfolio_rows = db.query(DailyPortfolio).filter_by(
+        account_id=account_id
+    ).order_by(DailyPortfolio.date).all()
     if not portfolio_rows:
         return
 
@@ -355,7 +383,8 @@ def _recompute_metrics(db: Session):
 
     # Load external cash flows (deposits + withdrawals only for MWR)
     ext_flows = db.query(CashFlow).filter(
-        CashFlow.type.in_(["deposit", "withdrawal"])
+        CashFlow.account_id == account_id,
+        CashFlow.type.in_(["deposit", "withdrawal"]),
     ).order_by(CashFlow.date).all()
     cf_dicts = [{"date": cf.date, "amount": cf.amount} for cf in ext_flows]
 
@@ -369,13 +398,13 @@ def _recompute_metrics(db: Session):
     # Upsert metrics
     for m in metrics:
         d = m["date"]
-        existing = db.query(DailyMetrics).filter_by(date=d).first()
+        existing = db.query(DailyMetrics).filter_by(account_id=account_id, date=d).first()
         if existing:
             for k, v in m.items():
                 if k != "date":
                     setattr(existing, k, v)
         else:
-            db.add(DailyMetrics(**m))
+            db.add(DailyMetrics(account_id=account_id, **m))
 
     db.commit()
-    logger.info("Metrics recomputed: %d rows", len(metrics))
+    logger.info("Metrics recomputed for %s: %d rows", account_id, len(metrics))

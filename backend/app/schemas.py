@@ -5,6 +5,24 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+# --- Accounts ---
+class AccountInfo(BaseModel):
+    id: str
+    credential_name: str
+    account_type: str
+    display_name: str
+    status: str
+
+
+# --- Manual Cash Flow ---
+class ManualCashFlowRequest(BaseModel):
+    account_id: str
+    date: date
+    type: str = "deposit"  # deposit / withdrawal
+    amount: float
+    description: str = ""
+
+
 # --- Sync ---
 class SyncStatus(BaseModel):
     status: str  # idle / syncing / error

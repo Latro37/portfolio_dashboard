@@ -2,6 +2,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api";
 
 async function fetchJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+  if (res.status === 429) {
+    const body = await res.text().catch(() => "");
+    console.error(
+      `[RATE LIMITED] 429 on ${path} — Retry-After: ${res.headers.get("Retry-After") ?? "unknown"}, body: ${body.slice(0, 500)}`
+    );
+    throw new Error(`Rate limited on ${path}. Try again later.`);
+  }
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
   return res.json();
 }
@@ -83,10 +90,33 @@ export interface SyncStatus {
   message: string;
 }
 
+export interface AccountInfo {
+  id: string;
+  credential_name: string;
+  account_type: string;
+  display_name: string;
+  status: string;
+}
+
+function _qs(accountId?: string, extra?: Record<string, string>): string {
+  const params = new URLSearchParams();
+  if (accountId) params.set("account_id", accountId);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (v) params.set(k, v);
+    }
+  }
+  const s = params.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
-  getSummary: () => fetchJSON<Summary>("/summary"),
-  getPerformance: (period?: string, startDate?: string, endDate?: string) => {
+  getAccounts: () => fetchJSON<AccountInfo[]>("/accounts"),
+  getSummary: (accountId?: string) =>
+    fetchJSON<Summary>(`/summary${_qs(accountId)}`),
+  getPerformance: (accountId?: string, period?: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
+    if (accountId) params.set("account_id", accountId);
     if (startDate || endDate) {
       if (startDate) params.set("start_date", startDate);
       if (endDate) params.set("end_date", endDate);
@@ -96,15 +126,31 @@ export const api = {
     const qs = params.toString();
     return fetchJSON<PerformancePoint[]>(qs ? `/performance?${qs}` : "/performance");
   },
-  getHoldings: (date?: string) =>
-    fetchJSON<HoldingsResponse>(date ? `/holdings?date=${date}` : "/holdings"),
-  getTransactions: (limit = 100, offset = 0, symbol?: string) => {
-    let url = `/transactions?limit=${limit}&offset=${offset}`;
-    if (symbol) url += `&symbol=${symbol}`;
-    return fetchJSON<{ total: number; transactions: TransactionRow[] }>(url);
+  getHoldings: (accountId?: string, date?: string) =>
+    fetchJSON<HoldingsResponse>(`/holdings${_qs(accountId, date ? { date } : undefined)}`),
+  getTransactions: (accountId?: string, limit = 100, offset = 0, symbol?: string) => {
+    const params: Record<string, string> = { limit: String(limit), offset: String(offset) };
+    if (symbol) params.symbol = symbol;
+    return fetchJSON<{ total: number; transactions: TransactionRow[] }>(
+      `/transactions${_qs(accountId, params)}`
+    );
   },
-  getCashFlows: () => fetchJSON<CashFlowRow[]>("/cash-flows"),
-  getSyncStatus: () => fetchJSON<SyncStatus>("/sync/status"),
-  triggerSync: () =>
-    fetch(`${API_BASE}/sync`, { method: "POST" }).then((r) => r.json()),
+  getCashFlows: (accountId?: string) =>
+    fetchJSON<CashFlowRow[]>(`/cash-flows${_qs(accountId)}`),
+  getSyncStatus: (accountId?: string) =>
+    fetchJSON<SyncStatus>(`/sync/status${_qs(accountId)}`),
+  triggerSync: (accountId?: string) =>
+    fetch(`${API_BASE}/sync${_qs(accountId)}`, { method: "POST" }).then((r) => r.json()),
+  addManualCashFlow: (body: {
+    account_id: string;
+    date: string;
+    type: string;
+    amount: number;
+    description?: string;
+  }) =>
+    fetch(`${API_BASE}/cash-flows/manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json()),
 };

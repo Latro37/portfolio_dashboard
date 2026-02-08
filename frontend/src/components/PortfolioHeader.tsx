@@ -1,5 +1,6 @@
 "use client";
 
+import { ReactNode } from "react";
 import { Summary } from "@/lib/api";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,9 +9,10 @@ interface Props {
   summary: Summary;
   onSync: () => void;
   syncing: boolean;
+  accountSwitcher?: ReactNode;
 }
 
-export function PortfolioHeader({ summary, onSync, syncing }: Props) {
+export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher }: Props) {
   const dailyPositive = summary.daily_return_pct >= 0;
   const totalPositive = summary.total_return_dollars >= 0;
 
@@ -32,6 +34,7 @@ export function PortfolioHeader({ summary, onSync, syncing }: Props) {
       </div>
 
       <div className="flex items-center gap-3">
+        {accountSwitcher}
         {/* Sync button */}
         <Button
           variant="outline"

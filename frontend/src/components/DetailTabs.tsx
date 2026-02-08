@@ -4,9 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { api, TransactionRow, CashFlowRow } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingDown, Plus } from "lucide-react";
 
-export function DetailTabs() {
+interface Props {
+  accountId?: string;
+  onDataChange?: () => void;
+}
+
+export function DetailTabs({ accountId, onDataChange }: Props) {
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [txTotal, setTxTotal] = useState(0);
   const [cashFlows, setCashFlows] = useState<CashFlowRow[]>([]);
@@ -16,20 +22,50 @@ export function DetailTabs() {
   const metricsRef = useRef<HTMLDivElement>(null);
   const [metricsHeight, setMetricsHeight] = useState<number | null>(null);
 
+  // Manual cash flow form state
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualDate, setManualDate] = useState("");
+  const [manualType, setManualType] = useState("deposit");
+  const [manualAmount, setManualAmount] = useState("");
+  const [manualDesc, setManualDesc] = useState("");
+
+  // Resolve to a single account UUID (manual entries need a specific account, not "all:...")
+  const resolvedSingleAccountId =
+    accountId && !accountId.startsWith("all:") ? accountId : undefined;
+
+  const handleAddManual = async () => {
+    if (!resolvedSingleAccountId || !manualDate || !manualAmount) return;
+    await api.addManualCashFlow({
+      account_id: resolvedSingleAccountId,
+      date: manualDate,
+      type: manualType,
+      amount: parseFloat(manualAmount),
+      description: manualDesc,
+    });
+    // Reset form, reload cash flows, and notify parent to re-render charts
+    setManualDate("");
+    setManualAmount("");
+    setManualDesc("");
+    setShowManualForm(false);
+    api.getCashFlows(accountId).then((data) => setCashFlows(data));
+    onDataChange?.();
+  };
+
   useEffect(() => {
-    api.getTransactions(PAGE_SIZE, 0).then((d) => {
+    api.getTransactions(accountId, PAGE_SIZE, 0).then((d) => {
       setTransactions(d.transactions);
       setTxTotal(d.total);
     });
-    api.getCashFlows().then((data) => setCashFlows(data));
-    fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api") + "/metrics")
+    api.getCashFlows(accountId).then((data) => setCashFlows(data));
+    const qs = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
+    fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api") + "/metrics" + qs)
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setMetrics(data);
         }
       });
-  }, []);
+  }, [accountId]);
 
   useEffect(() => {
     if (metricsRef.current) {
@@ -39,7 +75,7 @@ export function DetailTabs() {
 
   const loadTxPage = (page: number) => {
     setTxPage(page);
-    api.getTransactions(PAGE_SIZE, page * PAGE_SIZE).then((d) => {
+    api.getTransactions(accountId, PAGE_SIZE, page * PAGE_SIZE).then((d) => {
       setTransactions(d.transactions);
     });
   };
@@ -119,6 +155,84 @@ export function DetailTabs() {
         {/* Cash Flows */}
         <TabsContent value="cashflows">
           <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { maxHeight: metricsHeight } : { maxHeight: 500 }}>
+            {/* Manual entry form */}
+            {!showManualForm ? (
+              <div className="mb-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setShowManualForm(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Manual Entry
+                </Button>
+              </div>
+            ) : (
+              <div className="mb-4 rounded-md border border-border/50 bg-muted/30 p-3">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">Add deposit or withdrawal</p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">Date</label>
+                    <input
+                      type="date"
+                      value={manualDate}
+                      onChange={(e) => setManualDate(e.target.value)}
+                      className="rounded border border-border bg-background px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">Type</label>
+                    <select
+                      value={manualType}
+                      onChange={(e) => setManualType(e.target.value)}
+                      className="rounded border border-border bg-background px-2 py-1 text-sm"
+                    >
+                      <option value="deposit">Deposit</option>
+                      <option value="withdrawal">Withdrawal</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">Amount ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={manualAmount}
+                      onChange={(e) => setManualAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-28 rounded border border-border bg-background px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">Description</label>
+                    <input
+                      type="text"
+                      value={manualDesc}
+                      onChange={(e) => setManualDesc(e.target.value)}
+                      placeholder="Optional"
+                      className="w-36 rounded border border-border bg-background px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={!manualDate || !manualAmount || !resolvedSingleAccountId}
+                    onClick={handleAddManual}
+                  >
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setShowManualForm(false)}>
+                    Cancel
+                  </Button>
+                </div>
+                {!resolvedSingleAccountId && (
+                  <p className="mt-2 text-xs text-yellow-500">
+                    Select a specific sub-account (not &quot;All&quot;) to add a manual entry.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
