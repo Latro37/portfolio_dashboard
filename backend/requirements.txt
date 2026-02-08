@@ -1,0 +1,11 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+sqlalchemy==2.0.35
+alembic==1.13.2
+python-dotenv==1.0.1
+requests==2.32.3
+yfinance==0.2.44
+pydantic==2.9.2
+pydantic-settings==2.5.2
+scipy==1.14.1
+numpy==1.26.4
