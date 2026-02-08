@@ -23,6 +23,9 @@ interface Props {
   onEndDateChange: (d: string) => void;
   period: string;
   onPeriodChange: (p: string) => void;
+  hideMWR?: boolean;
+  hidePeriodControls?: boolean;
+  portfolioLabel?: string;
 }
 
 const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
@@ -35,6 +38,9 @@ export function PerformanceChart({
   onEndDateChange,
   period,
   onPeriodChange,
+  hideMWR,
+  hidePeriodControls,
+  portfolioLabel,
 }: Props) {
   const [mode, setMode] = useState<ChartMode>("portfolio");
   const [showPortfolio, setShowPortfolio] = useState(true);
@@ -56,8 +62,17 @@ export function PerformanceChart({
   const twrOffset = calcGradientOffset("time_weighted_return");
   const mwrOffset = calcGradientOffset("money_weighted_return");
 
+  // Detect if data spans multiple calendar years
+  const multiYear = hasData &&
+    new Date(data[0].date + "T00:00:00").getFullYear() !==
+    new Date(data[data.length - 1].date + "T00:00:00").getFullYear();
+
   const formatDate = (d: string) => {
     const dt = new Date(d + "T00:00:00");
+    if (multiYear) {
+      const yr = String(dt.getFullYear()).slice(-2);
+      return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " '" + yr;
+    }
     return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
@@ -83,7 +98,7 @@ export function PerformanceChart({
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Portfolio Value
+              {portfolioLabel || "Portfolio Value"}
             </button>
             <button
               onClick={() => setMode("twr")}
@@ -95,16 +110,18 @@ export function PerformanceChart({
             >
               TWR
             </button>
-            <button
-              onClick={() => setMode("mwr")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === "mwr"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              MWR
-            </button>
+            {!hideMWR && (
+              <button
+                onClick={() => setMode("mwr")}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  mode === "mwr"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                MWR
+              </button>
+            )}
             <button
               onClick={() => setMode("drawdown")}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -117,60 +134,64 @@ export function PerformanceChart({
             </button>
           </div>
 
-          <div className="h-5 w-px bg-border/50" />
+          {!hidePeriodControls && (
+            <>
+              <div className="h-5 w-px bg-border/50" />
 
-          {/* Period pills */}
-          <div className="flex rounded-lg bg-muted p-0.5">
-            {PERIODS.map((p) => (
-              <button
-                key={p}
-                onClick={() => {
-                  onPeriodChange(p);
-                  onStartDateChange("");
-                  onEndDateChange("");
-                }}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  period === p && !isCustomRange
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
+              {/* Period pills */}
+              <div className="flex rounded-lg bg-muted p-0.5">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => {
+                      onPeriodChange(p);
+                      onStartDateChange("");
+                      onEndDateChange("");
+                    }}
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      period === p && !isCustomRange
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
 
-          <div className="h-5 w-px bg-border/50" />
+              <div className="h-5 w-px bg-border/50" />
 
-          {/* Date pickers */}
-          <div className="flex items-center gap-2 text-xs">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => onStartDateChange(e.target.value)}
-              className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
-              placeholder="Start"
-            />
-            <span className="text-muted-foreground">to</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => onEndDateChange(e.target.value)}
-              className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
-              placeholder="End"
-            />
-            {isCustomRange && (
-              <button
-                onClick={() => {
-                  onStartDateChange("");
-                  onEndDateChange("");
-                }}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
-            )}
-          </div>
+              {/* Date pickers */}
+              <div className="flex items-center gap-2 text-xs">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => onStartDateChange(e.target.value)}
+                  className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
+                  placeholder="Start"
+                />
+                <span className="text-muted-foreground">to</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => onEndDateChange(e.target.value)}
+                  className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
+                  placeholder="End"
+                />
+                {isCustomRange && (
+                  <button
+                    onClick={() => {
+                      onStartDateChange("");
+                      onEndDateChange("");
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Chart */}

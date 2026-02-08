@@ -102,6 +102,55 @@ export interface AccountInfo {
   status: string;
 }
 
+export interface SymphonyHolding {
+  ticker: string;
+  allocation: number;
+  value: number;
+  last_percent_change: number;
+}
+
+export interface SymphonyInfo {
+  id: string;
+  position_id: string;
+  account_id: string;
+  account_name: string;
+  name: string;
+  color: string;
+  value: number;
+  net_deposits: number;
+  cash: number;
+  total_return: number;
+  cumulative_return_pct: number;
+  simple_return: number;
+  time_weighted_return: number;
+  last_dollar_change: number;
+  last_percent_change: number;
+  sharpe_ratio: number;
+  max_drawdown: number;
+  annualized_return: number;
+  invested_since: string;
+  last_rebalance_on: string | null;
+  next_rebalance_on: string | null;
+  rebalance_frequency: string;
+  holdings: SymphonyHolding[];
+}
+
+export interface SymphonyPerformancePoint {
+  date: string;
+  value: number;
+  deposit_adjusted_value: number;
+}
+
+export interface SymphonyBacktest {
+  stats: Record<string, number>;
+  dvm_capital: Record<string, Record<string, number>>;
+  tdvm_weights: Record<string, Record<string, number>>;
+  benchmarks: Record<string, Record<string, number>>;
+  first_day: number;
+  last_market_day: number;
+  cached_at: string;
+}
+
 function _qs(accountId?: string, extra?: Record<string, string>): string {
   const params = new URLSearchParams();
   if (accountId) params.set("account_id", accountId);
@@ -165,4 +214,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json()),
+  getSymphonies: (accountId?: string) =>
+    fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`),
+  getSymphonyPerformance: (symphonyId: string, accountId: string) =>
+    fetchJSON<PerformancePoint[]>(
+      `/symphonies/${symphonyId}/performance?account_id=${encodeURIComponent(accountId)}`
+    ),
+  getSymphonyBacktest: (symphonyId: string, accountId: string, forceRefresh = false) =>
+    fetchJSON<SymphonyBacktest>(
+      `/symphonies/${symphonyId}/backtest?account_id=${encodeURIComponent(accountId)}${forceRefresh ? "&force_refresh=true" : ""}`
+    ),
 };

@@ -261,6 +261,78 @@ class ComposerClient:
         return rows
 
     # ------------------------------------------------------------------
+    # Symphonies
+    # ------------------------------------------------------------------
+
+    def get_symphony_stats(self, account_id: str) -> List[Dict]:
+        """Fetch active symphony stats for an account via symphony-stats-meta.
+
+        Returns list of symphony dicts with id, name, value, net_deposits,
+        simple_return, time_weighted_return, holdings, etc.
+        """
+        data = self._get_json(f"api/v0.1/portfolio/accounts/{account_id}/symphony-stats-meta")
+        symphonies = data.get("symphonies", [])
+        logger.info("Symphony stats: %d symphonies for account %s", len(symphonies), account_id)
+        return symphonies
+
+    def get_symphony_history(self, account_id: str, symphony_id: str) -> List[Dict]:
+        """Fetch daily value history for a specific symphony.
+
+        Returns list of {'date': 'YYYY-MM-DD', 'value': float, 'deposit_adjusted_value': float}.
+        """
+        data = self._get_json(
+            f"api/v0.1/portfolio/accounts/{account_id}/symphonies/{symphony_id}"
+        )
+        epochs = data.get("epoch_ms", [])
+        values = data.get("series", [])
+        dep_adj = data.get("deposit_adjusted_series", [])
+
+        if len(epochs) != len(values):
+            raise ValueError("symphony history length mismatch")
+
+        result = []
+        for i, (ts_ms, val) in enumerate(zip(epochs, values)):
+            dt = datetime.fromtimestamp(ts_ms / 1000)
+            result.append({
+                "date": dt.strftime("%Y-%m-%d"),
+                "value": round(val, 2),
+                "deposit_adjusted_value": round(dep_adj[i], 2) if i < len(dep_adj) else round(val, 2),
+            })
+        logger.info("Symphony history: %d data points for %s", len(result), symphony_id)
+        return result
+
+    def get_symphony_backtest(self, symphony_id: str) -> Dict:
+        """Run backtest for an existing symphony.
+
+        Returns the full backtest response with dvm_capital, stats, benchmarks, etc.
+        """
+        url = f"{self.base_url}/api/v0.1/symphonies/{symphony_id}/backtest"
+        resp = requests.post(url, headers=self.headers, json={
+            "capital": 10000,
+            "apply_reg_fee": True,
+            "apply_taf_fee": True,
+            "apply_subscription": "none",
+            "backtest_version": "v2",
+            "slippage_percent": 0.0005,
+            "spread_markup": 0.001,
+        })
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "unknown")
+            logger.error(
+                "RATE LIMITED (429) on POST backtest %s — Retry-After: %s",
+                symphony_id, retry_after,
+            )
+        if not resp.ok:
+            logger.error(
+                "Backtest %s failed (%s): %s",
+                symphony_id, resp.status_code, resp.text[:500],
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info("Symphony backtest complete for %s", symphony_id)
+        return data
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

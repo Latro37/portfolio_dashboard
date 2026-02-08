@@ -2,7 +2,7 @@
 
 import { Summary } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
-import { Info } from "lucide-react";
+import { InfoTooltip } from "./InfoTooltip";
 
 interface Props {
   summary: Summary;
@@ -14,14 +14,7 @@ function Metric({ label, value, color, tooltip }: { label: string; value: string
       <CardContent className="p-4">
         <p className="text-base font-medium text-foreground/70 flex items-center gap-1.5">
           {label}
-          {tooltip && (
-            <span className="relative group/tip inline-flex">
-              <Info className="h-3.5 w-3.5 text-foreground/40 cursor-help" />
-              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-foreground w-64 opacity-0 group-hover/tip:opacity-100 transition-opacity pointer-events-none z-10">
-                {tooltip}
-              </span>
-            </span>
-          )}
+          {tooltip && <InfoTooltip text={tooltip} />}
         </p>
         <p className={`mt-1 text-3xl font-semibold ${color || "text-foreground"}`}>{value}</p>
       </CardContent>
@@ -47,7 +40,7 @@ export function MetricCards({ summary }: Props) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <Metric label="Total Return" value={fmtDollar(s.total_return_dollars)} color={colorPct(s.total_return_dollars)} />
-      <Metric label="TWR" value={fmtPct(s.time_weighted_return)} color={colorPct(s.time_weighted_return)} tooltip="Measures portfolio growth independent of cash flows such as deposits. Each day's gain/loss is compounded together to show how the strategy itself performed. Measures the performance of the strategy, not the timing of entry or exit." />
+      <Metric label="TWR" value={fmtPct(s.time_weighted_return)} color={colorPct(s.time_weighted_return)} tooltip="Time Weighted Return measures portfolio growth independent of cash flows such as deposits. Each day's gain/loss is compounded together to show how the strategy itself performed. Measures the performance of the strategy, not the timing of entry or exit." />
       <Metric label="Win Rate" value={s.win_rate.toFixed(1) + "%"} />
       <Metric label="Sharpe" value={s.sharpe_ratio.toFixed(2)} />
       <Metric label="Volatility" value={s.annualized_volatility.toFixed(1) + "%"} />

@@ -1,0 +1,245 @@
+"""Symphony API routes."""
+
+import json
+import logging
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import Account, SymphonyBacktestCache
+from app.composer_client import ComposerClient
+from app.config import load_accounts
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api", tags=["symphonies"])
+
+CACHE_TTL_HOURS = 24
+
+
+def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
+    """Build a ComposerClient with the right credentials for a given sub-account."""
+    acct = db.query(Account).filter_by(id=account_id).first()
+    if not acct:
+        raise HTTPException(404, f"Account {account_id} not found")
+    accounts_creds = load_accounts()
+    for creds in accounts_creds:
+        if creds.name == acct.credential_name:
+            return ComposerClient.from_credentials(creds)
+    raise HTTPException(500, f"No credentials found for credential name '{acct.credential_name}'")
+
+
+def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
+    """Resolve account_id param to list of sub-account IDs (same logic as portfolio router)."""
+    if account_id == "all":
+        accts = db.query(Account).all()
+        if not accts:
+            raise HTTPException(404, "No accounts discovered.")
+        return [a.id for a in accts]
+    if account_id and account_id.startswith("all:"):
+        cred_name = account_id[4:]
+        accts = db.query(Account).filter_by(credential_name=cred_name).all()
+        if not accts:
+            raise HTTPException(404, f"No sub-accounts found for credential '{cred_name}'")
+        return [a.id for a in accts]
+    if account_id:
+        return [account_id]
+    first = db.query(Account).first()
+    if not first:
+        raise HTTPException(404, "No accounts discovered.")
+    return [first.id]
+
+
+# ------------------------------------------------------------------
+# List symphonies
+# ------------------------------------------------------------------
+
+@router.get("/symphonies")
+def list_symphonies(
+    account_id: Optional[str] = Query(None, description="Sub-account ID, all:<cred>, or all"),
+    db: Session = Depends(get_db),
+):
+    """List active symphonies across one or more sub-accounts."""
+    ids = _resolve_account_ids(db, account_id)
+    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
+
+    result = []
+    for aid in ids:
+        try:
+            client = _get_client_for_account(db, aid)
+            symphonies = client.get_symphony_stats(aid)
+            for s in symphonies:
+                total_return = s.get("value", 0) - s.get("net_deposits", 0)
+                cum_return_pct = (total_return / s.get("net_deposits", 1) * 100) if s.get("net_deposits", 0) else 0
+                result.append({
+                    "id": s.get("id", ""),
+                    "position_id": s.get("position_id", ""),
+                    "account_id": aid,
+                    "account_name": acct_names.get(aid, aid),
+                    "name": s.get("name", "Unknown"),
+                    "color": s.get("color", "#888"),
+                    "value": round(s.get("value", 0), 2),
+                    "net_deposits": round(s.get("net_deposits", 0), 2),
+                    "cash": round(s.get("cash", 0), 2),
+                    "total_return": round(total_return, 2),
+                    "cumulative_return_pct": round(cum_return_pct, 2),
+                    "simple_return": round(s.get("simple_return", 0) * 100, 2),
+                    "time_weighted_return": round(s.get("time_weighted_return", 0) * 100, 2),
+                    "last_dollar_change": round(s.get("last_dollar_change", 0), 2),
+                    "last_percent_change": round(s.get("last_percent_change", 0) * 100, 2),
+                    "sharpe_ratio": round(s.get("sharpe_ratio", 0), 2),
+                    "max_drawdown": round(s.get("max_drawdown", 0) * 100, 2),
+                    "annualized_return": round(s.get("annualized_rate_of_return", 0) * 100, 2),
+                    "invested_since": s.get("invested_since", ""),
+                    "last_rebalance_on": s.get("last_rebalance_on"),
+                    "next_rebalance_on": s.get("next_rebalance_on"),
+                    "rebalance_frequency": s.get("rebalance_frequency", ""),
+                    "holdings": [
+                        {
+                            "ticker": h.get("ticker", ""),
+                            "allocation": round(h.get("allocation", 0) * 100, 2),
+                            "value": round(h.get("value", 0), 2),
+                            "last_percent_change": round(h.get("last_percent_change", 0) * 100, 2),
+                        }
+                        for h in s.get("holdings", [])
+                    ],
+                })
+        except Exception as e:
+            logger.warning("Failed to fetch symphonies for account %s: %s", aid, e)
+
+    return result
+
+
+# ------------------------------------------------------------------
+# Symphony performance (live daily values)
+# ------------------------------------------------------------------
+
+@router.get("/symphonies/{symphony_id}/performance")
+def get_symphony_performance(
+    symphony_id: str,
+    account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
+    db: Session = Depends(get_db),
+):
+    """Get daily value history for a symphony in the same shape as /performance."""
+    client = _get_client_for_account(db, account_id)
+    try:
+        history = client.get_symphony_history(account_id, symphony_id)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch symphony history: {e}")
+
+    if not history:
+        return []
+
+    initial_val = history[0]["value"]
+    initial_adj = history[0]["deposit_adjusted_value"]
+    twr = 1.0
+    peak_adj = initial_adj
+    result = []
+    for i, pt in enumerate(history):
+        val = pt["value"]
+        adj = pt["deposit_adjusted_value"]
+        prev_adj = history[i - 1]["deposit_adjusted_value"] if i > 0 else adj
+
+        daily_ret = (adj - prev_adj) / prev_adj if prev_adj > 0 and i > 0 else 0.0
+        if i > 0:
+            twr *= (1 + daily_ret)
+        twr_pct = (twr - 1) * 100
+
+        cum_ret = ((adj / initial_adj) - 1) * 100 if initial_adj > 0 else 0.0
+
+        peak_adj = max(peak_adj, adj)
+        drawdown = ((adj - peak_adj) / peak_adj) * 100 if peak_adj > 0 else 0.0
+
+        # net_deposits: initial investment + additional deposits over time
+        net_dep = initial_val + (val - adj) - (initial_val - initial_adj)
+
+        result.append({
+            "date": pt["date"],
+            "portfolio_value": round(val, 2),
+            "net_deposits": round(net_dep, 2),
+            "cumulative_return_pct": round(cum_ret, 4),
+            "daily_return_pct": round(daily_ret * 100, 4),
+            "time_weighted_return": round(twr_pct, 4),
+            "money_weighted_return": 0.0,
+            "current_drawdown": round(drawdown, 4),
+        })
+    return result
+
+
+# ------------------------------------------------------------------
+# Symphony backtest (cached)
+# ------------------------------------------------------------------
+
+@router.get("/symphonies/{symphony_id}/backtest")
+def get_symphony_backtest(
+    symphony_id: str,
+    account_id: str = Query(..., description="Sub-account ID for credentials"),
+    force_refresh: bool = Query(False, description="Force refresh cache"),
+    db: Session = Depends(get_db),
+):
+    """Get backtest results for a symphony, using cache when available."""
+    # Check cache
+    if not force_refresh:
+        cached = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
+        if cached and cached.cached_at > datetime.utcnow() - timedelta(hours=CACHE_TTL_HOURS):
+            return {
+                "stats": json.loads(cached.stats_json),
+                "dvm_capital": json.loads(cached.dvm_capital_json),
+                "tdvm_weights": json.loads(cached.tdvm_weights_json),
+                "benchmarks": json.loads(cached.benchmarks_json),
+                "first_day": cached.first_day,
+                "last_market_day": cached.last_market_day,
+                "cached_at": cached.cached_at.isoformat(),
+            }
+
+    # Fetch fresh backtest
+    client = _get_client_for_account(db, account_id)
+    try:
+        data = client.get_symphony_backtest(symphony_id)
+    except Exception as e:
+        raise HTTPException(500, f"Backtest failed: {e}")
+
+    stats = data.get("stats", {})
+    dvm_capital = data.get("dvm_capital", {})
+    tdvm_weights = data.get("tdvm_weights", {})
+    benchmarks = stats.get("benchmarks", {})
+    first_day = data.get("first_day", 0)
+    last_market_day = data.get("last_market_day", 0)
+
+    # Upsert cache
+    existing = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
+    now = datetime.utcnow()
+    if existing:
+        existing.account_id = account_id
+        existing.cached_at = now
+        existing.stats_json = json.dumps(stats)
+        existing.dvm_capital_json = json.dumps(dvm_capital)
+        existing.tdvm_weights_json = json.dumps(tdvm_weights)
+        existing.benchmarks_json = json.dumps(benchmarks)
+        existing.first_day = first_day
+        existing.last_market_day = last_market_day
+    else:
+        db.add(SymphonyBacktestCache(
+            symphony_id=symphony_id,
+            account_id=account_id,
+            cached_at=now,
+            stats_json=json.dumps(stats),
+            dvm_capital_json=json.dumps(dvm_capital),
+            tdvm_weights_json=json.dumps(tdvm_weights),
+            benchmarks_json=json.dumps(benchmarks),
+            first_day=first_day,
+            last_market_day=last_market_day,
+        ))
+    db.commit()
+
+    return {
+        "stats": stats,
+        "dvm_capital": dvm_capital,
+        "tdvm_weights": tdvm_weights,
+        "benchmarks": benchmarks,
+        "first_day": first_day,
+        "last_market_day": last_market_day,
+        "cached_at": now.isoformat(),
+    }

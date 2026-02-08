@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models for all database tables."""
 
-from sqlalchemy import Column, Integer, Float, Text, Date, UniqueConstraint
+from sqlalchemy import Column, Integer, Float, Text, Date, DateTime, UniqueConstraint
 from app.database import Base
 
 
@@ -100,6 +100,21 @@ class BenchmarkData(Base):
     date = Column(Date, primary_key=True)
     symbol = Column(Text, nullable=False, default="SPY")
     close = Column(Float, nullable=False)
+
+
+class SymphonyBacktestCache(Base):
+    """Cached backtest results for symphonies to avoid repeated slow API calls."""
+    __tablename__ = "symphony_backtest_cache"
+
+    symphony_id = Column(Text, primary_key=True)
+    account_id = Column(Text, nullable=False)
+    cached_at = Column(DateTime, nullable=False)
+    stats_json = Column(Text, nullable=False, default="{}")
+    dvm_capital_json = Column(Text, nullable=False, default="{}")
+    tdvm_weights_json = Column(Text, nullable=False, default="{}")
+    benchmarks_json = Column(Text, nullable=False, default="{}")
+    first_day = Column(Integer, default=0)
+    last_market_day = Column(Integer, default=0)
 
 
 class SyncState(Base):

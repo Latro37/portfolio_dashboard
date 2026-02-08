@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, SessionLocal
-from app.routers import portfolio, health
+from app.routers import portfolio, health, symphonies
 from app.config import load_accounts
 from app.composer_client import ComposerClient
 from app.models import Account
@@ -91,3 +91,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(portfolio.router)
+app.include_router(symphonies.router)

@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo } from "@/lib/api";
+import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo } from "@/lib/api";
 import { PortfolioHeader } from "./PortfolioHeader";
 import { PerformanceChart } from "./PerformanceChart";
 import { MetricCards } from "./MetricCards";
 import { HoldingsPie } from "./HoldingsPie";
 import { HoldingsList } from "./HoldingsList";
 import { DetailTabs } from "./DetailTabs";
+import { SymphonyList } from "./SymphonyList";
+import { SymphonyDetail } from "./SymphonyDetail";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +29,8 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [symphonies, setSymphonies] = useState<SymphonyInfo[]>([]);
+  const [selectedSymphony, setSelectedSymphony] = useState<SymphonyInfo | null>(null);
 
   // Resolve the account_id query param based on selection
   const resolvedAccountId = selectedCredential === "__all__"
@@ -76,6 +80,12 @@ export default function Dashboard() {
       } catch {
         setPerformance([]);
       }
+      try {
+        const syms = await api.getSymphonies(resolvedAccountId);
+        setSymphonies(syms);
+      } catch {
+        setSymphonies([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load data");
     } finally {
@@ -98,6 +108,7 @@ export default function Dashboard() {
     setSummary(null);
     setPerformance([]);
     setHoldings(null);
+    setSymphonies([]);
     setError(null);
     setLoading(true);
   };
@@ -198,9 +209,24 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Active Symphonies */}
+        <SymphonyList
+          symphonies={symphonies}
+          showAccountColumn={selectedCredential === "__all__" || selectedSubAccount === "all"}
+          onSelect={setSelectedSymphony}
+        />
+
         {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
         <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />
       </div>
+
+      {/* Symphony detail overlay */}
+      {selectedSymphony && (
+        <SymphonyDetail
+          symphony={selectedSymphony}
+          onClose={() => setSelectedSymphony(null)}
+        />
+      )}
     </div>
   );
 }
