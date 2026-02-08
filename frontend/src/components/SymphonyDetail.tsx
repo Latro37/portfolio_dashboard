@@ -80,15 +80,23 @@ const TOOLTIP_STYLE = {
 };
 
 // --- Metric card ---
-function Metric({ label, value, color, subValue, tooltip }: { label: string; value: string; color?: string; subValue?: string; tooltip?: string }) {
+function Metric({ label, value, color, subValue, tooltip, valueTooltip, subValueColor, subValueTooltip, subValueLarge }: { label: string; value: string; color?: string; subValue?: string; tooltip?: string; valueTooltip?: string; subValueColor?: string; subValueTooltip?: string; subValueLarge?: boolean }) {
   return (
     <div className="rounded-lg bg-muted/50 p-3">
       <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${color || "text-foreground"}`}>{value}</div>
-      {subValue && <div className={`text-xs tabular-nums ${color || "text-muted-foreground"}`}>{subValue}</div>}
+      <div className={`mt-1 text-lg font-semibold tabular-nums flex items-center gap-1 ${color || "text-foreground"}`}>
+        {value}
+        {valueTooltip && <InfoTooltip text={valueTooltip} />}
+      </div>
+      {subValue && (
+        <div className={`${subValueLarge ? "mt-0.5 text-lg font-semibold" : "text-xs"} tabular-nums flex items-center gap-1 ${subValueColor || color || "text-muted-foreground"}`}>
+          {subValue}
+          {subValueTooltip && <InfoTooltip text={subValueTooltip} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -116,12 +124,9 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   const [backtest, setBacktest] = useState<SymphonyBacktest | null>(null);
   const [loadingLive, setLoadingLive] = useState(true);
   const [loadingBacktest, setLoadingBacktest] = useState(false);
-  const [livePeriod, setLivePeriod] = useState<Period>("ALL");
-  const [liveStart, setLiveStart] = useState("");
-  const [liveEnd, setLiveEnd] = useState("");
-  const [btPeriod, setBtPeriod] = useState<Period>("ALL");
-  const [btStart, setBtStart] = useState("");
-  const [btEnd, setBtEnd] = useState("");
+  const [period, setPeriod] = useState<Period>("ALL");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
 
   const s = symphony;
 
@@ -154,15 +159,15 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   // Filter live data by period/custom dates (client-side, data already fetched as ALL)
   const filteredLiveData = useMemo(() => {
     if (!liveData.length) return [];
-    const start = liveStart || periodStartDate(livePeriod);
-    const end = liveEnd || "";
+    const start = customStart || periodStartDate(period);
+    const end = customEnd || "";
     if (!start && !end) return liveData;
     return liveData.filter((pt) => {
       if (start && pt.date < start) return false;
       if (end && pt.date > end) return false;
       return true;
     });
-  }, [liveData, livePeriod, liveStart, liveEnd]);
+  }, [liveData, period, customStart, customEnd]);
 
   // Compute backtest chart data
   const backtestChartData = useMemo(() => {
@@ -208,8 +213,8 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   // Filter backtest data by period/custom dates (client-side)
   const filteredBacktestData = useMemo(() => {
     if (!backtestChartData.length) return [];
-    const start = btStart || periodStartDate(btPeriod);
-    const end = btEnd || "";
+    const start = customStart || periodStartDate(period);
+    const end = customEnd || "";
     if (!start && !end) return backtestChartData;
     const filtered = backtestChartData.filter((pt) => {
       if (start && pt.date < start) return false;
@@ -233,14 +238,14 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
         drawdown: peak > 0 ? ((pt.value - peak) / peak) * 100 : 0,
       };
     });
-  }, [backtestChartData, btPeriod, btStart, btEnd]);
+  }, [backtestChartData, period, customStart, customEnd]);
 
   const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
   const btFormatDate = makeDateFormatter(filteredBacktestData);
 
   // Compute live metrics from filteredLiveData (period-aware)
   const liveMetrics = useMemo(() => {
-    const empty = { sharpe: null as number | null, maxDrawdown: null as number | null, annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, cumReturn: null as number | null, twr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
+    const empty = { sharpe: null as number | null, maxDrawdown: null as number | null, maxDrawdownDate: "", annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, bestDayDate: "", worstDayDate: "", cumReturn: null as number | null, twr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
     if (filteredLiveData.length < 2) return empty;
     const first = filteredLiveData[0];
     const last = filteredLiveData[filteredLiveData.length - 1];
@@ -248,40 +253,51 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
     const endDate = last.date;
     const dailyReturns = filteredLiveData.slice(1).map((pt) => pt.daily_return_pct);
     const n = dailyReturns.length;
-    // Win rate
+    // Win rate (exclude flat days, matching account-level formula)
     const wins = dailyReturns.filter((r) => r > 0).length;
-    const winRate = (wins / n) * 100;
-    // Best / Worst
-    const bestDay = Math.max(...dailyReturns);
-    const worstDay = Math.min(...dailyReturns);
+    const losses = dailyReturns.filter((r) => r < 0).length;
+    const decided = wins + losses;
+    const winRate = decided > 0 ? (wins / decided) * 100 : 0;
+    // Best / Worst (with dates)
+    const pts = filteredLiveData.slice(1);
+    let bestDay = -Infinity, worstDay = Infinity, bestDayDate = "", worstDayDate = "";
+    for (let j = 0; j < pts.length; j++) {
+      const r = pts[j].daily_return_pct;
+      if (r > bestDay) { bestDay = r; bestDayDate = pts[j].date; }
+      if (r < worstDay) { worstDay = r; worstDayDate = pts[j].date; }
+    }
     // Sharpe (annualized)
     const meanRet = dailyReturns.reduce((a, b) => a + b, 0) / n;
     const variance = dailyReturns.reduce((a, r) => a + (r - meanRet) ** 2, 0) / n;
     const stdDev = Math.sqrt(variance);
     const sharpe = stdDev > 0 ? (meanRet / stdDev) * Math.sqrt(252) : null;
-    // Max drawdown (from portfolio values in the filtered range)
-    let peak = first.portfolio_value;
-    let maxDd = 0;
-    for (const pt of filteredLiveData) {
-      if (pt.portfolio_value > peak) peak = pt.portfolio_value;
-      const dd = peak > 0 ? ((pt.portfolio_value - peak) / peak) * 100 : 0;
-      if (dd < maxDd) maxDd = dd;
-    }
-    // TWR for period
+    // TWR for period (deposit-adjusted)
     const twrStart = 1 + first.time_weighted_return / 100;
     const twrEnd = 1 + last.time_weighted_return / 100;
     const twr = twrStart > 0 ? ((twrEnd / twrStart) - 1) * 100 : null;
-    // Cum return
-    const cumReturn = first.portfolio_value > 0 ? ((last.portfolio_value / first.portfolio_value) - 1) * 100 : null;
+    // Cum return = profit / net deposits (how much you made relative to what you put in)
+    const cumReturn = last.net_deposits > 0
+      ? ((last.portfolio_value - last.net_deposits) / last.net_deposits) * 100
+      : null;
+    // Max drawdown from TWR within the period (rebased to period start)
+    let peakTwr = 0;
+    let maxDd = 0;
+    let maxDrawdownDate = "";
+    for (const pt of filteredLiveData) {
+      const rebasedTwr = twrStart > 0 ? ((1 + pt.time_weighted_return / 100) / twrStart - 1) * 100 : 0;
+      if (rebasedTwr > peakTwr) peakTwr = rebasedTwr;
+      const dd = (100 + peakTwr) > 0 ? ((100 + rebasedTwr) - (100 + peakTwr)) / (100 + peakTwr) * 100 : 0;
+      if (dd < maxDd) { maxDd = dd; maxDrawdownDate = pt.date; }
+    }
     // Annualized
     const tradingDays = n;
     const periodReturn = twr != null ? twr / 100 : 0;
     const annualized = tradingDays > 0 ? (Math.pow(1 + periodReturn, 252 / tradingDays) - 1) * 100 : null;
     // Calmar
     const calmar = maxDd < 0 && annualized != null ? annualized / Math.abs(maxDd) : null;
-    // Total return ($)
-    const totalReturn = last.portfolio_value - last.net_deposits;
-    return { sharpe, maxDrawdown: maxDd, annualized, calmar, winRate, bestDay, worstDay, cumReturn, twr, totalReturn, startDate, endDate };
+    // Total return ($) for the period: value change minus deposit change
+    const totalReturn = (last.portfolio_value - first.portfolio_value) - (last.net_deposits - first.net_deposits);
+    return { sharpe, maxDrawdown: maxDd, maxDrawdownDate, annualized, calmar, winRate, bestDay, worstDay, bestDayDate, worstDayDate, cumReturn, twr, totalReturn, startDate, endDate };
   }, [filteredLiveData]);
 
   // Backtest stats (from API, used as fallback)
@@ -383,7 +399,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                 color={colorVal(s.last_percent_change)}
                 subValue={fmtSignedDollar(s.last_dollar_change)}
               />
-              <Metric label="Total Return" value={liveMetrics.totalReturn != null ? fmtSignedDollar(liveMetrics.totalReturn) : "—"} color={colorVal(liveMetrics.totalReturn ?? 0)} />
+              <Metric label="Profit" value={liveMetrics.totalReturn != null ? fmtSignedDollar(liveMetrics.totalReturn) : "—"} color={colorVal(liveMetrics.totalReturn ?? 0)} />
               <Metric label="Cum. Return" value={liveMetrics.cumReturn != null ? fmtPct(liveMetrics.cumReturn) : "—"} color={colorVal(liveMetrics.cumReturn ?? 0)} />
               <Metric
                 label="TWR"
@@ -392,7 +408,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                 tooltip={TWR_TOOLTIP_TEXT}
               />
               <Metric label="Sharpe" value={liveMetrics.sharpe != null ? liveMetrics.sharpe.toFixed(2) : "—"} />
-              <Metric label="Max Drawdown" value={liveMetrics.maxDrawdown != null ? fmtPct(liveMetrics.maxDrawdown) : "—"} color="text-red-400" />
+              <Metric label="Max Drawdown" value={liveMetrics.maxDrawdown != null ? fmtPct(liveMetrics.maxDrawdown) : "—"} color="text-red-400" valueTooltip={liveMetrics.maxDrawdownDate ? new Date(liveMetrics.maxDrawdownDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined} />
               <Metric label="Annualized" value={liveMetrics.annualized != null ? fmtPct(liveMetrics.annualized) : "—"} color={colorVal(liveMetrics.annualized ?? 0)} />
               <Metric label="Calmar" value={liveMetrics.calmar != null ? liveMetrics.calmar.toFixed(2) : "—"} />
               <Metric label="Win Rate" value={liveMetrics.winRate != null ? liveMetrics.winRate.toFixed(1) + "%" : "—"} />
@@ -400,7 +416,11 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                 label="Best / Worst Day"
                 value={liveMetrics.bestDay != null ? fmtPct(liveMetrics.bestDay) : "—"}
                 color="text-emerald-400"
+                valueTooltip={liveMetrics.bestDayDate ? new Date(liveMetrics.bestDayDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined}
                 subValue={liveMetrics.worstDay != null ? fmtPct(liveMetrics.worstDay) : "—"}
+                subValueLarge
+                subValueColor="text-red-400"
+                subValueTooltip={liveMetrics.worstDayDate ? new Date(liveMetrics.worstDayDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined}
               />
             </div>
           </div>
@@ -434,12 +454,12 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
             ) : (
               <PerformanceChart
                 data={filteredLiveData}
-                period={livePeriod}
-                onPeriodChange={(p) => setLivePeriod(p as Period)}
-                startDate={liveStart}
-                endDate={liveEnd}
-                onStartDateChange={setLiveStart}
-                onEndDateChange={setLiveEnd}
+                period={period}
+                onPeriodChange={(p) => setPeriod(p as Period)}
+                startDate={customStart}
+                endDate={customEnd}
+                onStartDateChange={setCustomStart}
+                onEndDateChange={setCustomEnd}
                 portfolioLabel="Symphony Value"
               />
             )
@@ -469,9 +489,9 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                   {PERIODS.map((p) => (
                     <button
                       key={p}
-                      onClick={() => { setBtPeriod(p); setBtStart(""); setBtEnd(""); }}
+                      onClick={() => { setPeriod(p); setCustomStart(""); setCustomEnd(""); }}
                       className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                        btPeriod === p && !btStart && !btEnd
+                        period === p && !customStart && !customEnd
                           ? "bg-background text-foreground shadow-sm"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
@@ -485,11 +505,11 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
 
                 {/* Date pickers */}
                 <div className="flex items-center gap-2 text-xs">
-                  <input type="date" value={btStart || (filteredBacktestData.length ? filteredBacktestData[0].date : "")} onChange={(e) => setBtStart(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
+                  <input type="date" value={customStart || (filteredBacktestData.length ? filteredBacktestData[0].date : "")} onChange={(e) => setCustomStart(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
                   <span className="text-muted-foreground">to</span>
-                  <input type="date" value={btEnd || (filteredBacktestData.length ? filteredBacktestData[filteredBacktestData.length - 1].date : "")} onChange={(e) => setBtEnd(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
-                  {(btStart || btEnd) && (
-                    <button onClick={() => { setBtStart(""); setBtEnd(""); }} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>
+                  <input type="date" value={customEnd || (filteredBacktestData.length ? filteredBacktestData[filteredBacktestData.length - 1].date : "")} onChange={(e) => setCustomEnd(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
+                  {(customStart || customEnd) && (
+                    <button onClick={() => { setCustomStart(""); setCustomEnd(""); }} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>
                   )}
                 </div>
               </div>

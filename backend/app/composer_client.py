@@ -3,7 +3,7 @@
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import requests
@@ -121,7 +121,7 @@ class ComposerClient:
 
         result = []
         for ts_ms, val in zip(epochs, values):
-            dt = datetime.fromtimestamp(ts_ms / 1000)
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
             result.append({"date": dt.strftime("%Y-%m-%d"), "portfolio_value": round(val, 2)})
         logger.info("Portfolio history: %d data points", len(result))
         return result
@@ -292,7 +292,7 @@ class ComposerClient:
 
         result = []
         for i, (ts_ms, val) in enumerate(zip(epochs, values)):
-            dt = datetime.fromtimestamp(ts_ms / 1000)
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
             result.append({
                 "date": dt.strftime("%Y-%m-%d"),
                 "value": round(val, 2),

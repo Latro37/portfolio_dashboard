@@ -137,16 +137,25 @@ def get_symphony_performance(
     twr = 1.0
     peak_adj = initial_adj
 
-    # Detect cash flows from daily changes in (value - deposit_adjusted_value)
-    # A deposit on day t causes value to jump but deposit_adjusted_value doesn't
-    prev_gap = initial_val - initial_adj
-    cash_flows = []  # list of (day_index, amount)
+    # --- Pre-pass: infer actual cash flows using market return from adj ratio ---
+    # adj only changes with market returns, so adj[i]/adj[i-1] = daily market return.
+    # expected_val = prev_val * market_return.  Any difference = deposit/withdrawal.
+    cash_flows: list[tuple[int, float]] = []   # (day_index, amount)
+    cum_net_dep = initial_val                    # running cumulative net deposits
+    net_deposits_by_day = [cum_net_dep]          # one entry per history point
     for i in range(1, len(history)):
-        gap = history[i]["value"] - history[i]["deposit_adjusted_value"]
-        cf = gap - prev_gap
-        if abs(cf) > 0.01:  # ignore floating point noise
+        prev_val = history[i - 1]["value"]
+        prev_adj = history[i - 1]["deposit_adjusted_value"]
+        adj_i = history[i]["deposit_adjusted_value"]
+        val_i = history[i]["value"]
+
+        mkt_ret = (adj_i / prev_adj) if prev_adj > 0 else 1.0
+        expected_val = prev_val * mkt_ret
+        cf = val_i - expected_val
+        if abs(cf) > 0.50:           # real cash flow (ignore float noise)
             cash_flows.append((i, cf))
-        prev_gap = gap
+            cum_net_dep += cf
+        net_deposits_by_day.append(cum_net_dep)
 
     n_days = len(history)
     result = []
@@ -165,8 +174,7 @@ def get_symphony_performance(
         peak_adj = max(peak_adj, adj)
         drawdown = ((adj - peak_adj) / peak_adj) * 100 if peak_adj > 0 else 0.0
 
-        # net_deposits: initial investment + additional deposits over time
-        net_dep = initial_val + (val - adj) - (initial_val - initial_adj)
+        net_dep = net_deposits_by_day[i]
 
         # Modified Dietz MWR from inception to current day
         mwr_pct = 0.0
