@@ -136,6 +136,19 @@ def get_symphony_performance(
     initial_adj = history[0]["deposit_adjusted_value"]
     twr = 1.0
     peak_adj = initial_adj
+
+    # Detect cash flows from daily changes in (value - deposit_adjusted_value)
+    # A deposit on day t causes value to jump but deposit_adjusted_value doesn't
+    prev_gap = initial_val - initial_adj
+    cash_flows = []  # list of (day_index, amount)
+    for i in range(1, len(history)):
+        gap = history[i]["value"] - history[i]["deposit_adjusted_value"]
+        cf = gap - prev_gap
+        if abs(cf) > 0.01:  # ignore floating point noise
+            cash_flows.append((i, cf))
+        prev_gap = gap
+
+    n_days = len(history)
     result = []
     for i, pt in enumerate(history):
         val = pt["value"]
@@ -155,6 +168,21 @@ def get_symphony_performance(
         # net_deposits: initial investment + additional deposits over time
         net_dep = initial_val + (val - adj) - (initial_val - initial_adj)
 
+        # Modified Dietz MWR from inception to current day
+        mwr_pct = 0.0
+        if i > 0:
+            period_len = i  # days from start
+            total_cf = 0.0
+            weighted_cf = 0.0
+            for cf_day, cf_amt in cash_flows:
+                if cf_day <= i:
+                    total_cf += cf_amt
+                    weight = (i - cf_day) / period_len
+                    weighted_cf += cf_amt * weight
+            denom = initial_val + weighted_cf
+            if denom > 0:
+                mwr_pct = ((val - initial_val - total_cf) / denom) * 100
+
         result.append({
             "date": pt["date"],
             "portfolio_value": round(val, 2),
@@ -162,7 +190,7 @@ def get_symphony_performance(
             "cumulative_return_pct": round(cum_ret, 4),
             "daily_return_pct": round(daily_ret * 100, 4),
             "time_weighted_return": round(twr_pct, 4),
-            "money_weighted_return": 0.0,
+            "money_weighted_return": round(mwr_pct, 4),
             "current_drawdown": round(drawdown, 4),
         })
     return result

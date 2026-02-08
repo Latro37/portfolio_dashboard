@@ -141,16 +141,15 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
       .finally(() => setLoadingLive(false));
   }, [s.id, s.account_id]);
 
-  // Fetch backtest when tab switches to backtest
+  // Fetch backtest eagerly on mount (metrics need bStats)
   useEffect(() => {
-    if (tab !== "backtest" || backtest) return;
     setLoadingBacktest(true);
     api
       .getSymphonyBacktest(s.id, s.account_id)
       .then(setBacktest)
       .catch(() => setBacktest(null))
       .finally(() => setLoadingBacktest(false));
-  }, [tab, s.id, s.account_id, backtest]);
+  }, [s.id, s.account_id]);
 
   // Filter live data by period/custom dates (client-side, data already fetched as ALL)
   const filteredLiveData = useMemo(() => {
@@ -239,8 +238,100 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
   const btFormatDate = makeDateFormatter(filteredBacktestData);
 
-  // Backtest stats
+  // Compute live metrics from filteredLiveData (period-aware)
+  const liveMetrics = useMemo(() => {
+    const empty = { sharpe: null as number | null, maxDrawdown: null as number | null, annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, cumReturn: null as number | null, twr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
+    if (filteredLiveData.length < 2) return empty;
+    const first = filteredLiveData[0];
+    const last = filteredLiveData[filteredLiveData.length - 1];
+    const startDate = first.date;
+    const endDate = last.date;
+    const dailyReturns = filteredLiveData.slice(1).map((pt) => pt.daily_return_pct);
+    const n = dailyReturns.length;
+    // Win rate
+    const wins = dailyReturns.filter((r) => r > 0).length;
+    const winRate = (wins / n) * 100;
+    // Best / Worst
+    const bestDay = Math.max(...dailyReturns);
+    const worstDay = Math.min(...dailyReturns);
+    // Sharpe (annualized)
+    const meanRet = dailyReturns.reduce((a, b) => a + b, 0) / n;
+    const variance = dailyReturns.reduce((a, r) => a + (r - meanRet) ** 2, 0) / n;
+    const stdDev = Math.sqrt(variance);
+    const sharpe = stdDev > 0 ? (meanRet / stdDev) * Math.sqrt(252) : null;
+    // Max drawdown (from portfolio values in the filtered range)
+    let peak = first.portfolio_value;
+    let maxDd = 0;
+    for (const pt of filteredLiveData) {
+      if (pt.portfolio_value > peak) peak = pt.portfolio_value;
+      const dd = peak > 0 ? ((pt.portfolio_value - peak) / peak) * 100 : 0;
+      if (dd < maxDd) maxDd = dd;
+    }
+    // TWR for period
+    const twrStart = 1 + first.time_weighted_return / 100;
+    const twrEnd = 1 + last.time_weighted_return / 100;
+    const twr = twrStart > 0 ? ((twrEnd / twrStart) - 1) * 100 : null;
+    // Cum return
+    const cumReturn = first.portfolio_value > 0 ? ((last.portfolio_value / first.portfolio_value) - 1) * 100 : null;
+    // Annualized
+    const tradingDays = n;
+    const periodReturn = twr != null ? twr / 100 : 0;
+    const annualized = tradingDays > 0 ? (Math.pow(1 + periodReturn, 252 / tradingDays) - 1) * 100 : null;
+    // Calmar
+    const calmar = maxDd < 0 && annualized != null ? annualized / Math.abs(maxDd) : null;
+    // Total return ($)
+    const totalReturn = last.portfolio_value - last.net_deposits;
+    return { sharpe, maxDrawdown: maxDd, annualized, calmar, winRate, bestDay, worstDay, cumReturn, twr, totalReturn, startDate, endDate };
+  }, [filteredLiveData]);
+
+  // Backtest stats (from API, used as fallback)
   const bStats = backtest?.stats || {};
+
+  // Compute backtest metrics from filteredBacktestData (period-aware)
+  const btMetrics = useMemo(() => {
+    const empty = { cumReturn: null as number | null, annualized: null as number | null, sharpe: null as number | null, sortino: null as number | null, calmar: null as number | null, maxDrawdown: null as number | null, winRate: null as number | null, stdDev: null as number | null, startDate: "", endDate: "" };
+    if (filteredBacktestData.length < 2) return empty;
+    const first = filteredBacktestData[0];
+    const last = filteredBacktestData[filteredBacktestData.length - 1];
+    const startDate = first.date;
+    const endDate = last.date;
+    const dailyReturns = filteredBacktestData.slice(1).map((pt, i) => {
+      const prev = filteredBacktestData[i].value;
+      return prev > 0 ? ((pt.value - prev) / prev) * 100 : 0;
+    });
+    const n = dailyReturns.length;
+    if (n === 0) return empty;
+    // Cum return from TWR
+    const twrStart = 1 + (first.twr ?? 0) / 100;
+    const twrEnd = 1 + (last.twr ?? 0) / 100;
+    const cumReturn = twrStart > 0 ? (twrEnd / twrStart - 1) : 0;
+    // Annualized
+    const annualized = n > 0 ? Math.pow(1 + cumReturn, 252 / n) - 1 : 0;
+    // Sharpe
+    const meanRet = dailyReturns.reduce((a, b) => a + b, 0) / n;
+    const variance = dailyReturns.reduce((a, r) => a + (r - meanRet) ** 2, 0) / n;
+    const stdDev = Math.sqrt(variance);
+    const sharpe = stdDev > 0 ? (meanRet / stdDev) * Math.sqrt(252) : null;
+    // Sortino (downside deviation)
+    const downsideReturns = dailyReturns.filter((r) => r < 0);
+    const downsideVar = downsideReturns.length > 0 ? downsideReturns.reduce((a, r) => a + r ** 2, 0) / n : 0;
+    const downsideDev = Math.sqrt(downsideVar);
+    const sortino = downsideDev > 0 ? (meanRet / downsideDev) * Math.sqrt(252) : null;
+    // Max drawdown
+    let peak = first.value;
+    let maxDd = 0;
+    for (const pt of filteredBacktestData) {
+      if (pt.value > peak) peak = pt.value;
+      const dd = peak > 0 ? (pt.value - peak) / peak : 0;
+      if (dd < maxDd) maxDd = dd;
+    }
+    // Calmar
+    const calmar = maxDd < 0 ? annualized / Math.abs(maxDd) : null;
+    // Win rate
+    const wins = dailyReturns.filter((r) => r > 0).length;
+    const winRate = wins / n;
+    return { cumReturn, annualized, sharpe, sortino, calmar, maxDrawdown: maxDd, winRate, stdDev: stdDev / 100, startDate, endDate };
+  }, [filteredBacktestData]);
 
   return (
     <div
@@ -271,35 +362,47 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
             </div>
           </div>
 
-          {/* Metric cards */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <Metric label="Current Value" value={fmtDollar(s.value)} />
-            <Metric label="Net Deposits" value={fmtDollar(s.net_deposits)} />
-            <Metric
-              label="Today's Change"
-              value={fmtPct(s.last_percent_change)}
-              color={colorVal(s.last_percent_change)}
-              subValue={fmtSignedDollar(s.last_dollar_change)}
-            />
-            <Metric label="Total Return" value={fmtSignedDollar(s.total_return)} color={colorVal(s.total_return)} />
-            <Metric label="Cum. Return" value={fmtPct(s.cumulative_return_pct)} color={colorVal(s.cumulative_return_pct)} />
-            <Metric
-              label="TWR"
-              value={s.time_weighted_return <= -100 ? "—" : fmtPct(s.time_weighted_return)}
-              color={s.time_weighted_return <= -100 ? "text-muted-foreground" : colorVal(s.time_weighted_return)}
-              tooltip={TWR_TOOLTIP_TEXT}
-            />
-            <Metric label="Sharpe" value={s.sharpe_ratio.toFixed(2)} />
-            <Metric label="Max Drawdown" value={fmtPct(s.max_drawdown)} color="text-red-400" />
-            <Metric label="Annualized" value={fmtPct(s.annualized_return)} color={colorVal(s.annualized_return)} />
-            <Metric label="Calmar" value={bStats.calmar_ratio != null ? bStats.calmar_ratio.toFixed(2) : "—"} />
-            <Metric label="Win Rate" value={bStats.win_rate != null ? (bStats.win_rate * 100).toFixed(1) + "%" : "—"} />
-            <Metric
-              label="Best / Worst Day"
-              value={bStats.max != null ? fmtPct(bStats.max * 100) : "—"}
-              color="text-emerald-400"
-              subValue={bStats.min != null ? fmtPct(bStats.min * 100) : "—"}
-            />
+          {/* Live Metrics */}
+          <div>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+              Live Metrics
+              {liveMetrics.startDate && liveMetrics.endDate && (
+                <span className="ml-2 text-xs font-normal normal-case text-muted-foreground/60">
+                  {new Date(liveMetrics.startDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  {" — "}
+                  {new Date(liveMetrics.endDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                </span>
+              )}
+            </h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Metric label="Current Value" value={fmtDollar(s.value)} />
+              <Metric label="Net Deposits" value={fmtDollar(s.net_deposits)} />
+              <Metric
+                label="Today's Change"
+                value={fmtPct(s.last_percent_change)}
+                color={colorVal(s.last_percent_change)}
+                subValue={fmtSignedDollar(s.last_dollar_change)}
+              />
+              <Metric label="Total Return" value={liveMetrics.totalReturn != null ? fmtSignedDollar(liveMetrics.totalReturn) : "—"} color={colorVal(liveMetrics.totalReturn ?? 0)} />
+              <Metric label="Cum. Return" value={liveMetrics.cumReturn != null ? fmtPct(liveMetrics.cumReturn) : "—"} color={colorVal(liveMetrics.cumReturn ?? 0)} />
+              <Metric
+                label="TWR"
+                value={liveMetrics.twr != null ? fmtPct(liveMetrics.twr) : "—"}
+                color={liveMetrics.twr != null ? colorVal(liveMetrics.twr) : "text-muted-foreground"}
+                tooltip={TWR_TOOLTIP_TEXT}
+              />
+              <Metric label="Sharpe" value={liveMetrics.sharpe != null ? liveMetrics.sharpe.toFixed(2) : "—"} />
+              <Metric label="Max Drawdown" value={liveMetrics.maxDrawdown != null ? fmtPct(liveMetrics.maxDrawdown) : "—"} color="text-red-400" />
+              <Metric label="Annualized" value={liveMetrics.annualized != null ? fmtPct(liveMetrics.annualized) : "—"} color={colorVal(liveMetrics.annualized ?? 0)} />
+              <Metric label="Calmar" value={liveMetrics.calmar != null ? liveMetrics.calmar.toFixed(2) : "—"} />
+              <Metric label="Win Rate" value={liveMetrics.winRate != null ? liveMetrics.winRate.toFixed(1) + "%" : "—"} />
+              <Metric
+                label="Best / Worst Day"
+                value={liveMetrics.bestDay != null ? fmtPct(liveMetrics.bestDay) : "—"}
+                color="text-emerald-400"
+                subValue={liveMetrics.worstDay != null ? fmtPct(liveMetrics.worstDay) : "—"}
+              />
+            </div>
           </div>
 
           {/* Tabs: Live / Backtest */}
@@ -382,9 +485,9 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
 
                 {/* Date pickers */}
                 <div className="flex items-center gap-2 text-xs">
-                  <input type="date" value={btStart} onChange={(e) => setBtStart(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
+                  <input type="date" value={btStart || (filteredBacktestData.length ? filteredBacktestData[0].date : "")} onChange={(e) => setBtStart(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
                   <span className="text-muted-foreground">to</span>
-                  <input type="date" value={btEnd} onChange={(e) => setBtEnd(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
+                  <input type="date" value={btEnd || (filteredBacktestData.length ? filteredBacktestData[filteredBacktestData.length - 1].date : "")} onChange={(e) => setBtEnd(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
                   {(btStart || btEnd) && (
                     <button onClick={() => { setBtStart(""); setBtEnd(""); }} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>
                   )}
@@ -455,56 +558,68 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
               )}
 
               {/* Backtest stats summary */}
-              {backtest && Object.keys(bStats).length > 0 && (
-                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6 text-xs">
-                  {bStats.cumulative_return != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Cum. Return</span>
-                      <span className={`ml-1 font-medium ${colorVal(bStats.cumulative_return)}`}>{(bStats.cumulative_return * 100).toFixed(2)}%</span>
-                    </div>
-                  )}
-                  {bStats.annualized_rate_of_return != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Annualized</span>
-                      <span className={`ml-1 font-medium ${colorVal(bStats.annualized_rate_of_return)}`}>{(bStats.annualized_rate_of_return * 100).toFixed(2)}%</span>
-                    </div>
-                  )}
-                  {bStats.sharpe_ratio != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Sharpe</span>
-                      <span className="ml-1 font-medium">{bStats.sharpe_ratio.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {bStats.sortino_ratio != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Sortino</span>
-                      <span className="ml-1 font-medium">{bStats.sortino_ratio.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {bStats.calmar_ratio != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Calmar</span>
-                      <span className="ml-1 font-medium">{bStats.calmar_ratio.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {bStats.max_drawdown != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Max DD</span>
-                      <span className="ml-1 font-medium text-red-400">{(bStats.max_drawdown * 100).toFixed(2)}%</span>
-                    </div>
-                  )}
-                  {bStats.win_rate != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Win Rate</span>
-                      <span className="ml-1 font-medium">{(bStats.win_rate * 100).toFixed(1)}%</span>
-                    </div>
-                  )}
-                  {bStats.standard_deviation != null && (
-                    <div className="rounded bg-muted/40 px-2 py-1.5">
-                      <span className="text-muted-foreground">Std Dev</span>
-                      <span className="ml-1 font-medium">{(bStats.standard_deviation * 100).toFixed(2)}%</span>
-                    </div>
-                  )}
+              {filteredBacktestData.length >= 2 && (
+                <div className="mt-6">
+                  <h3 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                    Backtest Metrics
+                    {btMetrics.startDate && btMetrics.endDate && (
+                      <span className="ml-2 text-xs font-normal normal-case text-muted-foreground/60">
+                        {new Date(btMetrics.startDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        {" — "}
+                        {new Date(btMetrics.endDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6 text-xs">
+                    {btMetrics.cumReturn != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Cum. Return</span>
+                        <span className={`ml-1 font-medium ${colorVal(btMetrics.cumReturn)}`}>{(btMetrics.cumReturn * 100).toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {btMetrics.annualized != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Annualized</span>
+                        <span className={`ml-1 font-medium ${colorVal(btMetrics.annualized)}`}>{(btMetrics.annualized * 100).toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {btMetrics.sharpe != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Sharpe</span>
+                        <span className="ml-1 font-medium">{btMetrics.sharpe.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {btMetrics.sortino != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Sortino</span>
+                        <span className="ml-1 font-medium">{btMetrics.sortino.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {btMetrics.calmar != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Calmar</span>
+                        <span className="ml-1 font-medium">{btMetrics.calmar.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {btMetrics.maxDrawdown != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Max DD</span>
+                        <span className="ml-1 font-medium text-red-400">{(btMetrics.maxDrawdown * 100).toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {btMetrics.winRate != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Win Rate</span>
+                        <span className="ml-1 font-medium">{(btMetrics.winRate * 100).toFixed(1)}%</span>
+                      </div>
+                    )}
+                    {btMetrics.stdDev != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Std Dev</span>
+                        <span className="ml-1 font-medium">{(btMetrics.stdDev * 100).toFixed(2)}%</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

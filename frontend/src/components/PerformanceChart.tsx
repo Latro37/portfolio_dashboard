@@ -82,6 +82,8 @@ export function PerformanceChart({
   const formatPct = (v: number) => v.toFixed(2) + "%";
 
   const isCustomRange = startDate !== "" || endDate !== "";
+  const displayStart = startDate || (hasData ? data[0].date : "");
+  const displayEnd = endDate || (hasData ? data[data.length - 1].date : "");
 
   return (
     <Card className="border-border/50">
@@ -165,18 +167,16 @@ export function PerformanceChart({
               <div className="flex items-center gap-2 text-xs">
                 <input
                   type="date"
-                  value={startDate}
+                  value={displayStart}
                   onChange={(e) => onStartDateChange(e.target.value)}
                   className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
-                  placeholder="Start"
                 />
                 <span className="text-muted-foreground">to</span>
                 <input
                   type="date"
-                  value={endDate}
+                  value={displayEnd}
                   onChange={(e) => onEndDateChange(e.target.value)}
                   className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
-                  placeholder="End"
                 />
                 {isCustomRange && (
                   <button
