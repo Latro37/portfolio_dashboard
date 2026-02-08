@@ -266,11 +266,12 @@ def get_summary(
     else:
         mwr = 0
 
-    # CAGR
+    # CAGR = (end_value / start_value)^(1/years) - 1
+    start_pv = daily_series[0][1] if daily_series else 0
     num_days = len(daily_series)
     years = num_days / 365.25
-    if years > 0 and total_deposits > 0 and total_pv > 0:
-        cagr = ((total_pv / total_deposits) ** (1 / years) - 1) * 100
+    if years > 0 and start_pv > 0 and total_pv > 0:
+        cagr = ((total_pv / start_pv) ** (1 / years) - 1) * 100
     else:
         cagr = 0
 
@@ -636,6 +637,8 @@ def get_transactions(
         query = query.filter(Transaction.symbol == symbol.upper())
     total = query.count()
     rows = query.offset(offset).limit(limit).all()
+    # Build account name lookup
+    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
     return {
         "total": total,
         "transactions": [
@@ -646,6 +649,8 @@ def get_transactions(
                 "quantity": r.quantity,
                 "price": r.price,
                 "total_amount": r.total_amount,
+                "account_id": r.account_id,
+                "account_name": acct_names.get(r.account_id, r.account_id),
             }
             for r in rows
         ],
@@ -666,12 +671,16 @@ def get_cash_flows(
     rows = db.query(CashFlow).filter(
         CashFlow.account_id.in_(ids)
     ).order_by(CashFlow.date).all()
+    # Build account name lookup
+    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
     return [
         {
             "date": str(r.date),
             "type": r.type,
             "amount": r.amount,
             "description": r.description,
+            "account_id": r.account_id,
+            "account_name": acct_names.get(r.account_id, r.account_id),
         }
         for r in rows
     ]

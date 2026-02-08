@@ -74,6 +74,8 @@ export interface TransactionRow {
   quantity: number;
   price: number;
   total_amount: number;
+  account_id?: string;
+  account_name?: string;
 }
 
 export interface CashFlowRow {
@@ -81,6 +83,8 @@ export interface CashFlowRow {
   type: string;
   amount: number;
   description: string;
+  account_id?: string;
+  account_name?: string;
 }
 
 export interface SyncStatus {

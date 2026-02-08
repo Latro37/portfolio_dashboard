@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Map Composer account_type strings to friendly display names
 ACCOUNT_TYPE_DISPLAY = {
-    "INDIVIDUAL": "Stocks",
+    "INDIVIDUAL": "Taxable",
     "IRA_ROTH": "Roth IRA",
     "ROTH_IRA": "Roth IRA",
     "IRA_TRADITIONAL": "Traditional IRA",

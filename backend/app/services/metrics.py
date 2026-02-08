@@ -91,12 +91,14 @@ def compute_all_metrics(
         row["time_weighted_return"] = round((twr - 1) * 100, 4)
 
         # --- CAGR / Annualized return ---
-        # Annualize the TWR for a meaningful CAGR
         days_elapsed = (dates[i] - dates[0]).days
-        if days_elapsed > 0 and twr > 0:
+        if days_elapsed > 0 and pv[0] > 0 and pv[i] > 0:
             years = days_elapsed / 365.25
-            row["cagr"] = round((twr ** (1 / years) - 1) * 100, 4)
-            row["annualized_return"] = row["cagr"]
+            # CAGR = (end_value / start_value)^(1/years) - 1
+            row["cagr"] = round(((pv[i] / pv[0]) ** (1 / years) - 1) * 100, 4)
+            # Simple annualized return: period return × (1 / years)
+            period_return = (twr - 1) * 100  # TWR as percentage
+            row["annualized_return"] = round(period_return * (1 / years), 4)
         else:
             row["cagr"] = 0.0
             row["annualized_return"] = 0.0

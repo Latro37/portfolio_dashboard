@@ -28,9 +28,11 @@ export function AccountSwitcher({
 
   // Map account_type to friendly short names for the sub-account dropdown
   const typeLabel: Record<string, string> = {
-    INDIVIDUAL: "Stocks",
+    INDIVIDUAL: "Taxable",
     IRA_ROTH: "Roth IRA",
+    ROTH_IRA: "Roth IRA",
     IRA_TRADITIONAL: "Traditional IRA",
+    TRADITIONAL_IRA: "Traditional IRA",
     BUSINESS: "Business",
   };
 

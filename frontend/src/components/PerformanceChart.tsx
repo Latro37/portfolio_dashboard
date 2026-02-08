@@ -10,6 +10,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 
 type ChartMode = "portfolio" | "twr" | "mwr" | "drawdown";
@@ -40,6 +41,20 @@ export function PerformanceChart({
   const [showDeposits, setShowDeposits] = useState(true);
 
   const hasData = data.length > 0;
+
+  // Calculate gradient offset for TWR/MWR split coloring (where 0 falls in the range)
+  const calcGradientOffset = (key: keyof PerformancePoint) => {
+    if (!hasData) return 0.5;
+    const vals = data.map((d) => Number(d[key]));
+    const max = Math.max(...vals);
+    const min = Math.min(...vals);
+    if (max <= 0) return 0;   // all negative
+    if (min >= 0) return 1;   // all positive
+    return max / (max - min);
+  };
+
+  const twrOffset = calcGradientOffset("time_weighted_return");
+  const mwrOffset = calcGradientOffset("money_weighted_return");
 
   const formatDate = (d: string) => {
     const dt = new Date(d + "T00:00:00");
@@ -230,9 +245,15 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
-                <linearGradient id="twrGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                <linearGradient id="twrGradSplit" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset={twrOffset} stopColor="#10b981" stopOpacity={0.05} />
+                  <stop offset={twrOffset} stopColor="#ef4444" stopOpacity={0.15} />
+                  <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
+                </linearGradient>
+                <linearGradient id="twrStrokeSplit" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={twrOffset} stopColor="#10b981" />
+                  <stop offset={twrOffset} stopColor="#ef4444" />
                 </linearGradient>
               </defs>
               <XAxis
@@ -250,6 +271,7 @@ export function PerformanceChart({
                 tickLine={false}
                 width={70}
               />
+              <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#18181b",
@@ -263,9 +285,9 @@ export function PerformanceChart({
               <Area
                 type="monotone"
                 dataKey="time_weighted_return"
-                stroke="#10b981"
+                stroke="url(#twrStrokeSplit)"
                 strokeWidth={2}
-                fill="url(#twrGrad)"
+                fill="url(#twrGradSplit)"
                 dot={false}
               />
             </AreaChart>
@@ -274,9 +296,15 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
-                <linearGradient id="mwrGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                <linearGradient id="mwrGradSplit" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={0} stopColor="#8b5cf6" stopOpacity={0.3} />
+                  <stop offset={mwrOffset} stopColor="#8b5cf6" stopOpacity={0.05} />
+                  <stop offset={mwrOffset} stopColor="#ef4444" stopOpacity={0.15} />
+                  <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
+                </linearGradient>
+                <linearGradient id="mwrStrokeSplit" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={mwrOffset} stopColor="#8b5cf6" />
+                  <stop offset={mwrOffset} stopColor="#ef4444" />
                 </linearGradient>
               </defs>
               <XAxis
@@ -294,6 +322,7 @@ export function PerformanceChart({
                 tickLine={false}
                 width={70}
               />
+              <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#18181b",
@@ -307,9 +336,9 @@ export function PerformanceChart({
               <Area
                 type="monotone"
                 dataKey="money_weighted_return"
-                stroke="#8b5cf6"
+                stroke="url(#mwrStrokeSplit)"
                 strokeWidth={2}
-                fill="url(#mwrGrad)"
+                fill="url(#mwrGradSplit)"
                 dot={false}
               />
             </AreaChart>
@@ -319,8 +348,8 @@ export function PerformanceChart({
             <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#ef4444" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
+                  <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
                 </linearGradient>
               </defs>
               <XAxis
@@ -338,6 +367,7 @@ export function PerformanceChart({
                 tickLine={false}
                 width={70}
               />
+              <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#18181b",
@@ -354,6 +384,7 @@ export function PerformanceChart({
                 stroke="#ef4444"
                 strokeWidth={2}
                 fill="url(#ddGrad)"
+                baseValue={0}
                 dot={false}
               />
             </AreaChart>
@@ -365,7 +396,7 @@ export function PerformanceChart({
           <div className="mt-3 flex items-center justify-center gap-4">
             <button
               onClick={() => { if (showDeposits) setShowPortfolio(!showPortfolio); }}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
                 showPortfolio ? "text-emerald-400" : "text-muted-foreground/40 line-through"
               }`}
             >
@@ -374,7 +405,7 @@ export function PerformanceChart({
             </button>
             <button
               onClick={() => { if (showPortfolio) setShowDeposits(!showDeposits); }}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
                 showDeposits ? "text-indigo-400" : "text-muted-foreground/40 line-through"
               }`}
             >

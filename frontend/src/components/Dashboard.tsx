@@ -84,6 +84,10 @@ export default function Dashboard() {
     setSelectedCredential(credName);
     const subsForCred = accounts.filter((a) => a.credential_name === credName);
     setSelectedSubAccount(subsForCred.length > 1 ? "all" : subsForCred[0]?.id || "");
+    setSummary(null);
+    setPerformance([]);
+    setHoldings(null);
+    setError(null);
     setLoading(true);
   };
 

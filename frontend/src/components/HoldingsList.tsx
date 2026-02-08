@@ -38,7 +38,7 @@ export function HoldingsList({ holdings }: Props) {
               </div>
               <div className="mt-1 h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all"
+                  className="h-full rounded-full"
                   style={{
                     width: `${Math.min(h.allocation_pct, 100)}%`,
                     backgroundColor: COLORS[i % COLORS.length],
@@ -46,7 +46,7 @@ export function HoldingsList({ holdings }: Props) {
                 />
               </div>
             </div>
-            <div className="flex flex-col items-end flex-shrink-0">
+            <div className="flex flex-col items-end flex-shrink-0 w-28">
               <span className="text-sm font-medium tabular-nums">
                 ${h.market_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>

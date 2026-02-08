@@ -99,6 +99,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                 <thead>
                   <tr className="border-b border-border/50 text-left text-xs text-muted-foreground">
                     <th className="pb-2 pr-4">Date</th>
+                    <th className="pb-2 pr-4">Account</th>
                     <th className="pb-2 pr-4">Symbol</th>
                     <th className="pb-2 pr-4">Action</th>
                     <th className="pb-2 pr-4 text-right">Quantity</th>
@@ -110,6 +111,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                   {transactions.map((tx, i) => (
                     <tr key={i} className="border-b border-border/30">
                       <td className="py-2 pr-4 text-muted-foreground">{tx.date}</td>
+                      <td className="py-2 pr-4 text-xs text-muted-foreground">{tx.account_name ?? ""}</td>
                       <td className="py-2 pr-4 font-medium">{tx.symbol}</td>
                       <td className="py-2 pr-4">
                         <span className={`inline-flex items-center gap-1 text-xs font-medium ${
@@ -238,6 +240,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                 <thead>
                   <tr className="border-b border-border/50 text-left text-xs text-muted-foreground">
                     <th className="pb-2 pr-4">Date</th>
+                    <th className="pb-2 pr-4">Account</th>
                     <th className="pb-2 pr-4">Type</th>
                     <th className="pb-2 pr-4">Description</th>
                     <th className="pb-2 text-right">Amount</th>
@@ -256,6 +259,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                     return (
                       <tr key={i} className="border-b border-border/30">
                         <td className="py-2 pr-4 text-muted-foreground">{cf.date}</td>
+                        <td className="py-2 pr-4 text-xs text-muted-foreground">{cf.account_name ?? ""}</td>
                         <td className="py-2 pr-4">
                           <span className="inline-flex items-center gap-1 text-xs font-medium capitalize">
                             {icon}
@@ -281,7 +285,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
             {metrics.length > 0 && (
               <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
                 {Object.entries(metrics[metrics.length - 1]).map(([key, value]) => {
-                  if (key === "date") return null;
+                  if (key === "date" || key === "account_id") return null;
                   const label = key
                     .replace(/_/g, " ")
                     .replace(/\bpct\b/g, "%")
