@@ -18,6 +18,8 @@ export default function Dashboard() {
   const [performance, setPerformance] = useState<PerformancePoint[]>([]);
   const [holdings, setHoldings] = useState<HoldingsResponse | null>(null);
   const [period, setPeriod] = useState<Period>("ALL");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,20 +27,28 @@ export default function Dashboard() {
   const fetchData = useCallback(async () => {
     try {
       setError(null);
-      const [s, p, h] = await Promise.all([
+      const [s, h] = await Promise.all([
         api.getSummary(),
-        api.getPerformance(period),
         api.getHoldings(),
       ]);
       setSummary(s);
-      setPerformance(p);
       setHoldings(h);
+      try {
+        const p = await api.getPerformance(
+          customStart || customEnd ? undefined : period,
+          customStart || undefined,
+          customEnd || undefined,
+        );
+        setPerformance(p);
+      } catch {
+        setPerformance([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load data");
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, customStart, customEnd]);
 
   useEffect(() => {
     fetchData();
@@ -86,14 +96,20 @@ export default function Dashboard() {
         {/* Header: PV, daily change, period selector, sync button */}
         <PortfolioHeader
           summary={summary!}
-          period={period}
-          onPeriodChange={setPeriod}
           onSync={handleSync}
           syncing={syncing}
         />
 
         {/* Performance chart */}
-        <PerformanceChart data={performance} />
+        <PerformanceChart
+          data={performance}
+          period={period}
+          onPeriodChange={setPeriod}
+          startDate={customStart}
+          endDate={customEnd}
+          onStartDateChange={setCustomStart}
+          onEndDateChange={setCustomEnd}
+        />
 
         {/* Metric cards row */}
         <MetricCards summary={summary!} />

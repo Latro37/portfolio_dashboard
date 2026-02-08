@@ -43,6 +43,9 @@ export interface PerformancePoint {
   net_deposits: number;
   cumulative_return_pct: number;
   daily_return_pct: number;
+  time_weighted_return: number;
+  money_weighted_return: number;
+  current_drawdown: number;
 }
 
 export interface Holding {
@@ -82,8 +85,17 @@ export interface SyncStatus {
 
 export const api = {
   getSummary: () => fetchJSON<Summary>("/summary"),
-  getPerformance: (period?: string) =>
-    fetchJSON<PerformancePoint[]>(period ? `/performance?period=${period}` : "/performance"),
+  getPerformance: (period?: string, startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate || endDate) {
+      if (startDate) params.set("start_date", startDate);
+      if (endDate) params.set("end_date", endDate);
+    } else if (period) {
+      params.set("period", period);
+    }
+    const qs = params.toString();
+    return fetchJSON<PerformancePoint[]>(qs ? `/performance?${qs}` : "/performance");
+  },
   getHoldings: (date?: string) =>
     fetchJSON<HoldingsResponse>(date ? `/holdings?date=${date}` : "/holdings"),
   getTransactions: (limit = 100, offset = 0, symbol?: string) => {

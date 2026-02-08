@@ -47,7 +47,7 @@ export function MetricCards({ summary }: Props) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <Metric label="Total Return" value={fmtDollar(s.total_return_dollars)} color={colorPct(s.total_return_dollars)} />
-      <Metric label="TWR" value={fmtPct(s.time_weighted_return)} color={colorPct(s.time_weighted_return)} tooltip="Measures portfolio growth independent of cash flows such as deposits. Each day's gain/loss is compounded together to show how the strategy itself performed, regardless of when you added or withdrew money. Measures the performance of the strategy, not the timing of entry or exit." />
+      <Metric label="TWR" value={fmtPct(s.time_weighted_return)} color={colorPct(s.time_weighted_return)} tooltip="Measures portfolio growth independent of cash flows such as deposits. Each day's gain/loss is compounded together to show how the strategy itself performed. Measures the performance of the strategy, not the timing of entry or exit." />
       <Metric label="Win Rate" value={s.win_rate.toFixed(1) + "%"} />
       <Metric label="Sharpe" value={s.sharpe_ratio.toFixed(2)} />
       <Metric label="Volatility" value={s.annualized_volatility.toFixed(1) + "%"} />

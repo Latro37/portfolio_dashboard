@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { PerformancePoint } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -9,15 +10,36 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  ReferenceLine,
 } from "recharts";
+
+type ChartMode = "portfolio" | "twr" | "mwr" | "drawdown";
 
 interface Props {
   data: PerformancePoint[];
+  startDate: string;
+  endDate: string;
+  onStartDateChange: (d: string) => void;
+  onEndDateChange: (d: string) => void;
+  period: string;
+  onPeriodChange: (p: string) => void;
 }
 
-export function PerformanceChart({ data }: Props) {
-  if (!data.length) return null;
+const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
+
+export function PerformanceChart({
+  data,
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
+  period,
+  onPeriodChange,
+}: Props) {
+  const [mode, setMode] = useState<ChartMode>("portfolio");
+  const [showPortfolio, setShowPortfolio] = useState(true);
+  const [showDeposits, setShowDeposits] = useState(true);
+
+  const hasData = data.length > 0;
 
   const formatDate = (d: string) => {
     const dt = new Date(d + "T00:00:00");
@@ -27,67 +49,340 @@ export function PerformanceChart({ data }: Props) {
   const formatValue = (v: number) =>
     "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
+  const formatPct = (v: number) => v.toFixed(2) + "%";
+
+  const isCustomRange = startDate !== "" || endDate !== "";
+
   return (
     <Card className="border-border/50">
       <CardContent className="pt-6">
-        <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-            <defs>
-              <linearGradient id="pvGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="depGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#6366f1" stopOpacity={0.2} />
-                <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <XAxis
-              dataKey="date"
-              tickFormatter={formatDate}
-              tick={{ fill: "#71717a", fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              minTickGap={40}
+        {/* Controls row */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          {/* Chart mode toggle */}
+          <div className="flex rounded-lg bg-muted p-0.5">
+            <button
+              onClick={() => setMode("portfolio")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === "portfolio"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Portfolio Value
+            </button>
+            <button
+              onClick={() => setMode("twr")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === "twr"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              TWR
+            </button>
+            <button
+              onClick={() => setMode("mwr")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === "mwr"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              MWR
+            </button>
+            <button
+              onClick={() => setMode("drawdown")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === "drawdown"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Drawdown
+            </button>
+          </div>
+
+          <div className="h-5 w-px bg-border/50" />
+
+          {/* Period pills */}
+          <div className="flex rounded-lg bg-muted p-0.5">
+            {PERIODS.map((p) => (
+              <button
+                key={p}
+                onClick={() => {
+                  onPeriodChange(p);
+                  onStartDateChange("");
+                  onEndDateChange("");
+                }}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  period === p && !isCustomRange
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          <div className="h-5 w-px bg-border/50" />
+
+          {/* Date pickers */}
+          <div className="flex items-center gap-2 text-xs">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => onStartDateChange(e.target.value)}
+              className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
+              placeholder="Start"
             />
-            <YAxis
-              tickFormatter={formatValue}
-              tick={{ fill: "#71717a", fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              width={70}
+            <span className="text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => onEndDateChange(e.target.value)}
+              className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
+              placeholder="End"
             />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#18181b",
-                border: "1px solid #27272a",
-                borderRadius: 8,
-                fontSize: 13,
-              }}
-              labelFormatter={(label: any) => formatDate(String(label))}
-              formatter={(value: any, name: any) => [
-                formatValue(Number(value)),
-                name === "portfolio_value" ? "Portfolio" : "Deposits",
-              ]}
-            />
-            <Area
-              type="monotone"
-              dataKey="net_deposits"
-              stroke="#6366f1"
-              strokeWidth={1.5}
-              fill="url(#depGrad)"
-              dot={false}
-            />
-            <Area
-              type="monotone"
-              dataKey="portfolio_value"
-              stroke="#10b981"
-              strokeWidth={2}
-              fill="url(#pvGrad)"
-              dot={false}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+            {isCustomRange && (
+              <button
+                onClick={() => {
+                  onStartDateChange("");
+                  onEndDateChange("");
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Chart */}
+        {!hasData ? (
+          <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">
+            No data for the selected date range
+          </div>
+        ) : mode === "portfolio" ? (
+          <ResponsiveContainer width="100%" height={320}>
+            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <defs>
+                <linearGradient id="pvGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="depGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#6366f1" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={40}
+              />
+              <YAxis
+                tickFormatter={formatValue}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={70}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#18181b",
+                  border: "1px solid #27272a",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+                labelFormatter={(label: any) => formatDate(String(label))}
+                formatter={(value: any, name: any) => [
+                  formatValue(Number(value)),
+                  name === "portfolio_value" ? "Portfolio" : "Deposits",
+                ]}
+              />
+              {showDeposits && (
+                <Area
+                  type="monotone"
+                  dataKey="net_deposits"
+                  stroke="#6366f1"
+                  strokeWidth={1.5}
+                  fill="url(#depGrad)"
+                  dot={false}
+                />
+              )}
+              {showPortfolio && (
+                <Area
+                  type="monotone"
+                  dataKey="portfolio_value"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  fill="url(#pvGrad)"
+                  dot={false}
+                />
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : mode === "twr" ? (
+          <ResponsiveContainer width="100%" height={320}>
+            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <defs>
+                <linearGradient id="twrGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={40}
+              />
+              <YAxis
+                tickFormatter={formatPct}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={70}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#18181b",
+                  border: "1px solid #27272a",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+                labelFormatter={(label: any) => formatDate(String(label))}
+                formatter={(value: any) => [formatPct(Number(value)), "TWR"]}
+              />
+              <Area
+                type="monotone"
+                dataKey="time_weighted_return"
+                stroke="#10b981"
+                strokeWidth={2}
+                fill="url(#twrGrad)"
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : mode === "mwr" ? (
+          <ResponsiveContainer width="100%" height={320}>
+            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <defs>
+                <linearGradient id="mwrGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={40}
+              />
+              <YAxis
+                tickFormatter={formatPct}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={70}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#18181b",
+                  border: "1px solid #27272a",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+                labelFormatter={(label: any) => formatDate(String(label))}
+                formatter={(value: any) => [formatPct(Number(value)), "MWR"]}
+              />
+              <Area
+                type="monotone"
+                dataKey="money_weighted_return"
+                stroke="#8b5cf6"
+                strokeWidth={2}
+                fill="url(#mwrGrad)"
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height={320}>
+            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <defs>
+                <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#ef4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={40}
+              />
+              <YAxis
+                tickFormatter={formatPct}
+                tick={{ fill: "#71717a", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                width={70}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#18181b",
+                  border: "1px solid #27272a",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+                labelFormatter={(label: any) => formatDate(String(label))}
+                formatter={(value: any) => [formatPct(Number(value)), "Drawdown"]}
+              />
+              <Area
+                type="monotone"
+                dataKey="current_drawdown"
+                stroke="#ef4444"
+                strokeWidth={2}
+                fill="url(#ddGrad)"
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+
+        {/* Portfolio/Deposits legend below chart */}
+        {mode === "portfolio" && hasData && (
+          <div className="mt-3 flex items-center justify-center gap-4">
+            <button
+              onClick={() => { if (showDeposits) setShowPortfolio(!showPortfolio); }}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                showPortfolio ? "text-emerald-400" : "text-muted-foreground/40 line-through"
+              }`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showPortfolio ? "#10b981" : "#71717a" }} />
+              Portfolio
+            </button>
+            <button
+              onClick={() => { if (showPortfolio) setShowDeposits(!showDeposits); }}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                showDeposits ? "text-indigo-400" : "text-muted-foreground/40 line-through"
+              }`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showDeposits ? "#6366f1" : "#71717a" }} />
+              Deposits
+            </button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

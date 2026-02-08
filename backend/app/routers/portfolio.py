@@ -99,6 +99,8 @@ def get_summary(db: Session = Depends(get_db)):
 @router.get("/performance")
 def get_performance(
     period: Optional[str] = Query(None, description="1D,1W,1M,3M,YTD,1Y,ALL"),
+    start_date: Optional[str] = Query(None, description="Custom start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="Custom end date YYYY-MM-DD"),
     db: Session = Depends(get_db),
 ):
     """Performance chart data (portfolio value + deposits + returns over time)."""
@@ -106,8 +108,13 @@ def get_performance(
         DailyMetrics, DailyPortfolio.date == DailyMetrics.date
     ).order_by(DailyPortfolio.date)
 
-    # Apply period filter
-    if period:
+    # Custom date range takes priority over period presets
+    if start_date or end_date:
+        if start_date:
+            query = query.filter(DailyPortfolio.date >= date.fromisoformat(start_date))
+        if end_date:
+            query = query.filter(DailyPortfolio.date <= date.fromisoformat(end_date))
+    elif period:
         from datetime import timedelta
         today = date.today()
         if period == "1D":
@@ -136,6 +143,9 @@ def get_performance(
             "net_deposits": p.net_deposits,
             "cumulative_return_pct": m.cumulative_return_pct if m else 0,
             "daily_return_pct": m.daily_return_pct if m else 0,
+            "time_weighted_return": m.time_weighted_return if m else 0,
+            "money_weighted_return": m.money_weighted_return if m else 0,
+            "current_drawdown": m.current_drawdown if m else 0,
         }
         for p, m in results
     ]

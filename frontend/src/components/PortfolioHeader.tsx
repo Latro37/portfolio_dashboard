@@ -4,18 +4,13 @@ import { Summary } from "@/lib/api";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
-const PERIODS: Period[] = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"];
-
 interface Props {
   summary: Summary;
-  period: Period;
-  onPeriodChange: (p: Period) => void;
   onSync: () => void;
   syncing: boolean;
 }
 
-export function PortfolioHeader({ summary, period, onPeriodChange, onSync, syncing }: Props) {
+export function PortfolioHeader({ summary, onSync, syncing }: Props) {
   const dailyPositive = summary.daily_return_pct >= 0;
   const totalPositive = summary.total_return_dollars >= 0;
 
@@ -37,23 +32,6 @@ export function PortfolioHeader({ summary, period, onPeriodChange, onSync, synci
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Period pills */}
-        <div className="flex rounded-lg bg-muted p-0.5">
-          {PERIODS.map((p) => (
-            <button
-              key={p}
-              onClick={() => onPeriodChange(p)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                period === p
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-
         {/* Sync button */}
         <Button
           variant="outline"
