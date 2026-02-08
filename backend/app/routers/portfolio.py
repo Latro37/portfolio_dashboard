@@ -66,8 +66,14 @@ def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
 
     - None → first discovered sub-account (backward compat)
     - specific UUID → [that UUID]
+    - "all" → every sub-account across all credentials
     - "all:<credential_name>" → all sub-accounts for that credential
     """
+    if account_id == "all":
+        accts = db.query(Account).all()
+        if not accts:
+            raise HTTPException(404, "No accounts discovered. Check accounts.json and restart.")
+        return [a.id for a in accts]
     if account_id and account_id.startswith("all:"):
         cred_name = account_id[4:]
         accts = db.query(Account).filter_by(credential_name=cred_name).all()

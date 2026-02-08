@@ -29,9 +29,11 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   // Resolve the account_id query param based on selection
-  const resolvedAccountId = selectedSubAccount === "all" && selectedCredential
-    ? `all:${selectedCredential}`
-    : selectedSubAccount || undefined;
+  const resolvedAccountId = selectedCredential === "__all__"
+    ? "all"
+    : selectedSubAccount === "all" && selectedCredential
+      ? `all:${selectedCredential}`
+      : selectedSubAccount || undefined;
 
   // Load accounts on mount
   useEffect(() => {
@@ -87,8 +89,12 @@ export default function Dashboard() {
 
   const handleCredentialChange = (credName: string) => {
     setSelectedCredential(credName);
-    const subsForCred = accounts.filter((a) => a.credential_name === credName);
-    setSelectedSubAccount(subsForCred.length > 1 ? "all" : subsForCred[0]?.id || "");
+    if (credName === "__all__") {
+      setSelectedSubAccount("all");
+    } else {
+      const subsForCred = accounts.filter((a) => a.credential_name === credName);
+      setSelectedSubAccount(subsForCred.length > 1 ? "all" : subsForCred[0]?.id || "");
+    }
     setSummary(null);
     setPerformance([]);
     setHoldings(null);
