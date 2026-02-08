@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Account, SymphonyBacktestCache
+from app.models import Account, SymphonyBacktestCache, SymphonyAllocationHistory
 from app.composer_client import ComposerClient
 from app.config import load_accounts
 
@@ -279,3 +279,34 @@ def get_symphony_backtest(
         "last_market_day": last_market_day,
         "cached_at": now.isoformat(),
     }
+
+
+# ------------------------------------------------------------------
+# Symphony allocation history (live daily snapshots)
+# ------------------------------------------------------------------
+
+@router.get("/symphonies/{symphony_id}/allocations")
+def get_symphony_allocations(
+    symphony_id: str,
+    account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
+    db: Session = Depends(get_db),
+):
+    """Return daily allocation history for a symphony (from sync snapshots)."""
+    rows = (
+        db.query(SymphonyAllocationHistory)
+        .filter_by(account_id=account_id, symphony_id=symphony_id)
+        .order_by(SymphonyAllocationHistory.date)
+        .all()
+    )
+    if not rows:
+        return {}
+
+    # Build {date_str: {ticker: allocation_pct}}
+    result: dict[str, dict[str, float]] = {}
+    for r in rows:
+        ds = str(r.date)
+        if ds not in result:
+            result[ds] = {}
+        result[ds][r.ticker] = r.allocation_pct
+
+    return result

@@ -15,6 +15,8 @@ import {
 
 type ChartMode = "portfolio" | "twr" | "mwr" | "drawdown";
 
+export type { ChartMode };
+
 interface Props {
   data: PerformancePoint[];
   startDate: string;
@@ -26,6 +28,8 @@ interface Props {
   hideMWR?: boolean;
   hidePeriodControls?: boolean;
   portfolioLabel?: string;
+  chartMode?: ChartMode;
+  onChartModeChange?: (m: ChartMode) => void;
 }
 
 const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
@@ -41,8 +45,12 @@ export function PerformanceChart({
   hideMWR,
   hidePeriodControls,
   portfolioLabel,
+  chartMode: controlledMode,
+  onChartModeChange,
 }: Props) {
-  const [mode, setMode] = useState<ChartMode>("portfolio");
+  const [internalMode, setInternalMode] = useState<ChartMode>("portfolio");
+  const mode = controlledMode ?? internalMode;
+  const setMode = onChartModeChange ?? setInternalMode;
   const [showPortfolio, setShowPortfolio] = useState(true);
   const [showDeposits, setShowDeposits] = useState(true);
 

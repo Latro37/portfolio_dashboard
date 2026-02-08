@@ -224,4 +224,8 @@ export const api = {
     fetchJSON<SymphonyBacktest>(
       `/symphonies/${symphonyId}/backtest?account_id=${encodeURIComponent(accountId)}${forceRefresh ? "&force_refresh=true" : ""}`
     ),
+  getSymphonyAllocations: (symphonyId: string, accountId: string) =>
+    fetchJSON<Record<string, Record<string, number>>>(
+      `/symphonies/${symphonyId}/allocations?account_id=${encodeURIComponent(accountId)}`
+    ),
 };

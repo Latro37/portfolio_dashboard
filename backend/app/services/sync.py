@@ -10,7 +10,7 @@ from sqlalchemy import func
 from app.composer_client import ComposerClient
 from app.models import (
     Transaction, HoldingsHistory, CashFlow, DailyPortfolio,
-    DailyMetrics, BenchmarkData, SyncState,
+    DailyMetrics, BenchmarkData, SyncState, SymphonyAllocationHistory,
 )
 from app.services.holdings import reconstruct_holdings
 from app.services.metrics import compute_all_metrics
@@ -95,6 +95,9 @@ def full_backfill(db: Session, client: ComposerClient, account_id: str):
     # 6. Compute and store all metrics
     _safe_step("metrics", _recompute_metrics, db, account_id)
 
+    # 7. Snapshot symphony allocations
+    _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
+
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Full backfill complete for account %s", account_id)
@@ -118,6 +121,7 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
     _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
     _safe_step("benchmark", _sync_benchmark, db, account_id)
     _safe_step("metrics", _recompute_metrics, db, account_id)
+    _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
 
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Incremental update complete for %s", account_id)
@@ -408,3 +412,49 @@ def _recompute_metrics(db: Session, account_id: str):
 
     db.commit()
     logger.info("Metrics recomputed for %s: %d rows", account_id, len(metrics))
+
+
+def _sync_symphony_allocations(db: Session, client: ComposerClient, account_id: str):
+    """Snapshot current symphony holdings as today's allocation history."""
+    today = date.today()
+    # Skip if today is a weekend (no market data)
+    if today.weekday() >= 5:
+        logger.info("Skipping symphony allocation snapshot on weekend for %s", account_id)
+        return
+
+    # Check if we already have a snapshot for today
+    existing = db.query(SymphonyAllocationHistory).filter_by(
+        account_id=account_id, date=today
+    ).first()
+    if existing:
+        logger.info("Symphony allocations already captured for %s on %s", account_id, today)
+        return
+
+    try:
+        symphonies = client.get_symphony_stats(account_id)
+    except Exception as e:
+        logger.warning("Failed to fetch symphony stats for %s: %s", account_id, e)
+        return
+
+    new_count = 0
+    for s in symphonies:
+        sym_id = s.get("id", "")
+        if not sym_id:
+            continue
+        for h in s.get("holdings", []):
+            ticker = h.get("ticker", "")
+            if not ticker:
+                continue
+            db.add(SymphonyAllocationHistory(
+                account_id=account_id,
+                symphony_id=sym_id,
+                date=today,
+                ticker=ticker,
+                allocation_pct=round(h.get("allocation", 0) * 100, 2),
+                value=round(h.get("value", 0), 2),
+            ))
+            new_count += 1
+
+    db.commit()
+    logger.info("Symphony allocations captured for %s: %d holdings across %d symphonies",
+                account_id, new_count, len(symphonies))

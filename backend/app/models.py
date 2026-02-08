@@ -117,6 +117,24 @@ class SymphonyBacktestCache(Base):
     last_market_day = Column(Integer, default=0)
 
 
+class SymphonyAllocationHistory(Base):
+    """Daily snapshot of symphony holdings (ticker + allocation %)."""
+    __tablename__ = "symphony_allocation_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Text, nullable=False, index=True)
+    symphony_id = Column(Text, nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    ticker = Column(Text, nullable=False)
+    allocation_pct = Column(Float, nullable=False)  # 0-100
+    value = Column(Float, default=0.0)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "symphony_id", "date", "ticker",
+                         name="uq_sym_alloc_acct_sym_date_ticker"),
+    )
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
 
