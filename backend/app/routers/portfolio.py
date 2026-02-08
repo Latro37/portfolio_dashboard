@@ -19,6 +19,7 @@ from app.schemas import (
     PerformancePoint, SyncStatus, ManualCashFlowRequest,
 )
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
+from app.services.metrics import compute_all_metrics
 from app.composer_client import ComposerClient
 from app.config import load_accounts
 
@@ -27,6 +28,33 @@ router = APIRouter(prefix="/api", tags=["portfolio"])
 
 # Simple in-memory sync lock
 _syncing = False
+
+
+def _resolve_date_range(
+    period: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> tuple[Optional[date], Optional[date]]:
+    """Convert period preset or custom range to (start, end) dates."""
+    if start_date or end_date:
+        return (
+            date.fromisoformat(start_date) if start_date else None,
+            date.fromisoformat(end_date) if end_date else None,
+        )
+    if period and period != "ALL":
+        today = date.today()
+        offsets = {
+            "1D": timedelta(days=1),
+            "1W": timedelta(weeks=1),
+            "1M": timedelta(days=30),
+            "3M": timedelta(days=90),
+            "1Y": timedelta(days=365),
+        }
+        if period == "YTD":
+            return (date(today.year, 1, 1), None)
+        if period in offsets:
+            return (today - offsets[period], None)
+    return (None, None)
 
 
 # ------------------------------------------------------------------
@@ -94,10 +122,16 @@ def list_accounts(db: Session = Depends(get_db)):
 @router.get("/summary", response_model=PortfolioSummary)
 def get_summary(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
+    period: Optional[str] = Query(None, description="1D,1W,1M,3M,YTD,1Y,ALL"),
+    start_date: Optional[str] = Query(None, description="Custom start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="Custom end date YYYY-MM-DD"),
     db: Session = Depends(get_db),
 ):
-    """Current portfolio summary with latest metrics."""
+    """Portfolio summary with metrics, optionally filtered to a time period."""
+    from collections import defaultdict
+
     ids = _resolve_account_ids(db, account_id)
+    date_start, date_end = _resolve_date_range(period, start_date, end_date)
 
     latest_portfolio = db.query(DailyPortfolio).filter(
         DailyPortfolio.account_id.in_(ids)
@@ -108,92 +142,33 @@ def get_summary(
 
     state = get_sync_state(db, ids[0])
 
-    # --- Single account: use stored metrics directly ---
-    if len(ids) == 1:
-        m = db.query(DailyMetrics).filter(
-            DailyMetrics.account_id.in_(ids)
-        ).order_by(DailyMetrics.date.desc()).first()
-
-        total_pv = latest_portfolio.portfolio_value
-        total_deposits = latest_portfolio.net_deposits
-        total_fees = latest_portfolio.total_fees
-        total_dividends = latest_portfolio.total_dividends
-
-        best_day_date = worst_day_date = max_drawdown_date = None
-        if m and m.best_day_pct != 0:
-            row = db.query(DailyMetrics.date).filter(
-                DailyMetrics.account_id == m.account_id,
-                DailyMetrics.daily_return_pct == m.best_day_pct,
-            ).order_by(DailyMetrics.date).first()
-            if row:
-                best_day_date = str(row[0])
-        if m and m.worst_day_pct != 0:
-            row = db.query(DailyMetrics.date).filter(
-                DailyMetrics.account_id == m.account_id,
-                DailyMetrics.daily_return_pct == m.worst_day_pct,
-            ).order_by(DailyMetrics.date).first()
-            if row:
-                worst_day_date = str(row[0])
-        if m and m.max_drawdown != 0:
-            row = db.query(DailyMetrics.date).filter(
-                DailyMetrics.account_id == m.account_id,
-                DailyMetrics.max_drawdown == m.max_drawdown,
-            ).order_by(DailyMetrics.date).first()
-            if row:
-                max_drawdown_date = str(row[0])
-
-        return PortfolioSummary(
-            portfolio_value=total_pv,
-            net_deposits=total_deposits,
-            total_return_dollars=m.total_return_dollars if m else 0,
-            daily_return_pct=m.daily_return_pct if m else 0,
-            cumulative_return_pct=m.cumulative_return_pct if m else 0,
-            cagr=m.cagr if m else 0,
-            time_weighted_return=m.time_weighted_return if m else 0,
-            money_weighted_return=m.money_weighted_return if m else 0,
-            sharpe_ratio=m.sharpe_ratio if m else 0,
-            calmar_ratio=m.calmar_ratio if m else 0,
-            sortino_ratio=m.sortino_ratio if m else 0,
-            max_drawdown=m.max_drawdown if m else 0,
-            max_drawdown_date=max_drawdown_date,
-            current_drawdown=m.current_drawdown if m else 0,
-            win_rate=m.win_rate if m else 0,
-            num_wins=m.num_wins if m else 0,
-            num_losses=m.num_losses if m else 0,
-            avg_win_pct=m.avg_win_pct if m else 0,
-            avg_loss_pct=m.avg_loss_pct if m else 0,
-            annualized_volatility=m.annualized_volatility if m else 0,
-            best_day_pct=m.best_day_pct if m else 0,
-            best_day_date=best_day_date,
-            worst_day_pct=m.worst_day_pct if m else 0,
-            worst_day_date=worst_day_date,
-            profit_factor=m.profit_factor if m else 0,
-            total_fees=total_fees,
-            total_dividends=total_dividends,
-            last_updated=state.get("last_sync_date"),
-        )
-
-    # --- Aggregate: compute metrics from combined daily data ---
-    import math
-    from collections import defaultdict
-
-    all_rows = db.query(DailyPortfolio).filter(
+    # --- Load daily portfolio rows (all accounts, filtered by date range) ---
+    port_query = db.query(DailyPortfolio).filter(
         DailyPortfolio.account_id.in_(ids)
-    ).order_by(DailyPortfolio.date).all()
+    ).order_by(DailyPortfolio.date)
+    if date_start:
+        port_query = port_query.filter(DailyPortfolio.date >= date_start)
+    if date_end:
+        port_query = port_query.filter(DailyPortfolio.date <= date_end)
+    all_rows = port_query.all()
 
-    # Build per-account, per-date lookup
+    if not all_rows:
+        raise HTTPException(404, "No portfolio data for selected period.")
+
+    # --- Build aggregated daily series (handles single + multi account) ---
     per_acct: dict[str, dict[str, DailyPortfolio]] = defaultdict(dict)
     for r in all_rows:
         per_acct[r.account_id][str(r.date)] = r
 
     all_dates = sorted({str(r.date) for r in all_rows})
 
-    # Forward-fill and aggregate
     last_vals: dict[str, dict] = {
         aid: {"pv": 0.0, "nd": 0.0, "fees": 0.0, "div": 0.0}
         for aid in per_acct
     }
-    daily_series = []  # [(date_str, agg_pv, agg_nd, agg_fees, agg_div)]
+    daily_series = []  # list of dicts for compute_all_metrics
+    fees_series = []
+    divs_series = []
     for ds in all_dates:
         sum_pv = sum_nd = sum_fees = sum_div = 0.0
         for aid in per_acct:
@@ -207,142 +182,72 @@ def get_summary(
             sum_nd += last_vals[aid]["nd"]
             sum_fees += last_vals[aid]["fees"]
             sum_div += last_vals[aid]["div"]
-        daily_series.append((ds, sum_pv, sum_nd, sum_fees, sum_div))
+        daily_series.append({"date": ds, "portfolio_value": sum_pv, "net_deposits": sum_nd})
+        fees_series.append(sum_fees)
+        divs_series.append(sum_div)
 
-    if not daily_series:
-        raise HTTPException(404, "No portfolio data. Run sync first.")
+    # --- Load cash flows for MWR ---
+    cf_query = db.query(CashFlow).filter(
+        CashFlow.account_id.in_(ids),
+        CashFlow.type.in_(["deposit", "withdrawal"]),
+    ).order_by(CashFlow.date)
+    if date_start:
+        cf_query = cf_query.filter(CashFlow.date >= date_start)
+    if date_end:
+        cf_query = cf_query.filter(CashFlow.date <= date_end)
+    cf_dicts = [{"date": cf.date, "amount": cf.amount} for cf in cf_query.all()]
 
-    # Compute aggregate metrics from the combined series
-    total_pv = daily_series[-1][1]
-    total_deposits = daily_series[-1][2]
-    total_fees = daily_series[-1][3]
-    total_dividends = daily_series[-1][4]
-    total_return_dollars = total_pv - total_deposits
-    cumulative_return_pct = ((total_pv - total_deposits) / total_deposits * 100) if total_deposits else 0
+    # --- Compute metrics via shared engine ---
+    from app.config import get_settings
+    settings = get_settings()
+    metrics = compute_all_metrics(daily_series, cf_dicts, risk_free_rate=settings.risk_free_rate)
 
-    # Daily returns (accounting for deposit changes)
-    daily_returns = []
-    daily_return_dates = []
-    peak_pv = 0.0
-    max_dd = 0.0
-    max_dd_date = None
-    current_dd = 0.0
+    if not metrics:
+        raise HTTPException(404, "Could not compute metrics for selected period.")
 
-    for i, (ds, pv, nd, _, _) in enumerate(daily_series):
-        if i == 0:
-            daily_returns.append(0.0)
-        else:
-            prev_pv = daily_series[i - 1][1]
-            prev_nd = daily_series[i - 1][2]
-            cf = nd - prev_nd
-            dr = ((pv - prev_pv - cf) / prev_pv * 100) if prev_pv > 0 else 0
-            daily_returns.append(dr)
-        daily_return_dates.append(ds)
+    m = metrics[-1]  # last row has cumulative values for the period
 
-        # Drawdown tracking
-        peak_pv = max(peak_pv, pv)
-        dd = ((pv - peak_pv) / peak_pv * 100) if peak_pv > 0 else 0
-        if dd < max_dd:
-            max_dd = dd
-            max_dd_date = ds
-        current_dd = dd
+    # Find best/worst day dates and max drawdown date from the computed series
+    best_day_date = worst_day_date = max_dd_date = None
+    for row in metrics:
+        if row["daily_return_pct"] == m["best_day_pct"] and m["best_day_pct"] != 0:
+            best_day_date = str(row["date"])
+        if row["daily_return_pct"] == m["worst_day_pct"] and m["worst_day_pct"] != 0:
+            worst_day_date = str(row["date"])
+        if row["max_drawdown"] == m["max_drawdown"] and m["max_drawdown"] != 0:
+            max_dd_date = str(row["date"])
 
-    latest_daily_ret = daily_returns[-1] if daily_returns else 0
-
-    # TWR (compound daily returns)
-    twr_cum = 1.0
-    for dr in daily_returns:
-        twr_cum *= (1 + dr / 100)
-    twr = (twr_cum - 1) * 100
-
-    # MWR: value-weighted average from per-account metrics
-    mwr_rows = db.query(DailyMetrics).filter(
-        DailyMetrics.account_id.in_(ids),
-        DailyMetrics.date == date.fromisoformat(all_dates[-1]),
-    ).all()
-    total_weight = sum(last_vals[r.account_id]["pv"] for r in mwr_rows)
-    if total_weight > 0:
-        mwr = sum(r.money_weighted_return * last_vals[r.account_id]["pv"] for r in mwr_rows) / total_weight
-    else:
-        mwr = 0
-
-    # CAGR = (end_value / start_value)^(1/years) - 1
-    start_pv = daily_series[0][1] if daily_series else 0
-    num_days = len(daily_series)
-    years = num_days / 365.25
-    if years > 0 and start_pv > 0 and total_pv > 0:
-        cagr = ((total_pv / start_pv) ** (1 / years) - 1) * 100
-    else:
-        cagr = 0
-
-    # Volatility, Sharpe, Sortino, Calmar
-    if len(daily_returns) > 1:
-        mean_dr = sum(daily_returns) / len(daily_returns)
-        variance = sum((r - mean_dr) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
-        daily_vol = math.sqrt(variance)
-        ann_vol = daily_vol * math.sqrt(252)
-        risk_free_daily = 0.05 / 252  # approx
-        excess = [r / 100 - risk_free_daily for r in daily_returns]
-        mean_excess = sum(excess) / len(excess)
-        sharpe = (mean_excess / (daily_vol / 100) * math.sqrt(252)) if daily_vol > 0 else 0
-        downside = [r for r in daily_returns if r < 0]
-        if downside:
-            down_var = sum(r ** 2 for r in downside) / len(downside)
-            down_vol = math.sqrt(down_var)
-            sortino = (mean_dr / down_vol * math.sqrt(252)) if down_vol > 0 else 0
-        else:
-            sortino = 0
-        calmar = (cagr / abs(max_dd)) if max_dd != 0 else 0
-    else:
-        ann_vol = sharpe = sortino = calmar = 0
-
-    # Win/loss stats
-    wins = [r for r in daily_returns[1:] if r > 0]
-    losses = [r for r in daily_returns[1:] if r < 0]
-    num_wins = len(wins)
-    num_losses = len(losses)
-    total_trading = num_wins + num_losses
-    win_rate = (num_wins / total_trading * 100) if total_trading > 0 else 0
-    avg_win = (sum(wins) / num_wins) if num_wins else 0
-    avg_loss = (sum(losses) / num_losses) if num_losses else 0
-    profit_factor = (sum(wins) / abs(sum(losses))) if losses else 0
-
-    # Best/worst day
-    best_idx = max(range(len(daily_returns)), key=lambda i: daily_returns[i])
-    worst_idx = min(range(len(daily_returns)), key=lambda i: daily_returns[i])
-    best_day_pct = daily_returns[best_idx]
-    worst_day_pct = daily_returns[worst_idx]
-    best_day_date = daily_return_dates[best_idx]
-    worst_day_date = daily_return_dates[worst_idx]
+    total_pv = daily_series[-1]["portfolio_value"]
+    total_deposits = daily_series[-1]["net_deposits"]
 
     return PortfolioSummary(
         portfolio_value=round(total_pv, 2),
         net_deposits=round(total_deposits, 2),
-        total_return_dollars=round(total_return_dollars, 2),
-        daily_return_pct=round(latest_daily_ret, 4),
-        cumulative_return_pct=round(cumulative_return_pct, 4),
-        cagr=round(cagr, 4),
-        time_weighted_return=round(twr, 4),
-        money_weighted_return=round(mwr, 4),
-        sharpe_ratio=round(sharpe, 4),
-        calmar_ratio=round(calmar, 4),
-        sortino_ratio=round(sortino, 4),
-        max_drawdown=round(max_dd, 4),
+        total_return_dollars=round(m.get("total_return_dollars", 0), 2),
+        daily_return_pct=round(m.get("daily_return_pct", 0), 4),
+        cumulative_return_pct=round(m.get("cumulative_return_pct", 0), 4),
+        cagr=round(m.get("cagr", 0), 4),
+        time_weighted_return=round(m.get("time_weighted_return", 0), 4),
+        money_weighted_return=round(m.get("money_weighted_return", 0), 4),
+        sharpe_ratio=round(m.get("sharpe_ratio", 0), 4),
+        calmar_ratio=round(m.get("calmar_ratio", 0), 4),
+        sortino_ratio=round(m.get("sortino_ratio", 0), 4),
+        max_drawdown=round(m.get("max_drawdown", 0), 4),
         max_drawdown_date=max_dd_date,
-        current_drawdown=round(current_dd, 4),
-        win_rate=round(win_rate, 2),
-        num_wins=num_wins,
-        num_losses=num_losses,
-        avg_win_pct=round(avg_win, 4),
-        avg_loss_pct=round(avg_loss, 4),
-        annualized_volatility=round(ann_vol, 4),
-        best_day_pct=round(best_day_pct, 4),
+        current_drawdown=round(m.get("current_drawdown", 0), 4),
+        win_rate=round(m.get("win_rate", 0), 2),
+        num_wins=m.get("num_wins", 0),
+        num_losses=m.get("num_losses", 0),
+        avg_win_pct=round(m.get("avg_win_pct", 0), 4),
+        avg_loss_pct=round(m.get("avg_loss_pct", 0), 4),
+        annualized_volatility=round(m.get("annualized_volatility", 0), 4),
+        best_day_pct=round(m.get("best_day_pct", 0), 4),
         best_day_date=best_day_date,
-        worst_day_pct=round(worst_day_pct, 4),
+        worst_day_pct=round(m.get("worst_day_pct", 0), 4),
         worst_day_date=worst_day_date,
-        profit_factor=round(profit_factor, 4),
-        total_fees=round(total_fees, 2),
-        total_dividends=round(total_dividends, 2),
+        profit_factor=round(m.get("profit_factor", 0), 4),
+        total_fees=round(fees_series[-1], 2),
+        total_dividends=round(divs_series[-1], 2),
         last_updated=state.get("last_sync_date"),
     )
 
@@ -369,31 +274,12 @@ def get_performance(
         DailyPortfolio.account_id.in_(ids)
     ).order_by(DailyPortfolio.date)
 
-    # Custom date range takes priority over period presets
-    if start_date or end_date:
-        if start_date:
-            query = query.filter(DailyPortfolio.date >= date.fromisoformat(start_date))
-        if end_date:
-            query = query.filter(DailyPortfolio.date <= date.fromisoformat(end_date))
-    elif period:
-        today = date.today()
-        if period == "1D":
-            start = today - timedelta(days=1)
-        elif period == "1W":
-            start = today - timedelta(weeks=1)
-        elif period == "1M":
-            start = today - timedelta(days=30)
-        elif period == "3M":
-            start = today - timedelta(days=90)
-        elif period == "YTD":
-            start = date(today.year, 1, 1)
-        elif period == "1Y":
-            start = today - timedelta(days=365)
-        else:
-            start = None
-
-        if start:
-            query = query.filter(DailyPortfolio.date >= start)
+    # Apply date filtering
+    d_start, d_end = _resolve_date_range(period, start_date, end_date)
+    if d_start:
+        query = query.filter(DailyPortfolio.date >= d_start)
+    if d_end:
+        query = query.filter(DailyPortfolio.date <= d_end)
 
     results = query.all()
 

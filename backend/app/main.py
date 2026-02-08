@@ -34,7 +34,7 @@ def _discover_accounts():
                 continue
 
             for sub in subs:
-                display = f"{creds.name} — {sub['display_name']}"
+                display = f"{creds.name}: {sub['display_name']}"
                 existing = db.query(Account).filter_by(id=sub["account_id"]).first()
                 if existing:
                     existing.credential_name = creds.name

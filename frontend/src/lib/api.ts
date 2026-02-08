@@ -116,8 +116,16 @@ function _qs(accountId?: string, extra?: Record<string, string>): string {
 
 export const api = {
   getAccounts: () => fetchJSON<AccountInfo[]>("/accounts"),
-  getSummary: (accountId?: string) =>
-    fetchJSON<Summary>(`/summary${_qs(accountId)}`),
+  getSummary: (accountId?: string, period?: string, startDate?: string, endDate?: string) => {
+    const params: Record<string, string> = {};
+    if (startDate || endDate) {
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+    } else if (period) {
+      params.period = period;
+    }
+    return fetchJSON<Summary>(`/summary${_qs(accountId, Object.keys(params).length ? params : undefined)}`);
+  },
   getPerformance: (accountId?: string, period?: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
     if (accountId) params.set("account_id", accountId);

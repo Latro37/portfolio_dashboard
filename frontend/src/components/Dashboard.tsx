@@ -53,7 +53,12 @@ export default function Dashboard() {
     try {
       setError(null);
       const [s, h] = await Promise.all([
-        api.getSummary(resolvedAccountId),
+        api.getSummary(
+          resolvedAccountId,
+          customStart || customEnd ? undefined : period,
+          customStart || undefined,
+          customEnd || undefined,
+        ),
         api.getHoldings(resolvedAccountId),
       ]);
       setSummary(s);
