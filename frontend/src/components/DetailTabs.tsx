@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, TransactionRow, CashFlowRow } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,13 +13,15 @@ export function DetailTabs() {
   const [metrics, setMetrics] = useState<Record<string, unknown>[]>([]);
   const [txPage, setTxPage] = useState(0);
   const PAGE_SIZE = 50;
+  const metricsRef = useRef<HTMLDivElement>(null);
+  const [metricsHeight, setMetricsHeight] = useState<number | null>(null);
 
   useEffect(() => {
     api.getTransactions(PAGE_SIZE, 0).then((d) => {
       setTransactions(d.transactions);
       setTxTotal(d.total);
     });
-    api.getCashFlows().then(setCashFlows);
+    api.getCashFlows().then((data) => setCashFlows(data));
     fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api") + "/metrics")
       .then((r) => r.json())
       .then((data) => {
@@ -28,6 +30,12 @@ export function DetailTabs() {
         }
       });
   }, []);
+
+  useEffect(() => {
+    if (metricsRef.current) {
+      setMetricsHeight(metricsRef.current.scrollHeight);
+    }
+  }, [metrics]);
 
   const loadTxPage = (page: number) => {
     setTxPage(page);
@@ -40,16 +48,16 @@ export function DetailTabs() {
 
   return (
     <Card className="border-border/50">
-      <Tabs defaultValue="transactions">
+      <Tabs defaultValue="metrics">
         <TabsList className="mx-4 mt-4">
-          <TabsTrigger value="transactions">Transactions</TabsTrigger>
-          <TabsTrigger value="cashflows">Deposits &amp; Dividends</TabsTrigger>
           <TabsTrigger value="metrics">All Metrics</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="cashflows">Non-Trade Activity</TabsTrigger>
         </TabsList>
 
         {/* Transactions */}
         <TabsContent value="transactions">
-          <CardContent className="pt-4">
+          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { maxHeight: metricsHeight } : { maxHeight: 500 }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -110,7 +118,7 @@ export function DetailTabs() {
 
         {/* Cash Flows */}
         <TabsContent value="cashflows">
-          <CardContent className="pt-4">
+          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { maxHeight: metricsHeight } : { maxHeight: 500 }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -122,7 +130,7 @@ export function DetailTabs() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cashFlows.map((cf, i) => {
+                  {[...cashFlows].reverse().map((cf, i) => {
                     const icon = cf.type === "deposit" ? (
                       <DollarSign className="h-3 w-3 text-emerald-400" />
                     ) : cf.type === "dividend" ? (
@@ -155,7 +163,7 @@ export function DetailTabs() {
 
         {/* All Metrics (latest row) */}
         <TabsContent value="metrics">
-          <CardContent className="pt-4">
+          <CardContent className="pt-4" ref={metricsRef}>
             {metrics.length > 0 && (
               <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
                 {Object.entries(metrics[metrics.length - 1]).map(([key, value]) => {
@@ -188,3 +196,4 @@ export function DetailTabs() {
     </Card>
   );
 }
+

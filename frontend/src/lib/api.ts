@@ -19,6 +19,7 @@ export interface Summary {
   calmar_ratio: number;
   sortino_ratio: number;
   max_drawdown: number;
+  max_drawdown_date: string | null;
   current_drawdown: number;
   win_rate: number;
   num_wins: number;
@@ -27,7 +28,9 @@ export interface Summary {
   avg_loss_pct: number;
   annualized_volatility: number;
   best_day_pct: number;
+  best_day_date: string | null;
   worst_day_pct: number;
+  worst_day_date: string | null;
   profit_factor: number;
   total_fees: number;
   total_dividends: number;
@@ -45,6 +48,7 @@ export interface PerformancePoint {
 export interface Holding {
   symbol: string;
   quantity: number;
+  market_value: number;
   allocation_pct: number;
 }
 

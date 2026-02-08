@@ -38,6 +38,32 @@ def get_summary(db: Session = Depends(get_db)):
     state = get_sync_state(db)
 
     m = latest_metrics
+
+    # Find dates of best and worst single-day returns
+    best_day_date = None
+    worst_day_date = None
+    if m and m.best_day_pct != 0:
+        best_row = db.query(DailyMetrics.date).filter(
+            DailyMetrics.daily_return_pct == m.best_day_pct
+        ).order_by(DailyMetrics.date).first()
+        if best_row:
+            best_day_date = str(best_row[0])
+    if m and m.worst_day_pct != 0:
+        worst_row = db.query(DailyMetrics.date).filter(
+            DailyMetrics.daily_return_pct == m.worst_day_pct
+        ).order_by(DailyMetrics.date).first()
+        if worst_row:
+            worst_day_date = str(worst_row[0])
+
+    # Find date of max drawdown
+    max_drawdown_date = None
+    if m and m.max_drawdown != 0:
+        dd_row = db.query(DailyMetrics.date).filter(
+            DailyMetrics.max_drawdown == m.max_drawdown
+        ).order_by(DailyMetrics.date).first()
+        if dd_row:
+            max_drawdown_date = str(dd_row[0])
+
     return PortfolioSummary(
         portfolio_value=latest_portfolio.portfolio_value,
         net_deposits=latest_portfolio.net_deposits,
@@ -51,6 +77,7 @@ def get_summary(db: Session = Depends(get_db)):
         calmar_ratio=m.calmar_ratio if m else 0,
         sortino_ratio=m.sortino_ratio if m else 0,
         max_drawdown=m.max_drawdown if m else 0,
+        max_drawdown_date=max_drawdown_date,
         current_drawdown=m.current_drawdown if m else 0,
         win_rate=m.win_rate if m else 0,
         num_wins=m.num_wins if m else 0,
@@ -59,7 +86,9 @@ def get_summary(db: Session = Depends(get_db)):
         avg_loss_pct=m.avg_loss_pct if m else 0,
         annualized_volatility=m.annualized_volatility if m else 0,
         best_day_pct=m.best_day_pct if m else 0,
+        best_day_date=best_day_date,
         worst_day_pct=m.worst_day_pct if m else 0,
+        worst_day_date=worst_day_date,
         profit_factor=m.profit_factor if m else 0,
         total_fees=latest_portfolio.total_fees,
         total_dividends=latest_portfolio.total_dividends,
@@ -150,14 +179,30 @@ def get_holdings(
         latest_date = latest_date[0]
         rows = db.query(HoldingsHistory).filter_by(date=latest_date).all()
 
-    total_qty = sum(abs(r.quantity) for r in rows)
+    # Fetch notional values from Composer holding-stats for market-value-based allocation
+    notional_map = {}
+    try:
+        client = ComposerClient()
+        stats = client.get_holding_stats()
+        for h in stats.get("holdings", []):
+            sym = h.get("symbol", "")
+            if sym and sym != "$USD":
+                notional_map[sym] = float(h.get("notional_value", 0))
+    except Exception:
+        pass  # Fall back to quantity-based if API fails
+
     holdings = []
     for r in rows:
+        market_value = notional_map.get(r.symbol, 0.0)
         holdings.append({
             "symbol": r.symbol,
             "quantity": r.quantity,
-            "allocation_pct": round(abs(r.quantity) / total_qty * 100, 2) if total_qty > 0 else 0,
+            "market_value": round(market_value, 2),
         })
+
+    total_value = sum(h["market_value"] for h in holdings)
+    for h in holdings:
+        h["allocation_pct"] = round(h["market_value"] / total_value * 100, 2) if total_value > 0 else 0
 
     return {"date": str(latest_date), "holdings": holdings}
 

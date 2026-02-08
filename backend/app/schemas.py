@@ -61,6 +61,7 @@ class PortfolioSummary(BaseModel):
     calmar_ratio: float
     sortino_ratio: float
     max_drawdown: float
+    max_drawdown_date: Optional[str] = None
     current_drawdown: float
     win_rate: float
     num_wins: int
@@ -69,7 +70,9 @@ class PortfolioSummary(BaseModel):
     avg_loss_pct: float
     annualized_volatility: float
     best_day_pct: float
+    best_day_date: Optional[str] = None
     worst_day_pct: float
+    worst_day_date: Optional[str] = None
     profit_factor: float
     total_fees: float
     total_dividends: float

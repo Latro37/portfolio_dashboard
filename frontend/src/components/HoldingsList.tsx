@@ -17,8 +17,8 @@ export function HoldingsList({ holdings }: Props) {
 
   return (
     <Card className="border-border/50">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base font-medium text-foreground/70">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-xl font-medium text-foreground/70">
           Holdings &middot; {holdings.date}
         </CardTitle>
       </CardHeader>
@@ -46,9 +46,14 @@ export function HoldingsList({ holdings }: Props) {
                 />
               </div>
             </div>
-            <span className="text-sm text-foreground/70 tabular-nums w-24 text-right">
-              {h.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} shares
-            </span>
+            <div className="flex flex-col items-end flex-shrink-0">
+              <span className="text-sm font-medium tabular-nums">
+                ${h.market_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <span className="text-xs text-foreground/50 tabular-nums">
+                {h.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} shares
+              </span>
+            </div>
           </div>
         ))}
       </CardContent>

@@ -24,7 +24,7 @@ export function HoldingsPie({ holdings }: Props) {
   return (
     <Card className="border-border/50">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base font-medium text-foreground/70">
+        <CardTitle className="text-xl font-medium text-foreground/70">
           Holdings Allocation
         </CardTitle>
       </CardHeader>
@@ -52,7 +52,7 @@ export function HoldingsPie({ holdings }: Props) {
                 borderRadius: 8,
                 fontSize: 13,
               }}
-              formatter={(value: any) => [`${Number(value).toFixed(1)}%`, "Allocation"]}
+              formatter={(value: any, name: any) => [`${Number(value).toFixed(1)}%`, name]}
             />
           </PieChart>
         </ResponsiveContainer>
