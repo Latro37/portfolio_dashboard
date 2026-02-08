@@ -7,6 +7,7 @@ import {
   SymphonyInfo,
   PerformancePoint,
   SymphonyBacktest,
+  SymphonyTradePreview,
 } from "@/lib/api";
 import {
   AreaChart,
@@ -129,6 +130,9 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   const [loadingLive, setLoadingLive] = useState(true);
   const [loadingBacktest, setLoadingBacktest] = useState(false);
   const [liveAllocations, setLiveAllocations] = useState<Record<string, Record<string, number>>>({});
+  const [tradePreview, setTradePreview] = useState<SymphonyTradePreview | null>(null);
+  const [loadingTradePreview, setLoadingTradePreview] = useState(false);
+  const [tradePreviewRefreshedAt, setTradePreviewRefreshedAt] = useState<Date | null>(null);
   const [period, setPeriod] = useState<Period>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -167,6 +171,23 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
       .getSymphonyAllocations(s.id, s.account_id)
       .then(setLiveAllocations)
       .catch(() => setLiveAllocations({}));
+  }, [s.id, s.account_id]);
+
+  // Fetch trade preview
+  const fetchTradePreview = () => {
+    setLoadingTradePreview(true);
+    api
+      .getSymphonyTradePreview(s.id, s.account_id)
+      .then((data) => {
+        setTradePreview(data);
+        setTradePreviewRefreshedAt(new Date());
+      })
+      .catch(() => setTradePreview(null))
+      .finally(() => setLoadingTradePreview(false));
+  };
+
+  useEffect(() => {
+    fetchTradePreview();
   }, [s.id, s.account_id]);
 
   // Filter live data by period/custom dates (client-side, data already fetched as ALL)
@@ -742,6 +763,82 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
               </div>
             );
           })()}
+
+          {/* Trade Preview */}
+          {tab === "live" && (
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                  Next Automated Trade Preview
+                </h3>
+                <div className="flex items-center gap-3">
+                  {tradePreviewRefreshedAt && (
+                    <span className="text-xs text-muted-foreground">
+                      {tradePreviewRefreshedAt.toLocaleTimeString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={fetchTradePreview}
+                    disabled={loadingTradePreview}
+                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    title="Refresh trade preview"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${loadingTradePreview ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+              </div>
+              {loadingTradePreview && !tradePreview && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Loading preview…
+                </div>
+              )}
+              {!loadingTradePreview && (!tradePreview || tradePreview.recommended_trades.length === 0) && (
+                <p className="text-sm text-muted-foreground">No upcoming trades.</p>
+              )}
+              {tradePreview && tradePreview.recommended_trades.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
+                        <th className="pb-2 pr-3 font-medium">Ticker</th>
+                        <th className="pb-2 pr-3 font-medium">Side</th>
+                        <th className="pb-2 pr-3 font-medium text-right">Shares</th>
+                        <th className="pb-2 pr-3 font-medium text-right">Est. Value</th>
+                        <th className="pb-2 pr-3 font-medium text-right">Price</th>
+                        <th className="pb-2 font-medium text-right">Weight Change</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tradePreview.recommended_trades.map((t, i) => (
+                        <tr key={`${t.ticker}-${t.side}-${i}`} className="border-b border-border/30">
+                          <td className="py-2 pr-3 font-medium">
+                            {t.ticker}
+                            {t.name && <span className="ml-1.5 text-xs text-muted-foreground">{t.name}</span>}
+                          </td>
+                          <td className={`py-2 pr-3 font-semibold ${t.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
+                            {t.side}
+                          </td>
+                          <td className="py-2 pr-3 text-right whitespace-nowrap">
+                            {Math.abs(t.share_change).toFixed(2)}
+                          </td>
+                          <td className={`py-2 pr-3 text-right whitespace-nowrap ${t.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
+                            ${Math.abs(t.cash_change).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2 pr-3 text-right whitespace-nowrap text-muted-foreground">
+                            ${t.average_price.toFixed(2)}
+                          </td>
+                          <td className="py-2 text-right whitespace-nowrap text-muted-foreground">
+                            {t.prev_weight.toFixed(1)}% → {t.next_weight.toFixed(1)}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Historical Allocations — live (from daily sync snapshots) */}
           {tab === "live" && Object.keys(liveAllocations).length > 0 && (

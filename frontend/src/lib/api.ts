@@ -151,6 +151,41 @@ export interface SymphonyBacktest {
   cached_at: string;
 }
 
+export interface TradePreviewItem {
+  symphony_id: string;
+  symphony_name: string;
+  account_id: string;
+  account_name: string;
+  ticker: string;
+  notional: number;
+  quantity: number;
+  prev_value: number;
+  prev_weight: number;
+  next_weight: number;
+  side: "BUY" | "SELL";
+}
+
+export interface SymphonyTradePreviewTrade {
+  ticker: string;
+  name: string | null;
+  side: string;
+  share_change: number;
+  cash_change: number;
+  average_price: number;
+  prev_value: number;
+  prev_weight: number;
+  next_weight: number;
+}
+
+export interface SymphonyTradePreview {
+  symphony_id: string;
+  symphony_name: string;
+  rebalanced: boolean;
+  next_rebalance_after: string;
+  symphony_value: number;
+  recommended_trades: SymphonyTradePreviewTrade[];
+}
+
 function _qs(accountId?: string, extra?: Record<string, string>): string {
   const params = new URLSearchParams();
   if (accountId) params.set("account_id", accountId);
@@ -227,5 +262,11 @@ export const api = {
   getSymphonyAllocations: (symphonyId: string, accountId: string) =>
     fetchJSON<Record<string, Record<string, number>>>(
       `/symphonies/${symphonyId}/allocations?account_id=${encodeURIComponent(accountId)}`
+    ),
+  getTradePreview: (accountId?: string) =>
+    fetchJSON<TradePreviewItem[]>(`/trade-preview${_qs(accountId)}`),
+  getSymphonyTradePreview: (symphonyId: string, accountId: string) =>
+    fetchJSON<SymphonyTradePreview>(
+      `/symphonies/${symphonyId}/trade-preview?account_id=${encodeURIComponent(accountId)}`
     ),
 };

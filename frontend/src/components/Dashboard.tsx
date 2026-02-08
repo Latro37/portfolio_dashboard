@@ -10,6 +10,7 @@ import { HoldingsList } from "./HoldingsList";
 import { DetailTabs } from "./DetailTabs";
 import { SymphonyList } from "./SymphonyList";
 import { SymphonyDetail } from "./SymphonyDetail";
+import { TradePreview } from "./TradePreview";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -215,6 +216,9 @@ export default function Dashboard() {
           showAccountColumn={selectedCredential === "__all__" || selectedSubAccount === "all"}
           onSelect={setSelectedSymphony}
         />
+
+        {/* Next Automated Trade Preview */}
+        <TradePreview accountId={resolvedAccountId} />
 
         {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
         <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />

@@ -285,6 +285,103 @@ def get_symphony_backtest(
 # Symphony allocation history (live daily snapshots)
 # ------------------------------------------------------------------
 
+@router.get("/trade-preview")
+def get_trade_preview(
+    account_id: Optional[str] = Query(None, description="Sub-account ID, all:<cred>, or all"),
+    db: Session = Depends(get_db),
+):
+    """Aggregate trade preview across all symphonies for selected accounts."""
+    ids = _resolve_account_ids(db, account_id)
+    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
+
+    # Group account IDs by credential so we make one dry-run call per credential
+    accts = db.query(Account).filter(Account.id.in_(ids)).all()
+    cred_to_ids: dict[str, list[str]] = {}
+    cred_to_client: dict[str, ComposerClient] = {}
+    for a in accts:
+        cred_to_ids.setdefault(a.credential_name, []).append(a.id)
+        if a.credential_name not in cred_to_client:
+            try:
+                cred_to_client[a.credential_name] = _get_client_for_account(db, a.id)
+            except Exception:
+                pass
+
+    results = []
+    for cred_name, aid_list in cred_to_ids.items():
+        client = cred_to_client.get(cred_name)
+        if not client:
+            continue
+        try:
+            dry_run_data = client.dry_run(account_uuids=aid_list)
+        except Exception as e:
+            logger.warning("Dry-run failed for credential %s: %s", cred_name, e)
+            continue
+
+        for acct_result in dry_run_data:
+            broker_uuid = acct_result.get("broker_account_uuid", "")
+            acct_name = acct_names.get(broker_uuid, acct_result.get("account_name", broker_uuid))
+            dry_run_result = acct_result.get("dry_run_result", {})
+
+            for sym_id, sym_data in dry_run_result.items():
+                trades = sym_data.get("recommended_trades", [])
+                if not trades:
+                    continue
+                for t in trades:
+                    results.append({
+                        "symphony_id": sym_id,
+                        "symphony_name": sym_data.get("symphony_name", "Unknown"),
+                        "account_id": broker_uuid,
+                        "account_name": acct_name,
+                        "ticker": t.get("ticker", ""),
+                        "notional": round(t.get("notional", 0), 2),
+                        "quantity": round(t.get("quantity", 0), 4),
+                        "prev_value": round(t.get("prev_value", 0), 2),
+                        "prev_weight": round(t.get("prev_weight", 0) * 100, 2),
+                        "next_weight": round(t.get("next_weight", 0) * 100, 2),
+                        "side": "BUY" if t.get("notional", 0) >= 0 else "SELL",
+                    })
+
+    return results
+
+
+@router.get("/symphonies/{symphony_id}/trade-preview")
+def get_symphony_trade_preview(
+    symphony_id: str,
+    account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
+    db: Session = Depends(get_db),
+):
+    """Get trade preview for a single symphony."""
+    client = _get_client_for_account(db, account_id)
+    try:
+        data = client.get_trade_preview(symphony_id, broker_account_uuid=account_id)
+    except Exception as e:
+        raise HTTPException(500, f"Trade preview failed: {e}")
+
+    trades = []
+    for t in data.get("recommended_trades", []):
+        side = t.get("side", "BUY" if t.get("cash_change", 0) < 0 else "SELL")
+        trades.append({
+            "ticker": t.get("symbol", ""),
+            "name": t.get("name"),
+            "side": side,
+            "share_change": round(t.get("share_change", 0), 4),
+            "cash_change": round(t.get("cash_change", 0), 2),
+            "average_price": round(t.get("average_price", 0), 2),
+            "prev_value": round(t.get("prev_value", 0), 2),
+            "prev_weight": round(t.get("prev_weight", 0) * 100, 2),
+            "next_weight": round(t.get("next_weight", 0) * 100, 2),
+        })
+
+    return {
+        "symphony_id": symphony_id,
+        "symphony_name": data.get("symphony_name", ""),
+        "rebalanced": data.get("rebalanced", False),
+        "next_rebalance_after": data.get("next_rebalance_after", ""),
+        "symphony_value": round(data.get("symphony_value", 0), 2),
+        "recommended_trades": trades,
+    }
+
+
 @router.get("/symphonies/{symphony_id}/allocations")
 def get_symphony_allocations(
     symphony_id: str,

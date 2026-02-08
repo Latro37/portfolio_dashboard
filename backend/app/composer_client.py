@@ -333,6 +333,50 @@ class ComposerClient:
         return data
 
     # ------------------------------------------------------------------
+    # Dry Run / Trade Preview
+    # ------------------------------------------------------------------
+
+    def dry_run(self, account_uuids: List[str] = None) -> List[Dict]:
+        """Run dry-run rebalance preview for all symphonies across accounts.
+
+        Returns list of per-account results with dry_run_result keyed by symphony ID.
+        """
+        url = f"{self.base_url}/api/v0.1/dry-run"
+        body = {"send_segment_event": False}
+        if account_uuids:
+            body["account_uuids"] = account_uuids
+        resp = requests.post(url, headers=self.headers, json=body)
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "unknown")
+            logger.error("RATE LIMITED (429) on POST dry-run — Retry-After: %s", retry_after)
+        if not resp.ok:
+            logger.error("Dry-run failed (%s): %s", resp.status_code, resp.text[:500])
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info("Dry-run complete: %d account results", len(data))
+        return data
+
+    def get_trade_preview(self, symphony_id: str, broker_account_uuid: str = None) -> Dict:
+        """Get trade preview for a single symphony.
+
+        Returns preview with recommended_trades, next_rebalance_after, etc.
+        """
+        url = f"{self.base_url}/api/v0.1/dry-run/trade-preview/{symphony_id}"
+        body: Dict = {}
+        if broker_account_uuid:
+            body["broker_account_uuid"] = broker_account_uuid
+        resp = requests.post(url, headers=self.headers, json=body)
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "unknown")
+            logger.error("RATE LIMITED (429) on POST trade-preview %s — Retry-After: %s", symphony_id, retry_after)
+        if not resp.ok:
+            logger.error("Trade preview %s failed (%s): %s", symphony_id, resp.status_code, resp.text[:500])
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info("Trade preview complete for symphony %s", symphony_id)
+        return data
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
