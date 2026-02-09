@@ -11,6 +11,7 @@ import { DetailTabs } from "./DetailTabs";
 import { SymphonyList } from "./SymphonyList";
 import { SymphonyDetail } from "./SymphonyDetail";
 import { TradePreview } from "./TradePreview";
+import { MetricsGuide } from "./MetricsGuide";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [symphonies, setSymphonies] = useState<SymphonyInfo[]>([]);
   const [selectedSymphony, setSelectedSymphony] = useState<SymphonyInfo | null>(null);
+  const [showMetricsGuide, setShowMetricsGuide] = useState(false);
 
   // Resolve the account_id query param based on selection
   const resolvedAccountId = selectedCredential === "__all__"
@@ -222,6 +224,16 @@ export default function Dashboard() {
 
         {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
         <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />
+
+        {/* Metrics Guide link */}
+        <div className="pt-2 pb-4 text-center">
+          <button
+            onClick={() => setShowMetricsGuide(true)}
+            className="text-xs text-muted-foreground/60 hover:text-foreground transition-colors"
+          >
+            Metrics Guide
+          </button>
+        </div>
       </div>
 
       {/* Symphony detail overlay */}
@@ -230,6 +242,11 @@ export default function Dashboard() {
           symphony={selectedSymphony}
           onClose={() => setSelectedSymphony(null)}
         />
+      )}
+
+      {/* Metrics Guide overlay */}
+      {showMetricsGuide && (
+        <MetricsGuide onClose={() => setShowMetricsGuide(false)} />
       )}
     </div>
   );

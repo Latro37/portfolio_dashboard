@@ -103,6 +103,48 @@ class BenchmarkData(Base):
     close = Column(Float, nullable=False)
 
 
+class SymphonyDailyPortfolio(Base):
+    """Daily portfolio values per symphony (atomic unit of performance)."""
+    __tablename__ = "symphony_daily_portfolio"
+
+    account_id = Column(Text, primary_key=True)
+    symphony_id = Column(Text, primary_key=True)
+    date = Column(Date, primary_key=True)
+    portfolio_value = Column(Float, nullable=False)
+    net_deposits = Column(Float, default=0.0)
+
+
+class SymphonyDailyMetrics(Base):
+    """Rolling daily metrics per symphony — same columns as DailyMetrics."""
+    __tablename__ = "symphony_daily_metrics"
+
+    account_id = Column(Text, primary_key=True)
+    symphony_id = Column(Text, primary_key=True)
+    date = Column(Date, primary_key=True)
+    daily_return_pct = Column(Float, default=0.0)
+    cumulative_return_pct = Column(Float, default=0.0)
+    total_return_dollars = Column(Float, default=0.0)
+    cagr = Column(Float, default=0.0)
+    annualized_return = Column(Float, default=0.0)
+    time_weighted_return = Column(Float, default=0.0)
+    money_weighted_return = Column(Float, default=0.0)
+    money_weighted_return_period = Column(Float, default=0.0)
+    win_rate = Column(Float, default=0.0)
+    num_wins = Column(Integer, default=0)
+    num_losses = Column(Integer, default=0)
+    avg_win_pct = Column(Float, default=0.0)
+    avg_loss_pct = Column(Float, default=0.0)
+    max_drawdown = Column(Float, default=0.0)
+    current_drawdown = Column(Float, default=0.0)
+    sharpe_ratio = Column(Float, default=0.0)
+    calmar_ratio = Column(Float, default=0.0)
+    sortino_ratio = Column(Float, default=0.0)
+    annualized_volatility = Column(Float, default=0.0)
+    best_day_pct = Column(Float, default=0.0)
+    worst_day_pct = Column(Float, default=0.0)
+    profit_factor = Column(Float, default=0.0)
+
+
 class SymphonyBacktestCache(Base):
     """Cached backtest results for symphonies to avoid repeated slow API calls."""
     __tablename__ = "symphony_backtest_cache"
@@ -114,6 +156,7 @@ class SymphonyBacktestCache(Base):
     dvm_capital_json = Column(Text, nullable=False, default="{}")
     tdvm_weights_json = Column(Text, nullable=False, default="{}")
     benchmarks_json = Column(Text, nullable=False, default="{}")
+    summary_metrics_json = Column(Text, nullable=False, default="{}")
     first_day = Column(Integer, default=0)
     last_market_day = Column(Integer, default=0)
 

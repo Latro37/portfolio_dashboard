@@ -1,6 +1,51 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api";
 
+// ---------------------------------------------------------------------------
+// localStorage cache (5-minute TTL, invalidated on sync)
+// ---------------------------------------------------------------------------
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_PREFIX = "cpv_cache:";
+
+function cacheGet<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL_MS) {
+      localStorage.removeItem(CACHE_PREFIX + key);
+      return null;
+    }
+    return data as T;
+  } catch {
+    return null;
+  }
+}
+
+function cacheSet(key: string, data: unknown): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ ts: Date.now(), data }));
+  } catch {
+    // quota exceeded — silently ignore
+  }
+}
+
+/** Invalidate all cached API responses (call after sync). */
+export function invalidateApiCache(): void {
+  if (typeof window === "undefined") return;
+  const toRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k?.startsWith(CACHE_PREFIX)) toRemove.push(k);
+  }
+  toRemove.forEach((k) => localStorage.removeItem(k));
+}
+
 async function fetchJSON<T>(path: string): Promise<T> {
+  const cached = cacheGet<T>(path);
+  if (cached !== null) return cached;
+
   const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
   if (res.status === 429) {
     const body = await res.text().catch(() => "");
@@ -10,7 +55,9 @@ async function fetchJSON<T>(path: string): Promise<T> {
     throw new Error(`Rate limited on ${path}. Try again later.`);
   }
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  return res.json();
+  const data: T = await res.json();
+  cacheSet(path, data);
+  return data;
 }
 
 export interface Summary {
@@ -135,10 +182,50 @@ export interface SymphonyInfo {
   holdings: SymphonyHolding[];
 }
 
-export interface SymphonyPerformancePoint {
-  date: string;
-  value: number;
-  deposit_adjusted_value: number;
+export interface SymphonySummary {
+  symphony_id: string;
+  account_id: string;
+  period: string;
+  start_date: string;
+  end_date: string;
+  portfolio_value: number;
+  net_deposits: number;
+  total_return_dollars: number;
+  cumulative_return_pct: number;
+  time_weighted_return: number;
+  money_weighted_return: number;
+  money_weighted_return_period: number;
+  cagr: number;
+  annualized_return: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  max_drawdown: number;
+  current_drawdown: number;
+  annualized_volatility: number;
+  win_rate: number;
+  num_wins: number;
+  num_losses: number;
+  best_day_pct: number;
+  worst_day_pct: number;
+  profit_factor: number;
+  daily_return_pct: number;
+}
+
+export interface BacktestSummaryMetrics {
+  cumulative_return_pct: number;
+  annualized_return: number;
+  time_weighted_return: number;
+  cagr: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  max_drawdown: number;
+  annualized_volatility: number;
+  win_rate: number;
+  best_day_pct: number;
+  worst_day_pct: number;
+  profit_factor: number;
 }
 
 export interface SymphonyBacktest {
@@ -146,6 +233,7 @@ export interface SymphonyBacktest {
   dvm_capital: Record<string, Record<string, number>>;
   tdvm_weights: Record<string, Record<string, number>>;
   benchmarks: Record<string, Record<string, number>>;
+  summary_metrics: BacktestSummaryMetrics;
   first_day: number;
   last_market_day: number;
   cached_at: string;
@@ -236,7 +324,8 @@ export const api = {
   getSyncStatus: (accountId?: string) =>
     fetchJSON<SyncStatus>(`/sync/status${_qs(accountId)}`),
   triggerSync: (accountId?: string) =>
-    fetch(`${API_BASE}/sync${_qs(accountId)}`, { method: "POST" }).then((r) => r.json()),
+    fetch(`${API_BASE}/sync${_qs(accountId)}`, { method: "POST" })
+      .then((r) => { invalidateApiCache(); return r.json(); }),
   addManualCashFlow: (body: {
     account_id: string;
     date: string;
@@ -258,6 +347,10 @@ export const api = {
   getSymphonyBacktest: (symphonyId: string, accountId: string, forceRefresh = false) =>
     fetchJSON<SymphonyBacktest>(
       `/symphonies/${symphonyId}/backtest?account_id=${encodeURIComponent(accountId)}${forceRefresh ? "&force_refresh=true" : ""}`
+    ),
+  getSymphonySummary: (symphonyId: string, accountId: string, period?: string) =>
+    fetchJSON<SymphonySummary>(
+      `/symphonies/${symphonyId}/summary?account_id=${encodeURIComponent(accountId)}${period ? `&period=${period}` : ""}`
     ),
   getSymphonyAllocations: (symphonyId: string, accountId: string) =>
     fetchJSON<Record<string, Record<string, number>>>(

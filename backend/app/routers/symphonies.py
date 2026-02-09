@@ -2,21 +2,74 @@
 
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Account, SymphonyBacktestCache, SymphonyAllocationHistory
+from app.models import (
+    Account, SymphonyBacktestCache, SymphonyAllocationHistory,
+    SymphonyDailyPortfolio, SymphonyDailyMetrics,
+)
 from app.composer_client import ComposerClient
-from app.config import load_accounts
+from app.config import load_accounts, get_settings
+from app.services.metrics import compute_all_metrics
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["symphonies"])
 
 CACHE_TTL_HOURS = 24
+
+
+def _compute_backtest_summary(dvm_capital: Dict, first_day: int, last_market_day: int) -> Dict:
+    """Compute summary metrics from backtest dvm_capital series.
+
+    dvm_capital is {day_offset_str: value, ...}. We create a synthetic daily
+    series (no deposits) and run compute_all_metrics to get the final-row summary.
+    """
+    if not dvm_capital:
+        return {}
+
+    sorted_keys = sorted(dvm_capital.keys(), key=lambda k: int(k))
+    if len(sorted_keys) < 2:
+        return {}
+
+    # Build daily_rows: synthetic dates starting from 2020-01-01, net_deposits = first value
+    base_date = date(2020, 1, 1)
+    initial_value = dvm_capital[sorted_keys[0]]
+    daily_rows = []
+    for k in sorted_keys:
+        day_offset = int(k)
+        d = base_date + timedelta(days=day_offset)
+        daily_rows.append({
+            "date": d,
+            "portfolio_value": dvm_capital[k],
+            "net_deposits": initial_value,  # backtest has no deposits
+        })
+
+    settings = get_settings()
+    metrics = compute_all_metrics(daily_rows, [], None, settings.risk_free_rate)
+    if not metrics:
+        return {}
+
+    last = metrics[-1]
+    return {
+        "cumulative_return_pct": last.get("cumulative_return_pct", 0),
+        "annualized_return": last.get("annualized_return", 0),
+        "time_weighted_return": last.get("time_weighted_return", 0),
+        "cagr": last.get("cagr", 0),
+        "sharpe_ratio": last.get("sharpe_ratio", 0),
+        "sortino_ratio": last.get("sortino_ratio", 0),
+        "calmar_ratio": last.get("calmar_ratio", 0),
+        "max_drawdown": last.get("max_drawdown", 0),
+        "annualized_volatility": last.get("annualized_volatility", 0),
+        "win_rate": last.get("win_rate", 0),
+        "best_day_pct": last.get("best_day_pct", 0),
+        "worst_day_pct": last.get("worst_day_pct", 0),
+        "profit_factor": last.get("profit_factor", 0),
+    }
 
 
 def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
@@ -122,7 +175,143 @@ def get_symphony_performance(
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
     db: Session = Depends(get_db),
 ):
-    """Get daily value history for a symphony in the same shape as /performance."""
+    """Get daily value history for a symphony — reads from DB (pre-computed)."""
+    # Read from stored symphony data
+    rows = (
+        db.query(SymphonyDailyPortfolio, SymphonyDailyMetrics)
+        .outerjoin(
+            SymphonyDailyMetrics,
+            (SymphonyDailyPortfolio.account_id == SymphonyDailyMetrics.account_id)
+            & (SymphonyDailyPortfolio.symphony_id == SymphonyDailyMetrics.symphony_id)
+            & (SymphonyDailyPortfolio.date == SymphonyDailyMetrics.date),
+        )
+        .filter(
+            SymphonyDailyPortfolio.account_id == account_id,
+            SymphonyDailyPortfolio.symphony_id == symphony_id,
+        )
+        .order_by(SymphonyDailyPortfolio.date)
+        .all()
+    )
+
+    if not rows:
+        # Fallback: fetch live from Composer API if no stored data yet
+        return _symphony_performance_live(symphony_id, account_id, db)
+
+    result = []
+    for port, met in rows:
+        result.append({
+            "date": str(port.date),
+            "portfolio_value": round(port.portfolio_value, 2),
+            "net_deposits": round(port.net_deposits, 2),
+            "cumulative_return_pct": round(met.cumulative_return_pct, 4) if met else 0.0,
+            "daily_return_pct": round(met.daily_return_pct, 4) if met else 0.0,
+            "time_weighted_return": round(met.time_weighted_return, 4) if met else 0.0,
+            "money_weighted_return": round(met.money_weighted_return_period, 4) if met else 0.0,
+            "current_drawdown": round(met.current_drawdown, 4) if met else 0.0,
+        })
+    return result
+
+
+@router.get("/symphonies/{symphony_id}/summary")
+def get_symphony_summary(
+    symphony_id: str,
+    account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
+    period: Optional[str] = Query(None, description="Period filter: 1D,1W,1M,3M,6M,YTD,1Y,ALL"),
+    db: Session = Depends(get_db),
+):
+    """Period-aware summary metrics for a single symphony, computed from stored data."""
+    rows = db.query(SymphonyDailyPortfolio).filter_by(
+        account_id=account_id, symphony_id=symphony_id,
+    ).order_by(SymphonyDailyPortfolio.date).all()
+
+    if not rows:
+        raise HTTPException(404, "No stored data for this symphony. Run sync first.")
+
+    # Apply period filter
+    all_dates = [r.date for r in rows]
+    if period and period != "ALL" and all_dates:
+        cutoff = _period_cutoff(period, all_dates[-1])
+        if cutoff:
+            rows = [r for r in rows if r.date >= cutoff]
+
+    if not rows:
+        raise HTTPException(404, "No data in selected period.")
+
+    daily_dicts = [
+        {"date": r.date, "portfolio_value": r.portfolio_value, "net_deposits": r.net_deposits}
+        for r in rows
+    ]
+
+    # Infer cash flow events from net_deposits changes for MWR
+    cf_dicts = []
+    for j in range(1, len(rows)):
+        delta = rows[j].net_deposits - rows[j - 1].net_deposits
+        if abs(delta) > 0.50:
+            cf_dicts.append({"date": rows[j].date, "amount": delta})
+
+    settings = get_settings()
+    metrics = compute_all_metrics(daily_dicts, cf_dicts, None, settings.risk_free_rate)
+    if not metrics:
+        raise HTTPException(404, "Could not compute metrics.")
+
+    last = metrics[-1]
+    first_row = rows[0]
+    last_row = rows[-1]
+
+    return {
+        "symphony_id": symphony_id,
+        "account_id": account_id,
+        "period": period or "ALL",
+        "start_date": str(first_row.date),
+        "end_date": str(last_row.date),
+        "portfolio_value": round(last_row.portfolio_value, 2),
+        "net_deposits": round(last_row.net_deposits, 2),
+        "total_return_dollars": last.get("total_return_dollars", 0),
+        "cumulative_return_pct": last.get("cumulative_return_pct", 0),
+        "time_weighted_return": last.get("time_weighted_return", 0),
+        "money_weighted_return": last.get("money_weighted_return", 0),
+        "money_weighted_return_period": last.get("money_weighted_return_period", 0),
+        "cagr": last.get("cagr", 0),
+        "annualized_return": last.get("annualized_return", 0),
+        "sharpe_ratio": last.get("sharpe_ratio", 0),
+        "sortino_ratio": last.get("sortino_ratio", 0),
+        "calmar_ratio": last.get("calmar_ratio", 0),
+        "max_drawdown": last.get("max_drawdown", 0),
+        "current_drawdown": last.get("current_drawdown", 0),
+        "annualized_volatility": last.get("annualized_volatility", 0),
+        "win_rate": last.get("win_rate", 0),
+        "num_wins": last.get("num_wins", 0),
+        "num_losses": last.get("num_losses", 0),
+        "best_day_pct": last.get("best_day_pct", 0),
+        "worst_day_pct": last.get("worst_day_pct", 0),
+        "profit_factor": last.get("profit_factor", 0),
+        "daily_return_pct": last.get("daily_return_pct", 0),
+    }
+
+
+def _period_cutoff(period: str, end_date: date) -> Optional[date]:
+    """Compute the start date for a given period filter."""
+    mapping = {
+        "1D": timedelta(days=1),
+        "1W": timedelta(weeks=1),
+        "1M": timedelta(days=30),
+        "3M": timedelta(days=91),
+        "6M": timedelta(days=182),
+        "1Y": timedelta(days=365),
+    }
+    if period == "YTD":
+        return date(end_date.year, 1, 1)
+    delta = mapping.get(period)
+    if delta:
+        return end_date - delta
+    return None
+
+
+def _symphony_performance_live(symphony_id: str, account_id: str, db: Session):
+    """Fallback: fetch live from Composer API (used before first backfill)."""
+    from app.services.metrics import compute_performance_series
+    from app.services.sync import _infer_net_deposits_from_history
+
     client = _get_client_for_account(db, account_id)
     try:
         history = client.get_symphony_history(account_id, symphony_id)
@@ -132,76 +321,16 @@ def get_symphony_performance(
     if not history:
         return []
 
-    initial_val = history[0]["value"]
-    initial_adj = history[0]["deposit_adjusted_value"]
-    twr = 1.0
-    peak_adj = initial_adj
-
-    # --- Pre-pass: infer actual cash flows using market return from adj ratio ---
-    # adj only changes with market returns, so adj[i]/adj[i-1] = daily market return.
-    # expected_val = prev_val * market_return.  Any difference = deposit/withdrawal.
-    cash_flows: list[tuple[int, float]] = []   # (day_index, amount)
-    cum_net_dep = initial_val                    # running cumulative net deposits
-    net_deposits_by_day = [cum_net_dep]          # one entry per history point
-    for i in range(1, len(history)):
-        prev_val = history[i - 1]["value"]
-        prev_adj = history[i - 1]["deposit_adjusted_value"]
-        adj_i = history[i]["deposit_adjusted_value"]
-        val_i = history[i]["value"]
-
-        mkt_ret = (adj_i / prev_adj) if prev_adj > 0 else 1.0
-        expected_val = prev_val * mkt_ret
-        cf = val_i - expected_val
-        if abs(cf) > 0.50:           # real cash flow (ignore float noise)
-            cash_flows.append((i, cf))
-            cum_net_dep += cf
-        net_deposits_by_day.append(cum_net_dep)
-
-    n_days = len(history)
-    result = []
+    net_deps = _infer_net_deposits_from_history(history)
+    daily_rows = []
     for i, pt in enumerate(history):
-        val = pt["value"]
-        adj = pt["deposit_adjusted_value"]
-        prev_adj = history[i - 1]["deposit_adjusted_value"] if i > 0 else adj
-
-        daily_ret = (adj - prev_adj) / prev_adj if prev_adj > 0 and i > 0 else 0.0
-        if i > 0:
-            twr *= (1 + daily_ret)
-        twr_pct = (twr - 1) * 100
-
-        cum_ret = ((adj / initial_adj) - 1) * 100 if initial_adj > 0 else 0.0
-
-        peak_adj = max(peak_adj, adj)
-        drawdown = ((adj - peak_adj) / peak_adj) * 100 if peak_adj > 0 else 0.0
-
-        net_dep = net_deposits_by_day[i]
-
-        # Modified Dietz MWR from inception to current day
-        mwr_pct = 0.0
-        if i > 0:
-            period_len = i  # days from start
-            total_cf = 0.0
-            weighted_cf = 0.0
-            for cf_day, cf_amt in cash_flows:
-                if cf_day <= i:
-                    total_cf += cf_amt
-                    weight = (i - cf_day) / period_len
-                    weighted_cf += cf_amt * weight
-            denom = initial_val + weighted_cf
-            if denom > 0:
-                mwr_pct = ((val - initial_val - total_cf) / denom) * 100
-
-        result.append({
+        daily_rows.append({
             "date": pt["date"],
-            "portfolio_value": round(val, 2),
-            "net_deposits": round(net_dep, 2),
-            "cumulative_return_pct": round(cum_ret, 4),
-            "daily_return_pct": round(daily_ret * 100, 4),
-            "time_weighted_return": round(twr_pct, 4),
-            "money_weighted_return": round(mwr_pct, 4),
-            "current_drawdown": round(drawdown, 4),
+            "portfolio_value": pt["value"],
+            "net_deposits": net_deps[i],
         })
-    return result
+
+    return compute_performance_series(daily_rows, [])
 
 
 # ------------------------------------------------------------------
@@ -220,11 +349,13 @@ def get_symphony_backtest(
     if not force_refresh:
         cached = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
         if cached and cached.cached_at > datetime.utcnow() - timedelta(hours=CACHE_TTL_HOURS):
+            summary_metrics = json.loads(cached.summary_metrics_json) if cached.summary_metrics_json else {}
             return {
                 "stats": json.loads(cached.stats_json),
                 "dvm_capital": json.loads(cached.dvm_capital_json),
                 "tdvm_weights": json.loads(cached.tdvm_weights_json),
                 "benchmarks": json.loads(cached.benchmarks_json),
+                "summary_metrics": summary_metrics,
                 "first_day": cached.first_day,
                 "last_market_day": cached.last_market_day,
                 "cached_at": cached.cached_at.isoformat(),
@@ -244,6 +375,9 @@ def get_symphony_backtest(
     first_day = data.get("first_day", 0)
     last_market_day = data.get("last_market_day", 0)
 
+    # Pre-compute summary metrics from backtest series
+    summary_metrics = _compute_backtest_summary(dvm_capital, first_day, last_market_day)
+
     # Upsert cache
     existing = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
     now = datetime.utcnow()
@@ -254,6 +388,7 @@ def get_symphony_backtest(
         existing.dvm_capital_json = json.dumps(dvm_capital)
         existing.tdvm_weights_json = json.dumps(tdvm_weights)
         existing.benchmarks_json = json.dumps(benchmarks)
+        existing.summary_metrics_json = json.dumps(summary_metrics)
         existing.first_day = first_day
         existing.last_market_day = last_market_day
     else:
@@ -265,6 +400,7 @@ def get_symphony_backtest(
             dvm_capital_json=json.dumps(dvm_capital),
             tdvm_weights_json=json.dumps(tdvm_weights),
             benchmarks_json=json.dumps(benchmarks),
+            summary_metrics_json=json.dumps(summary_metrics),
             first_day=first_day,
             last_market_day=last_market_day,
         ))
@@ -275,6 +411,7 @@ def get_symphony_backtest(
         "dvm_capital": dvm_capital,
         "tdvm_weights": tdvm_weights,
         "benchmarks": benchmarks,
+        "summary_metrics": summary_metrics,
         "first_day": first_day,
         "last_market_day": last_market_day,
         "cached_at": now.isoformat(),

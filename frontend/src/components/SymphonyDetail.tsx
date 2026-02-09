@@ -7,6 +7,7 @@ import {
   SymphonyInfo,
   PerformancePoint,
   SymphonyBacktest,
+  SymphonySummary,
   SymphonyTradePreview,
 } from "@/lib/api";
 import {
@@ -136,6 +137,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   const [period, setPeriod] = useState<Period>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [liveSummary, setLiveSummary] = useState<SymphonySummary | null>(null);
 
   const s = symphony;
 
@@ -155,7 +157,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
       .finally(() => setLoadingLive(false));
   }, [s.id, s.account_id]);
 
-  // Fetch backtest eagerly on mount (metrics need bStats)
+  // Fetch backtest eagerly on mount
   useEffect(() => {
     setLoadingBacktest(true);
     api
@@ -189,6 +191,15 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   useEffect(() => {
     fetchTradePreview();
   }, [s.id, s.account_id]);
+
+  // Fetch live summary metrics from backend (period-aware)
+  useEffect(() => {
+    const p = customStart ? undefined : (period === "ALL" ? undefined : period);
+    api
+      .getSymphonySummary(s.id, s.account_id, p)
+      .then(setLiveSummary)
+      .catch(() => setLiveSummary(null));
+  }, [s.id, s.account_id, period, customStart, customEnd]);
 
   // Filter live data by period/custom dates (client-side, data already fetched as ALL)
   const filteredLiveData = useMemo(() => {
@@ -279,67 +290,50 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
   const btFormatDate = makeDateFormatter(filteredBacktestData);
 
-  // Compute live metrics from filteredLiveData (period-aware)
+  // Live metrics: values from backend /summary, date lookups from client-side data
   const liveMetrics = useMemo(() => {
     const empty = { sharpe: null as number | null, maxDrawdown: null as number | null, maxDrawdownDate: "", annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, bestDayDate: "", worstDayDate: "", cumReturn: null as number | null, twr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
-    if (filteredLiveData.length < 2) return empty;
-    const first = filteredLiveData[0];
-    const last = filteredLiveData[filteredLiveData.length - 1];
-    const startDate = first.date;
-    const endDate = last.date;
-    const dailyReturns = filteredLiveData.slice(1).map((pt) => pt.daily_return_pct);
-    const n = dailyReturns.length;
-    // Win rate (exclude flat days, matching account-level formula)
-    const wins = dailyReturns.filter((r) => r > 0).length;
-    const losses = dailyReturns.filter((r) => r < 0).length;
-    const decided = wins + losses;
-    const winRate = decided > 0 ? (wins / decided) * 100 : 0;
-    // Best / Worst (with dates)
-    const pts = filteredLiveData.slice(1);
-    let bestDay = -Infinity, worstDay = Infinity, bestDayDate = "", worstDayDate = "";
-    for (let j = 0; j < pts.length; j++) {
-      const r = pts[j].daily_return_pct;
-      if (r > bestDay) { bestDay = r; bestDayDate = pts[j].date; }
-      if (r < worstDay) { worstDay = r; worstDayDate = pts[j].date; }
-    }
-    // Sharpe (annualized)
-    const meanRet = dailyReturns.reduce((a, b) => a + b, 0) / n;
-    const variance = dailyReturns.reduce((a, r) => a + (r - meanRet) ** 2, 0) / n;
-    const stdDev = Math.sqrt(variance);
-    const sharpe = stdDev > 0 ? (meanRet / stdDev) * Math.sqrt(252) : null;
-    // TWR for period (deposit-adjusted)
-    const twrStart = 1 + first.time_weighted_return / 100;
-    const twrEnd = 1 + last.time_weighted_return / 100;
-    const twr = twrStart > 0 ? ((twrEnd / twrStart) - 1) * 100 : null;
-    // Cum return = profit / net deposits (how much you made relative to what you put in)
-    const cumReturn = last.net_deposits > 0
-      ? ((last.portfolio_value - last.net_deposits) / last.net_deposits) * 100
-      : null;
-    // Max drawdown from TWR within the period (rebased to period start)
-    let peakTwr = 0;
-    let maxDd = 0;
-    let maxDrawdownDate = "";
-    for (const pt of filteredLiveData) {
-      const rebasedTwr = twrStart > 0 ? ((1 + pt.time_weighted_return / 100) / twrStart - 1) * 100 : 0;
-      if (rebasedTwr > peakTwr) peakTwr = rebasedTwr;
-      const dd = (100 + peakTwr) > 0 ? ((100 + rebasedTwr) - (100 + peakTwr)) / (100 + peakTwr) * 100 : 0;
-      if (dd < maxDd) { maxDd = dd; maxDrawdownDate = pt.date; }
-    }
-    // Annualized
-    const tradingDays = n;
-    const periodReturn = twr != null ? twr / 100 : 0;
-    const annualized = tradingDays > 0 ? (Math.pow(1 + periodReturn, 252 / tradingDays) - 1) * 100 : null;
-    // Calmar
-    const calmar = maxDd < 0 && annualized != null ? annualized / Math.abs(maxDd) : null;
-    // Total return ($) for the period: value change minus deposit change
-    const totalReturn = (last.portfolio_value - first.portfolio_value) - (last.net_deposits - first.net_deposits);
-    return { sharpe, maxDrawdown: maxDd, maxDrawdownDate, annualized, calmar, winRate, bestDay, worstDay, bestDayDate, worstDayDate, cumReturn, twr, totalReturn, startDate, endDate };
-  }, [filteredLiveData]);
+    if (!liveSummary) return empty;
 
-  // Backtest stats (from API, used as fallback)
-  const bStats = backtest?.stats || {};
+    // Date lookups from client-side data (backend doesn't track which date has best/worst)
+    let bestDayDate = "", worstDayDate = "", maxDrawdownDate = "";
+    if (filteredLiveData.length >= 2) {
+      const pts = filteredLiveData.slice(1);
+      let bestDay = -Infinity, worstDay = Infinity;
+      for (const pt of pts) {
+        if (pt.daily_return_pct > bestDay) { bestDay = pt.daily_return_pct; bestDayDate = pt.date; }
+        if (pt.daily_return_pct < worstDay) { worstDay = pt.daily_return_pct; worstDayDate = pt.date; }
+      }
+      // Find date of max drawdown
+      let peak = 0;
+      let maxDd = 0;
+      for (const pt of filteredLiveData) {
+        if (pt.portfolio_value > peak) peak = pt.portfolio_value;
+        const dd = peak > 0 ? (pt.portfolio_value - peak) / peak : 0;
+        if (dd < maxDd) { maxDd = dd; maxDrawdownDate = pt.date; }
+      }
+    }
 
-  // Compute backtest metrics from filteredBacktestData (period-aware)
+    return {
+      sharpe: liveSummary.sharpe_ratio,
+      maxDrawdown: liveSummary.max_drawdown,
+      maxDrawdownDate,
+      annualized: liveSummary.annualized_return,
+      calmar: liveSummary.calmar_ratio,
+      winRate: liveSummary.win_rate,
+      bestDay: liveSummary.best_day_pct,
+      worstDay: liveSummary.worst_day_pct,
+      bestDayDate,
+      worstDayDate,
+      cumReturn: liveSummary.cumulative_return_pct,
+      twr: liveSummary.time_weighted_return,
+      totalReturn: liveSummary.total_return_dollars,
+      startDate: liveSummary.start_date,
+      endDate: liveSummary.end_date,
+    };
+  }, [liveSummary, filteredLiveData]);
+
+  // Backtest metrics: use backend summary_metrics for ALL period, client-side for filtered
   const btMetrics = useMemo(() => {
     const empty = { cumReturn: null as number | null, annualized: null as number | null, sharpe: null as number | null, sortino: null as number | null, calmar: null as number | null, maxDrawdown: null as number | null, winRate: null as number | null, stdDev: null as number | null, startDate: "", endDate: "" };
     if (filteredBacktestData.length < 2) return empty;
@@ -347,29 +341,43 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
     const last = filteredBacktestData[filteredBacktestData.length - 1];
     const startDate = first.date;
     const endDate = last.date;
+
+    // Use pre-computed backend metrics for ALL period
+    const sm = backtest?.summary_metrics;
+    if (sm && period === "ALL" && !customStart && !customEnd) {
+      return {
+        cumReturn: sm.cumulative_return_pct / 100,
+        annualized: sm.annualized_return / 100,
+        sharpe: sm.sharpe_ratio,
+        sortino: sm.sortino_ratio,
+        calmar: sm.calmar_ratio,
+        maxDrawdown: sm.max_drawdown / 100,
+        winRate: sm.win_rate / 100,
+        stdDev: sm.annualized_volatility / 100,
+        startDate,
+        endDate,
+      };
+    }
+
+    // Client-side computation for filtered periods
     const dailyReturns = filteredBacktestData.slice(1).map((pt, i) => {
       const prev = filteredBacktestData[i].value;
       return prev > 0 ? ((pt.value - prev) / prev) * 100 : 0;
     });
     const n = dailyReturns.length;
     if (n === 0) return empty;
-    // Cum return from TWR
     const twrStart = 1 + (first.twr ?? 0) / 100;
     const twrEnd = 1 + (last.twr ?? 0) / 100;
     const cumReturn = twrStart > 0 ? (twrEnd / twrStart - 1) : 0;
-    // Annualized
     const annualized = n > 0 ? Math.pow(1 + cumReturn, 252 / n) - 1 : 0;
-    // Sharpe
     const meanRet = dailyReturns.reduce((a, b) => a + b, 0) / n;
     const variance = dailyReturns.reduce((a, r) => a + (r - meanRet) ** 2, 0) / n;
     const stdDev = Math.sqrt(variance);
     const sharpe = stdDev > 0 ? (meanRet / stdDev) * Math.sqrt(252) : null;
-    // Sortino (downside deviation)
     const downsideReturns = dailyReturns.filter((r) => r < 0);
     const downsideVar = downsideReturns.length > 0 ? downsideReturns.reduce((a, r) => a + r ** 2, 0) / n : 0;
     const downsideDev = Math.sqrt(downsideVar);
     const sortino = downsideDev > 0 ? (meanRet / downsideDev) * Math.sqrt(252) : null;
-    // Max drawdown
     let peak = first.value;
     let maxDd = 0;
     for (const pt of filteredBacktestData) {
@@ -377,13 +385,11 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
       const dd = peak > 0 ? (pt.value - peak) / peak : 0;
       if (dd < maxDd) maxDd = dd;
     }
-    // Calmar
     const calmar = maxDd < 0 ? annualized / Math.abs(maxDd) : null;
-    // Win rate
     const wins = dailyReturns.filter((r) => r > 0).length;
     const winRate = wins / n;
     return { cumReturn, annualized, sharpe, sortino, calmar, maxDrawdown: maxDd, winRate, stdDev: stdDev / 100, startDate, endDate };
-  }, [filteredBacktestData]);
+  }, [filteredBacktestData, backtest, period, customStart, customEnd]);
 
   return (
     <div

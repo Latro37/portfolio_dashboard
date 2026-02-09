@@ -1,6 +1,7 @@
 """Sync service: backfill and incremental update from Composer API to local DB."""
 
 import logging
+import time
 from datetime import date, datetime
 from typing import Optional
 
@@ -11,6 +12,7 @@ from app.composer_client import ComposerClient
 from app.models import (
     Transaction, HoldingsHistory, CashFlow, DailyPortfolio,
     DailyMetrics, BenchmarkData, SyncState, SymphonyAllocationHistory,
+    SymphonyDailyPortfolio, SymphonyDailyMetrics,
 )
 from app.services.holdings import reconstruct_holdings
 from app.services.metrics import compute_all_metrics
@@ -98,6 +100,10 @@ def full_backfill(db: Session, client: ComposerClient, account_id: str):
     # 7. Snapshot symphony allocations
     _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
 
+    # 8. Sync symphony daily data (full history) and compute symphony metrics
+    _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
+    _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
+
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Full backfill complete for account %s", account_id)
@@ -122,6 +128,10 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
     _safe_step("benchmark", _sync_benchmark, db, account_id)
     _safe_step("metrics", _recompute_metrics, db, account_id)
     _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
+
+    # Sync symphony daily data (incremental: today only) and compute symphony metrics
+    _safe_step("symphony_daily", _sync_symphony_daily_incremental, db, client, account_id)
+    _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
 
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Incremental update complete for %s", account_id)
@@ -458,3 +468,192 @@ def _sync_symphony_allocations(db: Session, client: ComposerClient, account_id: 
     db.commit()
     logger.info("Symphony allocations captured for %s: %d holdings across %d symphonies",
                 account_id, new_count, len(symphonies))
+
+
+# ------------------------------------------------------------------
+# Symphony daily data (backfill + incremental)
+# ------------------------------------------------------------------
+
+def _infer_net_deposits_from_history(history: list) -> list[float]:
+    """Infer cumulative net deposits per day from symphony history.
+
+    Uses the deposit_adjusted_value vs value series to detect cash flows.
+    Logic: deposit_adjusted only moves with market returns, so any
+    difference between expected and actual value indicates a cash flow.
+    """
+    if not history:
+        return []
+
+    initial_val = history[0]["value"]
+    cum_net_dep = initial_val
+    net_deposits = [cum_net_dep]
+
+    for i in range(1, len(history)):
+        prev_val = history[i - 1]["value"]
+        prev_adj = history[i - 1]["deposit_adjusted_value"]
+        adj_i = history[i]["deposit_adjusted_value"]
+        val_i = history[i]["value"]
+
+        mkt_ret = (adj_i / prev_adj) if prev_adj > 0 else 1.0
+        expected_val = prev_val * mkt_ret
+        cf = val_i - expected_val
+        if abs(cf) > 0.50:  # real cash flow (ignore float noise)
+            cum_net_dep += cf
+        net_deposits.append(cum_net_dep)
+
+    return net_deposits
+
+
+def _sync_symphony_daily_backfill(db: Session, client: ComposerClient, account_id: str):
+    """Fetch full daily history for each active symphony and store all rows."""
+    try:
+        symphonies = client.get_symphony_stats(account_id)
+    except Exception as e:
+        logger.warning("Failed to fetch symphony stats for backfill %s: %s", account_id, e)
+        return
+
+    total_new = 0
+    for s in symphonies:
+        sym_id = s.get("id", "")
+        if not sym_id:
+            continue
+
+        try:
+            history = client.get_symphony_history(account_id, sym_id)
+        except Exception as e:
+            logger.warning("Failed to fetch history for symphony %s: %s", sym_id, e)
+            continue
+
+        if not history:
+            continue
+
+        net_deps = _infer_net_deposits_from_history(history)
+
+        for i, pt in enumerate(history):
+            try:
+                d = date.fromisoformat(pt["date"])
+            except Exception:
+                continue
+
+            existing = db.query(SymphonyDailyPortfolio).filter_by(
+                account_id=account_id, symphony_id=sym_id, date=d
+            ).first()
+            if existing:
+                existing.portfolio_value = pt["value"]
+                existing.net_deposits = round(net_deps[i], 2)
+            else:
+                db.add(SymphonyDailyPortfolio(
+                    account_id=account_id,
+                    symphony_id=sym_id,
+                    date=d,
+                    portfolio_value=pt["value"],
+                    net_deposits=round(net_deps[i], 2),
+                ))
+                total_new += 1
+
+        time.sleep(0.5)  # rate-limit between symphony history calls
+
+    db.commit()
+    logger.info("Symphony daily backfill for %s: %d new rows across %d symphonies",
+                account_id, total_new, len(symphonies))
+
+
+def _sync_symphony_daily_incremental(db: Session, client: ComposerClient, account_id: str):
+    """Store today's symphony values using symphony-stats-meta (1 API call)."""
+    today = date.today()
+    if today.weekday() >= 5:
+        logger.info("Skipping symphony daily on weekend for %s", account_id)
+        return
+
+    try:
+        symphonies = client.get_symphony_stats(account_id)
+    except Exception as e:
+        logger.warning("Failed to fetch symphony stats for incremental %s: %s", account_id, e)
+        return
+
+    new_count = 0
+    for s in symphonies:
+        sym_id = s.get("id", "")
+        if not sym_id:
+            continue
+
+        value = s.get("value", 0)
+        net_dep = s.get("net_deposits", 0)
+
+        existing = db.query(SymphonyDailyPortfolio).filter_by(
+            account_id=account_id, symphony_id=sym_id, date=today
+        ).first()
+        if existing:
+            existing.portfolio_value = round(value, 2)
+            existing.net_deposits = round(net_dep, 2)
+        else:
+            db.add(SymphonyDailyPortfolio(
+                account_id=account_id,
+                symphony_id=sym_id,
+                date=today,
+                portfolio_value=round(value, 2),
+                net_deposits=round(net_dep, 2),
+            ))
+            new_count += 1
+
+    db.commit()
+    logger.info("Symphony daily incremental for %s: %d new rows for %d symphonies",
+                account_id, new_count, len(symphonies))
+
+
+def _recompute_symphony_metrics(db: Session, account_id: str):
+    """Compute daily metrics for each symphony from stored SymphonyDailyPortfolio data.
+
+    Runs compute_all_metrics on the full stored series per symphony but only
+    persists rows that are new or updated (today).  Past rows are immutable.
+    """
+    # Get distinct symphony IDs for this account
+    sym_ids = [
+        row[0] for row in
+        db.query(SymphonyDailyPortfolio.symphony_id).filter_by(
+            account_id=account_id
+        ).distinct().all()
+    ]
+
+    settings = get_settings()
+
+    for sym_id in sym_ids:
+        portfolio_rows = db.query(SymphonyDailyPortfolio).filter_by(
+            account_id=account_id, symphony_id=sym_id,
+        ).order_by(SymphonyDailyPortfolio.date).all()
+
+        if not portfolio_rows:
+            continue
+
+        daily_dicts = [
+            {"date": r.date, "portfolio_value": r.portfolio_value, "net_deposits": r.net_deposits}
+            for r in portfolio_rows
+        ]
+
+        # Infer cash flow events from net_deposits changes for MWR
+        cf_dicts = []
+        for j in range(1, len(portfolio_rows)):
+            delta = portfolio_rows[j].net_deposits - portfolio_rows[j - 1].net_deposits
+            if abs(delta) > 0.50:
+                cf_dicts.append({"date": portfolio_rows[j].date, "amount": delta})
+
+        metrics = compute_all_metrics(daily_dicts, cf_dicts, None, settings.risk_free_rate)
+
+        # Only persist rows that don't already exist (immutable history)
+        for m in metrics:
+            d = m["date"]
+            existing = db.query(SymphonyDailyMetrics).filter_by(
+                account_id=account_id, symphony_id=sym_id, date=d
+            ).first()
+            if existing:
+                # Update today's row (or re-backfill)
+                for k, v in m.items():
+                    if k != "date":
+                        setattr(existing, k, v)
+            else:
+                db.add(SymphonyDailyMetrics(
+                    account_id=account_id, symphony_id=sym_id, **m
+                ))
+
+    db.commit()
+    logger.info("Symphony metrics computed for %s: %d symphonies", account_id, len(sym_ids))
