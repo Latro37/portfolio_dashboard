@@ -39,14 +39,22 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Pro
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [isFinalPreview, setIsFinalPreview] = useState(false);
 
   const fetchPreview = async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await api.getTradePreview(accountId);
-      setTrades(data);
-      setLastRefreshed(new Date());
+      const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const pastCutoff = nowET.getHours() > 15 || (nowET.getHours() === 15 && nowET.getMinutes() >= 40);
+      if (data.length === 0 && pastCutoff && trades.length > 0) {
+        setIsFinalPreview(true);
+      } else {
+        setTrades(data);
+        setLastRefreshed(new Date());
+        setIsFinalPreview(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load trade preview");
     } finally {
@@ -107,9 +115,10 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Pro
       }
     }
 
-    return Array.from(map.values()).sort(
-      (a, b) => Math.abs(b.totalNotional) - Math.abs(a.totalNotional)
-    );
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.side !== b.side) return a.side === "SELL" ? -1 : 1;
+      return Math.abs(b.totalNotional) - Math.abs(a.totalNotional);
+    });
   }, [trades]);
 
   const handleSymphonyClick = (e: React.MouseEvent, symphonyId: string) => {
@@ -126,7 +135,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Pro
         <div className="flex items-center gap-3">
           {lastRefreshed && (
             <span className="text-xs text-muted-foreground">
-              {lastRefreshed.toLocaleTimeString()}
+              {isFinalPreview ? "Final Trade Preview of the Day" : lastRefreshed.toLocaleTimeString()}
             </span>
           )}
           <button
@@ -173,8 +182,10 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Pro
                 const key = `${row.ticker}|${row.side}`;
                 const isMulti = row.symphonies.length > 1;
                 const isOpen = expanded.has(key);
-                const acctPrevWeight = portfolioValue ? (row.totalPrevValue / portfolioValue) * 100 : 0;
-                const acctNextWeight = portfolioValue ? ((row.totalPrevValue + row.totalNotional) / portfolioValue) * 100 : 0;
+                const allPrevZero = row.symphonies.every((s) => s.prevWeight === 0);
+                const allNextZero = row.symphonies.every((s) => s.nextWeight === 0);
+                const acctPrevWeight = allPrevZero ? 0 : portfolioValue ? Math.max(0, (row.totalPrevValue / portfolioValue) * 100) : 0;
+                const acctNextWeight = allNextZero ? 0 : portfolioValue ? Math.max(0, ((row.totalPrevValue + row.totalNotional) / portfolioValue) * 100) : 0;
                 return (
                   <>
                     <tr key={key} className="border-b border-border/50">

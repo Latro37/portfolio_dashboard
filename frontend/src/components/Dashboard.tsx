@@ -235,7 +235,7 @@ export default function Dashboard() {
         {/* Next Automated Trade Preview */}
         <TradePreview
           accountId={resolvedAccountId}
-          portfolioValue={summary?.portfolio_value}
+          portfolioValue={symphonies.length ? symphonies.reduce((s, x) => s + x.value, 0) : summary?.portfolio_value}
           onSymphonyClick={(symphonyId) => {
             const match = symphonies.find((s) => s.id === symphonyId);
             if (match) {
