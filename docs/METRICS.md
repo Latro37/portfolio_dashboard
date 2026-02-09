@@ -61,6 +61,47 @@ Composer API ──► sync.py (backfill / incremental)
 
 All metric math lives in **one file**: `backend/app/services/metrics.py`. The frontend consumes pre-computed values from the API — it does not calculate metrics itself (except date lookups for best/worst day tooltips and client-side backtest filtering for sub-period views).
 
+### Live Intraday Overlay
+
+In addition to the sync-based pipeline above, an intraday live overlay updates metrics every ~60 seconds using data from Composer's `symphony-stats-meta` API (which the Active Symphonies panel already polls):
+
+```
+Every 60s (weekdays, market hours only):
+  symphony-stats-meta API ──► SymphonyInfo[] (value, net_deposits per symphony)
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+              livePV = Σ value  liveND = Σ net_dep  live holdings
+                    │               │               │
+                    ▼               ▼               ▼
+             /summary/live     (chart point)    HoldingsPie
+            (compute_latest_    appended to     + HoldingsList
+             metrics on stored  performance[]   (instant, no
+             series + today)                     animation)
+                    │
+                    ▼
+            MetricCards + PortfolioHeader
+```
+
+**Key endpoints:**
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/summary/live?live_pv=&live_nd=&account_id=&period=` | Portfolio summary with today's value replaced by live symphony data. Uses `compute_latest_metrics()` on the stored daily series with the live "today" row appended/replaced. DB query results cached for 120s. |
+| `GET /api/symphonies/{id}/summary/live?live_pv=&live_nd=&account_id=&period=` | Same pattern for individual symphonies. |
+
+**How it works:**
+1. The stored daily series (from `DailyPortfolio`) is loaded and cached in memory (120s TTL).
+2. If today's date matches the last row, its `portfolio_value` and `net_deposits` are replaced with the live values. Otherwise, a new row is appended.
+3. Intraday deposits are detected automatically: `Δ net_deposits = live_nd − last_stored_nd`. If |Δ| > $0.50, a cash flow event is inferred for MWR's IRR solve.
+4. `compute_latest_metrics()` runs on the full series (including the live today row) but only computes the final day's metrics — avoiding the cost of recomputing all historical days.
+5. Best/worst day dates are not recomputed in the live response (they come from the base `/summary` endpoint on sync).
+
+**Frontend controls:**
+- **Live toggle** (top-right of dashboard): Enables/disables live overlay. Persisted in `localStorage`. When disabled, base sync-time values are restored.
+- **Market hours guard** (`isMarketOpen()`): Skips the live overlay call on weekends and outside 9 AM – 8 PM ET.
+- **Chart point:** A synthetic "today" `PerformancePoint` is appended/updated in the `performance[]` array using approximate TWR/drawdown derived from the last stored data point and today's live return. This appears on all chart timeframes.
+
 ---
 
 ## Input Data

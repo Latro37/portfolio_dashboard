@@ -50,9 +50,11 @@ export function HoldingsList({ holdings }: Props) {
               <span className="text-sm font-medium tabular-nums">
                 ${h.market_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span className="text-xs text-foreground/50 tabular-nums">
-                {h.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} shares
-              </span>
+              {h.quantity > 0 && (
+                <span className="text-xs text-foreground/50 tabular-nums">
+                  {h.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} shares
+                </span>
+              )}
             </div>
           </div>
         ))}

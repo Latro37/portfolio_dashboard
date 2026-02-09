@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo } from "@/lib/api";
+import { isMarketOpen } from "@/lib/marketHours";
 import { PortfolioHeader } from "./PortfolioHeader";
 import { PerformanceChart } from "./PerformanceChart";
 import { MetricCards } from "./MetricCards";
@@ -36,6 +37,16 @@ export default function Dashboard() {
   const [symphonyScrollTo, setSymphonyScrollTo] = useState<"trade-preview" | undefined>(undefined);
   const [showMetricsGuide, setShowMetricsGuide] = useState(false);
   const [symphoniesRefreshing, setSymphoniesRefreshing] = useState(false);
+  const [liveEnabled, setLiveEnabled] = useState(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("live_enabled");
+      return stored === null ? true : stored === "true";
+    }
+    return true;
+  });
+  const baseHoldingsRef = useRef<HoldingsResponse | null>(null);
+  const basePerformanceRef = useRef<PerformancePoint[]>([]);
+  const baseSummaryRef = useRef<Summary | null>(null);
 
   // Resolve the account_id query param based on selection
   const resolvedAccountId = selectedCredential === "__all__"
@@ -73,7 +84,9 @@ export default function Dashboard() {
         api.getHoldings(resolvedAccountId),
       ]);
       setSummary(s);
+      baseSummaryRef.current = s;
       setHoldings(h);
+      baseHoldingsRef.current = h;
       try {
         const p = await api.getPerformance(
           resolvedAccountId,
@@ -82,8 +95,10 @@ export default function Dashboard() {
           customEnd || undefined,
         );
         setPerformance(p);
+        basePerformanceRef.current = p;
       } catch {
         setPerformance([]);
+        basePerformanceRef.current = [];
       }
       try {
         const syms = await api.getSymphonies(resolvedAccountId);
@@ -101,6 +116,96 @@ export default function Dashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const toggleLive = useCallback((enabled: boolean) => {
+    setLiveEnabled(enabled);
+    localStorage.setItem("live_enabled", String(enabled));
+    if (!enabled) {
+      // Restore base data when disabling live
+      if (baseSummaryRef.current) setSummary(baseSummaryRef.current);
+      if (baseHoldingsRef.current) setHoldings(baseHoldingsRef.current);
+      if (basePerformanceRef.current.length) setPerformance(basePerformanceRef.current);
+    }
+  }, []);
+
+  const applyLiveOverlay = useCallback(async (freshSymphonies: SymphonyInfo[]) => {
+    if (!liveEnabled || !isMarketOpen() || !resolvedAccountId || !freshSymphonies.length) return;
+
+    const livePV = freshSymphonies.reduce((s, x) => s + x.value, 0);
+    // Use stored net_deposits — symphony sum doesn't match portfolio-level ND
+    // (cash outside symphonies, rounding, etc. would create phantom deposits)
+    const base = basePerformanceRef.current;
+    const storedND = base.length > 0 ? base[base.length - 1].net_deposits : (baseSummaryRef.current?.net_deposits ?? 0);
+
+    // 1. Live summary → updates MetricCards + PortfolioHeader
+    try {
+      const liveSummary = await api.getLiveSummary(
+        resolvedAccountId, livePV, storedND,
+        customStart || customEnd ? undefined : period,
+        customStart || undefined,
+        customEnd || undefined,
+      );
+      setSummary(liveSummary);
+    } catch { /* fall back to base summary */ }
+
+    // 2. Live chart point → append/update today in performance
+    if (base.length > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const lastPt = base[base.length - 1];
+      const prevPV = lastPt.portfolio_value;
+      const dailyRet = prevPV > 0 ? ((livePV - prevPV) / prevPV) * 100 : 0;
+      const cumRet = storedND > 0 ? ((livePV - storedND) / storedND) * 100 : 0;
+      // Approximate TWR: compound previous TWR with today's return
+      const prevTWR = lastPt.time_weighted_return || 0;
+      const liveTWR = ((1 + prevTWR / 100) * (1 + dailyRet / 100) - 1) * 100;
+      // Approximate drawdown from TWR peak
+      const twrPeak = Math.max(...base.map((p) => 1 + (p.time_weighted_return || 0) / 100), 1 + liveTWR / 100);
+      const liveDD = twrPeak > 0 ? ((1 + liveTWR / 100) / twrPeak - 1) * 100 : 0;
+
+      const todayPt: PerformancePoint = {
+        date: today,
+        portfolio_value: livePV,
+        net_deposits: storedND,
+        cumulative_return_pct: cumRet,
+        daily_return_pct: dailyRet,
+        time_weighted_return: liveTWR,
+        money_weighted_return: lastPt.money_weighted_return || 0,
+        current_drawdown: Math.min(liveDD, 0),
+      };
+
+      if (lastPt.date === today) {
+        setPerformance([...base.slice(0, -1), todayPt]);
+      } else {
+        setPerformance([...base, todayPt]);
+      }
+    }
+
+    // 3. Live holdings from symphony data
+    const holdingMap = new Map<string, { value: number; pctChange: number }>(); 
+    for (const sym of freshSymphonies) {
+      for (const h of sym.holdings) {
+        const existing = holdingMap.get(h.ticker);
+        if (existing) {
+          existing.value += h.value;
+        } else {
+          holdingMap.set(h.ticker, { value: h.value, pctChange: h.last_percent_change });
+        }
+      }
+    }
+    const totalValue = Array.from(holdingMap.values()).reduce((s, h) => s + h.value, 0);
+    const liveHoldings: HoldingsResponse = {
+      date: new Date().toISOString().slice(0, 10),
+      holdings: Array.from(holdingMap.entries())
+        .map(([symbol, h]) => ({
+          symbol,
+          quantity: 0, // not available from symphony holdings
+          market_value: h.value,
+          allocation_pct: totalValue > 0 ? (h.value / totalValue) * 100 : 0,
+        }))
+        .sort((a, b) => b.market_value - a.market_value),
+    };
+    setHoldings(liveHoldings);
+  }, [liveEnabled, resolvedAccountId, period, customStart, customEnd]);
 
   const handleCredentialChange = (credName: string) => {
     setSelectedCredential(credName);
@@ -172,6 +277,18 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
+        {/* Live toggle */}
+        <div className="flex items-center justify-end">
+          <button
+            onClick={() => toggleLive(!liveEnabled)}
+            className="cursor-pointer flex items-center gap-2 rounded-full border border-border/50 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+            title={liveEnabled ? "Live updates enabled — click to disable" : "Live updates disabled — click to enable"}
+          >
+            <span className={`inline-block h-2 w-2 rounded-full transition-colors ${liveEnabled ? "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"}`} />
+            <span className={liveEnabled ? "text-foreground" : "text-muted-foreground"}>Live</span>
+          </button>
+        </div>
+
         {/* Header: PV, daily change, account switcher, sync button */}
         <PortfolioHeader
           summary={summary!}
@@ -226,6 +343,7 @@ export default function Dashboard() {
             try {
               const syms = await api.getSymphonies(resolvedAccountId);
               setSymphonies(syms);
+              applyLiveOverlay(syms);
             } catch { /* ignore */ }
             finally { setSymphoniesRefreshing(false); }
           }}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { X, RefreshCw } from "lucide-react";
 import {
   api,
@@ -10,6 +10,7 @@ import {
   SymphonySummary,
   SymphonyTradePreview,
 } from "@/lib/api";
+import { isMarketOpen } from "@/lib/marketHours";
 import {
   AreaChart,
   Area,
@@ -140,6 +141,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [liveSummary, setLiveSummary] = useState<SymphonySummary | null>(null);
+  const baseLiveDataRef = useRef<PerformancePoint[]>([]);
 
   const s = symphony;
 
@@ -154,8 +156,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     setLoadingLive(true);
     api
       .getSymphonyPerformance(s.id, s.account_id)
-      .then(setLiveData)
-      .catch(() => setLiveData([]))
+      .then((data) => { setLiveData(data); baseLiveDataRef.current = data; })
+      .catch(() => { setLiveData([]); baseLiveDataRef.current = []; })
       .finally(() => setLoadingLive(false));
   }, [s.id, s.account_id]);
 
@@ -194,11 +196,62 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     fetchTradePreview();
   }, [s.id, s.account_id]);
 
-  // Auto-refresh trade preview every 60s
+  // Refresh live summary metrics using live symphony data
+  const refreshLiveMetrics = useCallback(() => {
+    if (!isMarketOpen()) return;
+    const livePv = s.value;
+    // Use stored net_deposits from base performance data to avoid phantom deposits
+    // (live symphony ND may differ from stored ND due to timing/aggregation)
+    const base = baseLiveDataRef.current;
+    const storedND = base.length > 0 ? base[base.length - 1].net_deposits : s.net_deposits;
+    const p = (customStart || customEnd) ? undefined : (period === "ALL" ? undefined : period);
+    api
+      .getSymphonyLiveSummary(
+        s.id, s.account_id, livePv, storedND, p,
+        customStart || undefined, customEnd || undefined,
+      )
+      .then(setLiveSummary)
+      .catch(() => { /* keep existing liveSummary */ });
+
+    // Append/update today's chart point
+    if (base.length > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const lastPt = base[base.length - 1];
+      const prevPV = lastPt.portfolio_value;
+      const dailyRet = prevPV > 0 ? ((livePv - prevPV) / prevPV) * 100 : 0;
+      const cumRet = storedND > 0 ? ((livePv - storedND) / storedND) * 100 : 0;
+      const prevTWR = lastPt.time_weighted_return || 0;
+      const liveTWR = ((1 + prevTWR / 100) * (1 + dailyRet / 100) - 1) * 100;
+      const twrPeak = Math.max(...base.map((pt) => 1 + (pt.time_weighted_return || 0) / 100), 1 + liveTWR / 100);
+      const liveDD = twrPeak > 0 ? ((1 + liveTWR / 100) / twrPeak - 1) * 100 : 0;
+
+      const todayPt: PerformancePoint = {
+        date: today,
+        portfolio_value: livePv,
+        net_deposits: storedND,
+        cumulative_return_pct: cumRet,
+        daily_return_pct: dailyRet,
+        time_weighted_return: liveTWR,
+        money_weighted_return: lastPt.money_weighted_return || 0,
+        current_drawdown: Math.min(liveDD, 0),
+      };
+
+      if (lastPt.date === today) {
+        setLiveData([...base.slice(0, -1), todayPt]);
+      } else {
+        setLiveData([...base, todayPt]);
+      }
+    }
+  }, [s.id, s.account_id, s.value, s.net_deposits, period, customStart, customEnd]);
+
+  // Auto-refresh trade preview + live metrics every 60s
   useEffect(() => {
-    const id = setInterval(fetchTradePreview, 60_000);
+    const id = setInterval(() => {
+      fetchTradePreview();
+      refreshLiveMetrics();
+    }, 60_000);
     return () => clearInterval(id);
-  }, [s.id, s.account_id]);
+  }, [s.id, s.account_id, refreshLiveMetrics]);
 
   // Scroll to trade preview section if requested
   useEffect(() => {

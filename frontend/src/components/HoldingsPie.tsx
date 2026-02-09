@@ -40,6 +40,7 @@ export function HoldingsPie({ holdings }: Props) {
               paddingAngle={2}
               dataKey="value"
               stroke="none"
+              isAnimationActive={false}
             >
               {data.map((_, i) => (
                 <Cell key={i} fill={COLORS[i % COLORS.length]} />

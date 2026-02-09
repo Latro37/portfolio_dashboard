@@ -363,4 +363,30 @@ export const api = {
     fetchJSON<SymphonyTradePreview>(
       `/symphonies/${symphonyId}/trade-preview?account_id=${encodeURIComponent(accountId)}`
     ),
+  getLiveSummary: (accountId: string, livePv: number, liveNd: number, period?: string, startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    params.set("account_id", accountId);
+    params.set("live_pv", String(livePv));
+    params.set("live_nd", String(liveNd));
+    if (startDate || endDate) {
+      if (startDate) params.set("start_date", startDate);
+      if (endDate) params.set("end_date", endDate);
+    } else if (period) {
+      params.set("period", period);
+    }
+    return fetchJSON<Summary>(`/summary/live?${params.toString()}`);
+  },
+  getSymphonyLiveSummary: (symphonyId: string, accountId: string, livePv: number, liveNd: number, period?: string, startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    params.set("account_id", accountId);
+    params.set("live_pv", String(livePv));
+    params.set("live_nd", String(liveNd));
+    if (startDate || endDate) {
+      if (startDate) params.set("start_date", startDate);
+      if (endDate) params.set("end_date", endDate);
+    } else if (period) {
+      params.set("period", period);
+    }
+    return fetchJSON<SymphonySummary>(`/symphonies/${symphonyId}/summary/live?${params.toString()}`);
+  },
 };

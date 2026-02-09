@@ -15,7 +15,8 @@ from app.models import (
 )
 from app.composer_client import ComposerClient
 from app.config import load_accounts, get_settings
-from app.services.metrics import compute_all_metrics
+from app.services.metrics import compute_all_metrics, compute_latest_metrics
+import time
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["symphonies"])
@@ -293,6 +294,125 @@ def get_symphony_summary(
         "worst_day_pct": last.get("worst_day_pct", 0),
         "profit_factor": last.get("profit_factor", 0),
         "daily_return_pct": last.get("daily_return_pct", 0),
+    }
+
+
+# ------------------------------------------------------------------
+# Live Symphony Summary (intraday overlay)
+# ------------------------------------------------------------------
+
+_sym_live_cache: dict = {}  # key: (symphony_id, account_id, period, start, end) → {ts, data}
+_SYM_LIVE_CACHE_TTL = 120  # seconds
+
+
+@router.get("/symphonies/{symphony_id}/summary/live")
+def get_symphony_summary_live(
+    symphony_id: str,
+    live_pv: float = Query(..., description="Live symphony value"),
+    live_nd: float = Query(..., description="Live symphony net deposits"),
+    account_id: str = Query(..., description="Sub-account ID"),
+    period: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Symphony summary with today's value replaced by live data."""
+    today = date.today()
+    today_str = str(today)
+
+    cache_key = (symphony_id, account_id, period, start_date, end_date)
+    cached = _sym_live_cache.get(cache_key)
+    if cached and time.time() - cached["ts"] < _SYM_LIVE_CACHE_TTL:
+        daily_dicts = cached["daily_dicts"]
+        cf_dicts = cached["cf_dicts"]
+        first_date_str = cached["first_date_str"]
+    else:
+        rows = db.query(SymphonyDailyPortfolio).filter_by(
+            account_id=account_id, symphony_id=symphony_id,
+        ).order_by(SymphonyDailyPortfolio.date).all()
+
+        if not rows:
+            raise HTTPException(404, "No stored data for this symphony.")
+
+        if start_date or end_date:
+            sd = date.fromisoformat(start_date) if start_date else None
+            ed = date.fromisoformat(end_date) if end_date else None
+            rows = [r for r in rows if (sd is None or r.date >= sd) and (ed is None or r.date <= ed)]
+        elif period and period != "ALL":
+            all_dates = [r.date for r in rows]
+            if all_dates:
+                cutoff = _period_cutoff(period, all_dates[-1])
+                if cutoff:
+                    rows = [r for r in rows if r.date >= cutoff]
+
+        if not rows:
+            raise HTTPException(404, "No data in selected period.")
+
+        daily_dicts = [
+            {"date": r.date, "portfolio_value": r.portfolio_value, "net_deposits": r.net_deposits}
+            for r in rows
+        ]
+        cf_dicts = []
+        for j in range(1, len(rows)):
+            delta = rows[j].net_deposits - rows[j - 1].net_deposits
+            if abs(delta) > 0.50:
+                cf_dicts.append({"date": rows[j].date, "amount": delta})
+        first_date_str = str(rows[0].date)
+
+        _sym_live_cache[cache_key] = {
+            "ts": time.time(),
+            "daily_dicts": daily_dicts,
+            "cf_dicts": cf_dicts,
+            "first_date_str": first_date_str,
+        }
+
+    # Deep-copy and append/replace today
+    series = [dict(d) for d in daily_dicts]
+    cf = list(cf_dicts)
+
+    if series and str(series[-1]["date"]) == today_str:
+        series[-1]["portfolio_value"] = live_pv
+        series[-1]["net_deposits"] = live_nd
+    else:
+        last_nd = series[-1]["net_deposits"] if series else 0.0
+        deposit_delta = live_nd - last_nd
+        if abs(deposit_delta) > 0.50:
+            cf.append({"date": today, "amount": deposit_delta})
+        series.append({"date": today_str, "portfolio_value": live_pv, "net_deposits": live_nd})
+
+    settings = get_settings()
+    m = compute_latest_metrics(series, cf, risk_free_rate=settings.risk_free_rate)
+    if not m:
+        raise HTTPException(404, "Could not compute live metrics.")
+
+    return {
+        "symphony_id": symphony_id,
+        "account_id": account_id,
+        "period": period or "ALL",
+        "start_date": first_date_str,
+        "end_date": today_str,
+        "portfolio_value": round(live_pv, 2),
+        "net_deposits": round(live_nd, 2),
+        "total_return_dollars": m.get("total_return_dollars", 0),
+        "cumulative_return_pct": m.get("cumulative_return_pct", 0),
+        "time_weighted_return": m.get("time_weighted_return", 0),
+        "money_weighted_return": m.get("money_weighted_return", 0),
+        "money_weighted_return_period": m.get("money_weighted_return_period", 0),
+        "cagr": m.get("cagr", 0),
+        "annualized_return": m.get("annualized_return", 0),
+        "sharpe_ratio": m.get("sharpe_ratio", 0),
+        "sortino_ratio": m.get("sortino_ratio", 0),
+        "calmar_ratio": m.get("calmar_ratio", 0),
+        "max_drawdown": m.get("max_drawdown", 0),
+        "current_drawdown": m.get("current_drawdown", 0),
+        "annualized_volatility": m.get("annualized_volatility", 0),
+        "win_rate": m.get("win_rate", 0),
+        "num_wins": m.get("num_wins", 0),
+        "num_losses": m.get("num_losses", 0),
+        "best_day_pct": m.get("best_day_pct", 0),
+        "worst_day_pct": m.get("worst_day_pct", 0),
+        "profit_factor": m.get("profit_factor", 0),
+        "daily_return_pct": m.get("daily_return_pct", 0),
     }
 
 
