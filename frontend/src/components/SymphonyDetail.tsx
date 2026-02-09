@@ -304,13 +304,18 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
         if (pt.daily_return_pct > bestDay) { bestDay = pt.daily_return_pct; bestDayDate = pt.date; }
         if (pt.daily_return_pct < worstDay) { worstDay = pt.daily_return_pct; worstDayDate = pt.date; }
       }
-      // Find date of max drawdown
-      let peak = 0;
+      // Find date of max drawdown using deposit-adjusted equity curve (TWR)
+      let equity = 1;
+      let eqPeak = 1;
       let maxDd = 0;
-      for (const pt of filteredLiveData) {
-        if (pt.portfolio_value > peak) peak = pt.portfolio_value;
-        const dd = peak > 0 ? (pt.portfolio_value - peak) / peak : 0;
-        if (dd < maxDd) { maxDd = dd; maxDrawdownDate = pt.date; }
+      for (let j = 0; j < filteredLiveData.length; j++) {
+        if (j > 0) {
+          const r = filteredLiveData[j].daily_return_pct / 100;
+          equity *= (1 + r);
+        }
+        if (equity > eqPeak) eqPeak = equity;
+        const dd = eqPeak > 0 ? (equity / eqPeak - 1) : 0;
+        if (dd < maxDd) { maxDd = dd; maxDrawdownDate = filteredLiveData[j].date; }
       }
     }
 

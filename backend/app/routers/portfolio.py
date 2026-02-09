@@ -372,9 +372,9 @@ def get_performance(
         twr_cum *= (1 + daily_ret / 100)
         twr = (twr_cum - 1) * 100
 
-        # Drawdown from aggregated portfolio value
-        peak_pv = max(peak_pv, sum_pv)
-        drawdown = ((sum_pv - peak_pv) / peak_pv * 100) if peak_pv > 0 else 0
+        # Drawdown from deposit-adjusted equity curve (TWR), not raw portfolio value
+        peak_pv = max(peak_pv, twr_cum)
+        drawdown = ((twr_cum / peak_pv - 1) * 100) if peak_pv > 0 else 0
 
         # MWR: value-weighted average of per-account MWR
         total_weight = sum(last_pv.values())

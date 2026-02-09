@@ -19,6 +19,7 @@ from app.services.metrics import (
     compute_calmar,
     compute_win_loss,
     compute_all_metrics,
+    compute_latest_metrics,
     compute_performance_series,
 )
 
@@ -422,6 +423,145 @@ class TestComputePerformanceSeries:
 
     def test_empty(self):
         assert compute_performance_series([], []) == []
+
+
+# =====================================================================
+# Cross-validation: verify metrics are internally consistent
+# =====================================================================
+
+# =====================================================================
+# compute_latest_metrics (incremental)
+# =====================================================================
+
+class TestComputeLatestMetrics:
+    def test_matches_last_row_of_all_metrics(self, simple_series):
+        """compute_latest_metrics should produce the same result as the last row of compute_all_metrics."""
+        all_rows = compute_all_metrics(simple_series["daily_rows"], simple_series["cash_flows"])
+        latest = compute_latest_metrics(simple_series["daily_rows"], simple_series["cash_flows"])
+        assert latest is not None
+        for key in all_rows[-1]:
+            assert latest[key] == all_rows[-1][key], f"Mismatch on {key}: {latest[key]} != {all_rows[-1][key]}"
+
+    def test_matches_with_deposits(self, deposit_series):
+        all_rows = compute_all_metrics(deposit_series["daily_rows"], deposit_series["cash_flows"])
+        latest = compute_latest_metrics(deposit_series["daily_rows"], deposit_series["cash_flows"])
+        assert latest is not None
+        for key in all_rows[-1]:
+            assert latest[key] == pytest.approx(all_rows[-1][key], abs=1e-6), f"Mismatch on {key}"
+
+    def test_matches_with_drawdown(self, drawdown_series):
+        all_rows = compute_all_metrics(drawdown_series["daily_rows"], drawdown_series["cash_flows"])
+        latest = compute_latest_metrics(drawdown_series["daily_rows"], drawdown_series["cash_flows"])
+        assert latest is not None
+        for key in all_rows[-1]:
+            assert latest[key] == pytest.approx(all_rows[-1][key], abs=1e-6), f"Mismatch on {key}"
+
+    def test_empty(self):
+        assert compute_latest_metrics([], []) is None
+
+
+# =====================================================================
+# compute_mwr — IRR accuracy
+# =====================================================================
+
+class TestComputeMWR_IRR:
+    def test_known_irr_no_flows(self):
+        """10% return over 1 year with no flows → IRR should be ~10%."""
+        d0 = date(2024, 1, 1)
+        d1 = d0 + timedelta(days=365)
+        ann, period = compute_mwr([d0, d1], [10000.0, 11000.0], {})
+        assert ann == pytest.approx(0.1, rel=1e-3)
+        assert period == pytest.approx(0.1, rel=1e-3)
+
+    def test_known_irr_with_flow(self):
+        """Invest $10k, add $5k at midpoint, end at $16k.
+        True IRR should differ from Modified Dietz."""
+        d0 = date(2024, 1, 1)
+        d_mid = d0 + timedelta(days=183)
+        d1 = d0 + timedelta(days=365)
+        dates = [d0, d_mid, d1]
+        values = [10000.0, 15500.0, 16000.0]  # $5k deposit at midpoint
+        flows = {d_mid: 5000.0}
+        ann, period = compute_mwr(dates, values, flows)
+        # The portfolio gained $1000 on $15k average capital — IRR should be modest
+        assert ann > 0
+        assert ann < 0.15  # sanity bound
+
+    def test_large_deposit_before_drop(self):
+        """Large deposit before a loss should produce lower MWR than TWR."""
+        d0 = date(2024, 1, 1)
+        d1 = d0 + timedelta(days=100)
+        d2 = d0 + timedelta(days=200)
+        # Start $10k, deposit $90k on day 100, portfolio drops to $90k on day 200
+        dates = [d0, d1, d2]
+        values = [10000.0, 100500.0, 90000.0]  # day 1: 10000*1.005 + 90000 deposit
+        flows = {d1: 90000.0}
+        ann, period = compute_mwr(dates, values, flows)
+        # Lost money on $100k base → negative MWR
+        assert period < 0
+
+    def test_solver_fallback(self):
+        """Edge case: zero-value start should not crash (falls back to Dietz)."""
+        d0 = date(2024, 1, 1)
+        d1 = d0 + timedelta(days=30)
+        # Start at 0, deposit on day 0 isn't in ext_flows, end at 100
+        dates = [d0, d1]
+        values = [0.0, 100.0]
+        flows = {}
+        ann, period = compute_mwr(dates, values, flows)
+        assert isinstance(ann, float)
+        assert isinstance(period, float)
+
+
+# =====================================================================
+# Cross-validation: verify metrics are internally consistent
+# =====================================================================
+
+# =====================================================================
+# Drawdown — deposit/withdrawal immunity
+# =====================================================================
+
+class TestDrawdownCashFlowImmunity:
+    def test_withdrawal_not_counted_as_drawdown(self):
+        """A withdrawal should NOT appear as a drawdown.
+
+        Scenario: $10k grows to $11k (+10%), then $3k is withdrawn (value drops
+        to ~$8.08k).  The investment itself never lost money, so max drawdown
+        should be 0% (or very close), not -26%.
+        """
+        # Day 0: invest $10k
+        # Day 1: grows 10% to $11k
+        # Day 2: withdraw $3k, portfolio continues to grow 1% → (11000-3000)*1.01 = 8080
+        pv  = [10000.0, 11000.0, 8080.0]
+        dep = [10000.0, 10000.0, 7000.0]  # net_deposits drops by $3k withdrawal
+        rows = [
+            {"date": date(2024, 1, 2) + timedelta(days=i), "portfolio_value": pv[i], "net_deposits": dep[i]}
+            for i in range(3)
+        ]
+        results = compute_all_metrics(rows, [{"date": date(2024, 1, 4), "amount": -3000.0}])
+        last = results[-1]
+        # Investment performance: +10%, then +1% → no drawdown from peak
+        # Raw pv would show 8080/11000 - 1 = -26.5%  (WRONG)
+        # Equity curve: 1.0 → 1.10 → 1.111 → no drawdown
+        assert last["max_drawdown"] == pytest.approx(0.0, abs=0.01)
+
+    def test_deposit_does_not_inflate_drawdown(self):
+        """A deposit followed by a small loss should show correct drawdown.
+
+        Scenario: $10k, deposit $10k (now $20k), then lose 5% → $19k.
+        Drawdown should be -5%, not based on raw peak.
+        """
+        pv  = [10000.0, 20000.0, 19000.0]
+        dep = [10000.0, 20000.0, 20000.0]
+        rows = [
+            {"date": date(2024, 1, 2) + timedelta(days=i), "portfolio_value": pv[i], "net_deposits": dep[i]}
+            for i in range(3)
+        ]
+        results = compute_all_metrics(rows, [{"date": date(2024, 1, 3), "amount": 10000.0}])
+        last = results[-1]
+        # Daily returns: day0=0, day1=(20000-10000-10000)/10000=0%, day2=(19000-20000-0)/20000=-5%
+        # Equity curve: 1.0 → 1.0 → 0.95 → drawdown = -5%
+        assert last["max_drawdown"] == pytest.approx(-5.0, abs=0.1)
 
 
 # =====================================================================

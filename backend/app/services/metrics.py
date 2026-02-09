@@ -12,6 +12,7 @@ from datetime import date
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from scipy.optimize import brentq
 
 logger = logging.getLogger(__name__)
 
@@ -57,29 +58,17 @@ def compute_twr(daily_returns: List[float]) -> float:
     return twr - 1.0
 
 
-def compute_mwr(
-    dates_list: List[date],
-    pv_list: List[float],
+def _modified_dietz(
+    pv_start: float,
+    pv_end: float,
+    total_days: int,
     ext_flows: Dict[date, float],
+    d0: date,
+    dn: date,
 ) -> Tuple[float, float]:
-    """Money-weighted return via Modified Dietz.
-
-    Returns ``(annualized_mwr, period_mwr)`` as decimals.
-    Falls back to ``(0, 0)`` on degenerate inputs.
-    """
-    if len(dates_list) < 2:
-        return 0.0, 0.0
-
-    d0, dn = dates_list[0], dates_list[-1]
-    total_days = (dn - d0).days
-    if total_days <= 0:
-        return 0.0, 0.0
-
-    pv_start = pv_list[0]
-    pv_end = pv_list[-1]
+    """Modified Dietz fallback.  Returns ``(annualized, period)``."""
     total_flow = 0.0
     weighted_flow = 0.0
-
     for d, amt in ext_flows.items():
         if d0 <= d <= dn:
             total_flow += amt
@@ -91,13 +80,55 @@ def compute_mwr(
         return 0.0, 0.0
 
     mdr = (pv_end - pv_start - total_flow) / denom
-
-    annualized = mdr
-    if total_days > 0:
-        years = total_days / 365.25
-        if mdr > -1:
-            annualized = (1 + mdr) ** (1 / years) - 1
+    years = total_days / 365.25
+    annualized = (1 + mdr) ** (1 / years) - 1 if mdr > -1 else mdr
     return annualized, mdr
+
+
+def compute_mwr(
+    dates_list: List[date],
+    pv_list: List[float],
+    ext_flows: Dict[date, float],
+) -> Tuple[float, float]:
+    """Money-weighted return via true IRR (Brentq solver).
+
+    Falls back to Modified Dietz if the solver fails to converge.
+    Returns ``(annualized_mwr, period_mwr)`` as decimals.
+    """
+    if len(dates_list) < 2:
+        return 0.0, 0.0
+
+    d0, dn = dates_list[0], dates_list[-1]
+    total_days = (dn - d0).days
+    if total_days <= 0:
+        return 0.0, 0.0
+
+    pv_start = pv_list[0]
+    pv_end = pv_list[-1]
+    years = total_days / 365.25
+
+    # Collect flows within the window
+    flows_in_window: List[Tuple[float, float]] = []  # (years_remaining, amount)
+    for d, amt in ext_flows.items():
+        if d0 < d <= dn:
+            t = (dn - d).days / 365.25
+            flows_in_window.append((t, amt))
+
+    # NPV equation: 0 = -pv_start*(1+r)^T - sum(cf*(1+r)^t) + pv_end
+    def npv(r: float) -> float:
+        total = -pv_start * (1 + r) ** years
+        for t, amt in flows_in_window:
+            total -= amt * (1 + r) ** t
+        total += pv_end
+        return total
+
+    try:
+        irr = brentq(npv, -0.999, 10.0, maxiter=200, xtol=1e-12)
+        period_return = (1 + irr) ** years - 1
+        return irr, period_return
+    except (ValueError, RuntimeError):
+        # Solver failed — fall back to Modified Dietz
+        return _modified_dietz(pv_start, pv_end, total_days, ext_flows, d0, dn)
 
 
 def compute_cagr(pv_start: float, pv_end: float, days_elapsed: int) -> float:
@@ -225,7 +256,113 @@ def compute_win_loss(daily_returns: List[float]) -> Dict:
 
 
 # =====================================================================
-# Orchestrator — same signature and output as the original
+# Single-day metric computation (shared by full + incremental paths)
+# =====================================================================
+
+def _compute_row(
+    i: int,
+    pv: List[float],
+    dates: List[date],
+    deposits: List[float],
+    daily_rets: List[float],
+    ext_flows: Dict[date, float],
+    rf_daily: float,
+) -> Dict:
+    """Compute the full metric dict for day *i* given pre-computed arrays.
+
+    This is O(N) for the statistics that need the full returns window
+    (volatility, Sharpe, Sortino, win/loss) and O(1) for everything else
+    except MWR which is one IRR solve.
+    """
+    row: Dict = {"date": dates[i]}
+    rets_window = daily_rets[1 : i + 1]  # returns excluding day-0
+    days_elapsed = (dates[i] - dates[0]).days
+
+    # --- Basic returns ---
+    row["daily_return_pct"] = round(daily_rets[i] * 100, 4)
+    row["total_return_dollars"] = round(pv[i] - deposits[i], 2)
+    row["cumulative_return_pct"] = round(compute_cumulative_return(pv[i], deposits[i]) * 100, 4)
+
+    # --- TWR (chain-link full series) ---
+    twr_dec = compute_twr(daily_rets[: i + 1])
+    row["time_weighted_return"] = round(twr_dec * 100, 4)
+
+    # --- CAGR / Annualized ---
+    row["cagr"] = round(compute_cagr(pv[0], pv[i], days_elapsed) * 100, 4)
+    ann_ret = compute_annualized_return(twr_dec, days_elapsed)
+    row["annualized_return"] = round(ann_ret, 4)
+
+    # --- MWR (one IRR solve) ---
+    mwr_ann, mwr_period = compute_mwr(dates[: i + 1], pv[: i + 1], ext_flows)
+    row["money_weighted_return"] = round(mwr_ann * 100, 4)
+    row["money_weighted_return_period"] = round(mwr_period * 100, 4)
+
+    # --- Win / Loss ---
+    wl = compute_win_loss(rets_window)
+    row["win_rate"] = round(wl["win_rate"] * 100, 2)
+    row["num_wins"] = wl["num_wins"]
+    row["num_losses"] = wl["num_losses"]
+    row["avg_win_pct"] = round(wl["avg_win"] * 100, 4)
+    row["avg_loss_pct"] = round(wl["avg_loss"] * 100, 4)
+
+    # --- Drawdown (from deposit-adjusted equity curve, not raw pv) ---
+    equity = [1.0]
+    for r in daily_rets[1 : i + 1]:
+        equity.append(equity[-1] * (1 + r))
+    max_dd, cur_dd = compute_drawdown(equity)
+    row["max_drawdown"] = round(max_dd * 100, 4)
+    row["current_drawdown"] = round(cur_dd * 100, 4)
+
+    # --- Volatility ---
+    row["annualized_volatility"] = round(compute_volatility(rets_window) * 100, 4)
+
+    # --- Sharpe ---
+    row["sharpe_ratio"] = round(compute_sharpe(rets_window, rf_daily), 4)
+
+    # --- Sortino ---
+    row["sortino_ratio"] = round(compute_sortino(rets_window, rf_daily), 4)
+
+    # --- Calmar (full-precision intermediates) ---
+    max_dd_full = max_dd * 100
+    row["calmar_ratio"] = round(
+        compute_calmar(ann_ret, max_dd_full), 4
+    ) if days_elapsed > 0 else 0.0
+
+    # --- Best / Worst day ---
+    row["best_day_pct"] = round(wl["best_day"] * 100, 4) if rets_window else 0.0
+    row["worst_day_pct"] = round(wl["worst_day"] * 100, 4) if rets_window else 0.0
+
+    # --- Profit Factor ---
+    row["profit_factor"] = round(wl["profit_factor"], 4)
+
+    return row
+
+
+def _prepare_arrays(
+    daily_rows: List[Dict],
+    cash_flow_events: List[Dict],
+    risk_free_rate: float,
+) -> Tuple[List[float], List[date], List[float], List[float], Dict[date, float], float]:
+    """Extract arrays and ext_flows from raw dicts.  Shared setup."""
+    pv = [r["portfolio_value"] for r in daily_rows]
+    dates = [
+        r["date"] if isinstance(r["date"], date) else date.fromisoformat(str(r["date"]))
+        for r in daily_rows
+    ]
+    deposits = [r["net_deposits"] for r in daily_rows]
+    daily_rets = compute_daily_returns(pv, deposits)
+
+    ext_flows: Dict[date, float] = {}
+    for cf in cash_flow_events:
+        d = cf["date"] if isinstance(cf["date"], date) else date.fromisoformat(str(cf["date"]))
+        ext_flows[d] = ext_flows.get(d, 0) + cf["amount"]
+
+    rf_daily = (1 + risk_free_rate) ** (1 / 252) - 1
+    return pv, dates, deposits, daily_rets, ext_flows, rf_daily
+
+
+# =====================================================================
+# Orchestrator — full backfill (computes every day)
 # =====================================================================
 
 def compute_all_metrics(
@@ -250,86 +387,39 @@ def compute_all_metrics(
     if not daily_rows:
         return []
 
-    n = len(daily_rows)
-    pv = [r["portfolio_value"] for r in daily_rows]
-    dates = [
-        r["date"] if isinstance(r["date"], date) else date.fromisoformat(str(r["date"]))
-        for r in daily_rows
+    pv, dates, deposits, daily_rets, ext_flows, rf_daily = _prepare_arrays(
+        daily_rows, cash_flow_events, risk_free_rate
+    )
+
+    return [
+        _compute_row(i, pv, dates, deposits, daily_rets, ext_flows, rf_daily)
+        for i in range(len(daily_rows))
     ]
-    deposits = [r["net_deposits"] for r in daily_rows]
 
-    # Pre-compute full daily returns series
-    daily_rets = compute_daily_returns(pv, deposits)
 
-    # Build external flows lookup for MWR
-    ext_flows: Dict[date, float] = {}
-    for cf in cash_flow_events:
-        d = cf["date"] if isinstance(cf["date"], date) else date.fromisoformat(str(cf["date"]))
-        ext_flows[d] = ext_flows.get(d, 0) + cf["amount"]
+# =====================================================================
+# Incremental — compute only the latest day's metrics
+# =====================================================================
 
-    rf_daily = (1 + risk_free_rate) ** (1 / 252) - 1
+def compute_latest_metrics(
+    daily_rows: List[Dict],
+    cash_flow_events: List[Dict],
+    risk_free_rate: float = 0.05,
+) -> Optional[Dict]:
+    """Compute metrics for only the **last** day in *daily_rows*.
 
-    results: List[Dict] = []
-    for i in range(n):
-        row: Dict = {"date": dates[i]}
-        rets_window = daily_rets[1 : i + 1]  # returns excluding day-0
-        days_elapsed = (dates[i] - dates[0]).days
+    Uses the full history for statistics (Sharpe, Sortino, volatility,
+    win/loss, drawdown) but only runs one IRR solve and one TWR chain-link.
+    Returns ``None`` if *daily_rows* is empty.
+    """
+    if not daily_rows:
+        return None
 
-        # --- Basic returns ---
-        row["daily_return_pct"] = round(daily_rets[i] * 100, 4)
-        row["total_return_dollars"] = round(pv[i] - deposits[i], 2)
-        row["cumulative_return_pct"] = round(compute_cumulative_return(pv[i], deposits[i]) * 100, 4)
+    pv, dates, deposits, daily_rets, ext_flows, rf_daily = _prepare_arrays(
+        daily_rows, cash_flow_events, risk_free_rate
+    )
 
-        # --- TWR ---
-        twr_dec = compute_twr(daily_rets[: i + 1])
-        row["time_weighted_return"] = round(twr_dec * 100, 4)
-
-        # --- CAGR / Annualized ---
-        row["cagr"] = round(compute_cagr(pv[0], pv[i], days_elapsed) * 100, 4)
-        row["annualized_return"] = round(compute_annualized_return(twr_dec, days_elapsed), 4)
-
-        # --- MWR ---
-        mwr_ann, mwr_period = compute_mwr(dates[: i + 1], pv[: i + 1], ext_flows)
-        row["money_weighted_return"] = round(mwr_ann * 100, 4)
-        row["money_weighted_return_period"] = round(mwr_period * 100, 4)
-
-        # --- Win / Loss ---
-        wl = compute_win_loss(rets_window)
-        row["win_rate"] = round(wl["win_rate"] * 100, 2)
-        row["num_wins"] = wl["num_wins"]
-        row["num_losses"] = wl["num_losses"]
-        row["avg_win_pct"] = round(wl["avg_win"] * 100, 4)
-        row["avg_loss_pct"] = round(wl["avg_loss"] * 100, 4)
-
-        # --- Drawdown ---
-        max_dd, cur_dd = compute_drawdown(pv[: i + 1])
-        row["max_drawdown"] = round(max_dd * 100, 4)
-        row["current_drawdown"] = round(cur_dd * 100, 4)
-
-        # --- Volatility ---
-        row["annualized_volatility"] = round(compute_volatility(rets_window) * 100, 4)
-
-        # --- Sharpe ---
-        row["sharpe_ratio"] = round(compute_sharpe(rets_window, rf_daily), 4)
-
-        # --- Sortino ---
-        row["sortino_ratio"] = round(compute_sortino(rets_window, rf_daily), 4)
-
-        # --- Calmar ---
-        row["calmar_ratio"] = round(
-            compute_calmar(row["annualized_return"], row["max_drawdown"]), 4
-        ) if days_elapsed > 0 else 0.0
-
-        # --- Best / Worst day ---
-        row["best_day_pct"] = round(wl["best_day"] * 100, 4) if rets_window else 0.0
-        row["worst_day_pct"] = round(wl["worst_day"] * 100, 4) if rets_window else 0.0
-
-        # --- Profit Factor ---
-        row["profit_factor"] = round(wl["profit_factor"], 4)
-
-        results.append(row)
-
-    return results
+    return _compute_row(len(daily_rows) - 1, pv, dates, deposits, daily_rets, ext_flows, rf_daily)
 
 
 # =====================================================================
@@ -364,13 +454,13 @@ def compute_performance_series(
 
     results: List[Dict] = []
     twr_cum = 1.0
-    peak = 0.0
+    equity_peak = 1.0
 
     for i in range(len(daily_rows)):
         if i > 0:
             twr_cum *= (1 + daily_rets[i])
-        peak = max(peak, pv[i])
-        dd = ((pv[i] / peak) - 1) if peak > 0 else 0.0
+        equity_peak = max(equity_peak, twr_cum)
+        dd = ((twr_cum / equity_peak) - 1) if equity_peak > 0 else 0.0
 
         cum_ret = compute_cumulative_return(pv[i], deposits[i])
         mwr_ann, mwr_period = compute_mwr(dates[: i + 1], pv[: i + 1], ext_flows)

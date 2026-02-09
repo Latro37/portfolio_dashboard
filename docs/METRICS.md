@@ -184,52 +184,63 @@ def compute_twr(daily_returns):
 
 ### 4. Money-Weighted Return (MWR)
 
-**What it is:** The return that accounts for the **timing and size of your cash flows**. Implemented using the **Modified Dietz method**, which weights each deposit or withdrawal by the fraction of the measurement period it was invested. This is an approximation of the Internal Rate of Return (IRR).
+**What it is:** The return that accounts for the **timing and size of your cash flows**. Implemented using the **true Internal Rate of Return (IRR)** solved numerically via Brent's method (`scipy.optimize.brentq`). If the solver fails to converge (rare edge cases), it falls back to the Modified Dietz approximation.
 
-**Why it matters:** MWR reflects the actual investor experience. If you invested heavily before a market rally, your MWR will be higher than TWR. If you deposited a large sum right before a crash, your MWR will be lower. Financial advisors use MWR to show clients their personal rate of return, while TWR evaluates the advisor's strategy selection.
+**Why it matters:** MWR reflects the actual investor experience. If you invested heavily before a market rally, your MWR will be higher than TWR. If you deposited a large sum right before a crash, your MWR will be lower. Financial advisors use MWR to show clients their personal rate of return, while TWR evaluates the advisor's strategy selection. Bloomberg, Morningstar, and institutional performance systems all use true IRR for MWR.
 
 **How to interpret:**
 - **MWR > TWR:** You timed your deposits well (more money invested during gains)
 - **MWR < TWR:** You timed your deposits poorly (more money invested during losses)
 - **MWR ≈ TWR:** Your deposits were relatively evenly distributed or small relative to the portfolio
 
-**Formula (Modified Dietz):**
+**Formula (True IRR):**
+
+The IRR is the annual rate `r` that satisfies the NPV equation:
 
 ```
-MDR = (V_end - V_start - Σ CF_i) / (V_start + Σ(CF_i × W_i))
+0 = -V_start × (1+r)^T  -  Σ CF_i × (1+r)^t_i  +  V_end
 
 where:
-  CF_i  = cash flow amount on day i
-  W_i   = (total_days - days_since_flow_i) / total_days   (time-weight)
+  T    = total years in the measurement period
+  CF_i = cash flow amount on day i
+  t_i  = years remaining from flow date to end date
 
-Annualized:
-  MWR_annual = (1 + MDR) ^ (365.25 / total_days) - 1
+Solve for r using Brent's method (bracket: -0.999 to 10.0)
+Period return = (1 + r)^T - 1
 ```
 
-The denominator represents the "average capital at risk" — early deposits get more weight because they were invested longer.
+Unlike the Modified Dietz approximation (which assumes linear returns within the period), true IRR assumes **compounding** — making it more accurate for longer periods and large cash flows.
+
+**Fallback (Modified Dietz):** If Brent's method fails (e.g., no root in the bracket, degenerate inputs), the implementation falls back to Modified Dietz: `MDR = (V_end - V_start - Σ CF_i) / (V_start + Σ(CF_i × W_i))`.
 
 **Implementation:** `compute_mwr(dates_list, pv_list, ext_flows)` → `(annualized, period)`
 
 ```python
-# backend/app/services/metrics.py, line 60-100
+# backend/app/services/metrics.py
 def compute_mwr(dates_list, pv_list, ext_flows):
-    d0, dn = dates_list[0], dates_list[-1]
-    total_days = (dn - d0).days
+    # ... setup: d0, dn, years, pv_start, pv_end ...
 
-    total_flow = 0.0
-    weighted_flow = 0.0
+    # Collect flows within the window
+    flows_in_window = []  # (years_remaining, amount)
     for d, amt in ext_flows.items():
-        if d0 <= d <= dn:
-            total_flow += amt
-            w = (dn - d).days / total_days
-            weighted_flow += amt * w
+        if d0 < d <= dn:
+            t = (dn - d).days / 365.25
+            flows_in_window.append((t, amt))
 
-    denom = pv_start + weighted_flow
-    mdr = (pv_end - pv_start - total_flow) / denom
+    # NPV equation
+    def npv(r):
+        total = -pv_start * (1 + r) ** years
+        for t, amt in flows_in_window:
+            total -= amt * (1 + r) ** t
+        total += pv_end
+        return total
 
-    years = total_days / 365.25
-    annualized = (1 + mdr) ** (1 / years) - 1
-    return annualized, mdr
+    try:
+        irr = brentq(npv, -0.999, 10.0, maxiter=200, xtol=1e-12)
+        period_return = (1 + irr) ** years - 1
+        return irr, period_return
+    except (ValueError, RuntimeError):
+        return _modified_dietz(...)  # fallback
 ```
 
 **Stored as:** `money_weighted_return` (annualized %), `money_weighted_return_period` (period %)
@@ -772,7 +783,9 @@ When period is ALL, these are served from `summary_metrics` pre-computed on the 
 | **Drawdown** | The peak-to-trough decline in portfolio value, expressed as a negative percentage |
 | **Excess return** | Return above the risk-free rate: `r - rf` |
 | **GIPS** | Global Investment Performance Standards — CFA Institute guidelines for reporting investment returns |
-| **Modified Dietz** | An approximation of IRR that time-weights external cash flows to estimate money-weighted return |
+| **Brent's method** | A root-finding algorithm (`scipy.optimize.brentq`) used to solve the IRR equation numerically |
+| **IRR** | Internal Rate of Return — the discount rate that makes NPV of all cash flows equal zero; the true MWR |
+| **Modified Dietz** | A closed-form approximation of IRR that time-weights external cash flows; used as a fallback when the solver fails |
 | **Risk-free rate** | The return on a "riskless" investment (typically short-term U.S. Treasury bills); default: 5% annual |
 | **Rolling metric** | A metric computed over an expanding window from the start date to each successive day |
 | **Symphony** | A Composer.trade strategy unit — an automated portfolio managed by algorithmic rules |

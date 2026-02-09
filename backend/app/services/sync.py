@@ -15,7 +15,7 @@ from app.models import (
     SymphonyDailyPortfolio, SymphonyDailyMetrics,
 )
 from app.services.holdings import reconstruct_holdings
-from app.services.metrics import compute_all_metrics
+from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -604,8 +604,9 @@ def _sync_symphony_daily_incremental(db: Session, client: ComposerClient, accoun
 def _recompute_symphony_metrics(db: Session, account_id: str):
     """Compute daily metrics for each symphony from stored SymphonyDailyPortfolio data.
 
-    Runs compute_all_metrics on the full stored series per symphony but only
-    persists rows that are new or updated (today).  Past rows are immutable.
+    Uses incremental computation when possible: if metrics already exist for all
+    days except the latest, only the latest day is computed (one IRR solve instead
+    of N).  Falls back to full backfill when metrics are missing for earlier days.
     """
     # Get distinct symphony IDs for this account
     sym_ids = [
@@ -637,16 +638,39 @@ def _recompute_symphony_metrics(db: Session, account_id: str):
             if abs(delta) > 0.50:
                 cf_dicts.append({"date": portfolio_rows[j].date, "amount": delta})
 
-        metrics = compute_all_metrics(daily_dicts, cf_dicts, None, settings.risk_free_rate)
+        # Check if we can do incremental (metrics exist for all days except the last)
+        last_metric_date = db.query(func.max(SymphonyDailyMetrics.date)).filter_by(
+            account_id=account_id, symphony_id=sym_id,
+        ).scalar()
 
-        # Only persist rows that don't already exist (immutable history)
-        for m in metrics:
+        latest_portfolio_date = portfolio_rows[-1].date
+        second_latest_date = portfolio_rows[-2].date if len(portfolio_rows) >= 2 else None
+
+        use_incremental = (
+            last_metric_date is not None
+            and second_latest_date is not None
+            and last_metric_date >= second_latest_date
+            and last_metric_date < latest_portfolio_date
+        )
+
+        if use_incremental:
+            # Incremental: compute only the latest day's metrics
+            m = compute_latest_metrics(daily_dicts, cf_dicts, settings.risk_free_rate)
+            if m:
+                metrics_to_persist = [m]
+                logger.debug("Incremental metrics for symphony %s: 1 new day", sym_id)
+        else:
+            # Full backfill: compute all days
+            metrics_to_persist = compute_all_metrics(daily_dicts, cf_dicts, None, settings.risk_free_rate)
+            logger.debug("Full backfill metrics for symphony %s: %d days", sym_id, len(metrics_to_persist))
+
+        # Persist (upsert)
+        for m in metrics_to_persist:
             d = m["date"]
             existing = db.query(SymphonyDailyMetrics).filter_by(
                 account_id=account_id, symphony_id=sym_id, date=d
             ).first()
             if existing:
-                # Update today's row (or re-backfill)
                 for k, v in m.items():
                     if k != "date":
                         setattr(existing, k, v)
