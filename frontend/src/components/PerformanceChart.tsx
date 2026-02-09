@@ -102,7 +102,7 @@ export function PerformanceChart({
           <div className="flex rounded-lg bg-muted p-0.5">
             <button
               onClick={() => setMode("portfolio")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "portfolio"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -112,7 +112,7 @@ export function PerformanceChart({
             </button>
             <button
               onClick={() => setMode("twr")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "twr"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -123,7 +123,7 @@ export function PerformanceChart({
             {!hideMWR && (
               <button
                 onClick={() => setMode("mwr")}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                   mode === "mwr"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
@@ -134,7 +134,7 @@ export function PerformanceChart({
             )}
             <button
               onClick={() => setMode("drawdown")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "drawdown"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -158,7 +158,7 @@ export function PerformanceChart({
                       onStartDateChange("");
                       onEndDateChange("");
                     }}
-                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                       period === p && !isCustomRange
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
@@ -192,7 +192,7 @@ export function PerformanceChart({
                       onStartDateChange("");
                       onEndDateChange("");
                     }}
-                    className="text-xs text-muted-foreground hover:text-foreground"
+                    className="cursor-pointer text-xs text-muted-foreground hover:text-foreground"
                   >
                     Clear
                   </button>

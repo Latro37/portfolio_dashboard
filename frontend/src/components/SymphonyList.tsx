@@ -1,12 +1,17 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import { SymphonyInfo } from "@/lib/api";
 import { InfoTooltip, TWR_TOOLTIP_TEXT } from "./InfoTooltip";
+import { RefreshCw } from "lucide-react";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 
 interface Props {
   symphonies: SymphonyInfo[];
   showAccountColumn: boolean;
   onSelect: (symphony: SymphonyInfo) => void;
+  onRefresh?: () => void | Promise<void>;
+  refreshLoading?: boolean;
 }
 
 function fmtDollar(v: number): string {
@@ -25,11 +30,37 @@ function colorVal(v: number): string {
   return "text-muted-foreground";
 }
 
-export function SymphonyList({ symphonies, showAccountColumn, onSelect }: Props) {
+export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefresh, refreshLoading }: Props) {
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  const wrappedRefresh = useCallback(async () => {
+    await onRefresh?.();
+    setLastRefreshed(new Date());
+  }, [onRefresh]);
+
+  useAutoRefresh(wrappedRefresh, onRefresh ? 60_000 : 999_999_999);
+
   if (!symphonies.length) {
     return (
       <div className="rounded-xl border border-border bg-card p-6">
-        <h3 className="mb-2 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
+          {onRefresh && (
+            <div className="flex items-center gap-3">
+              {lastRefreshed && (
+                <span className="text-xs text-muted-foreground">{lastRefreshed.toLocaleTimeString()}</span>
+              )}
+              <button
+                onClick={wrappedRefresh}
+                disabled={refreshLoading}
+                className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                title="Refresh symphonies"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+          )}
+        </div>
         <p className="text-sm text-muted-foreground">No active symphonies found.</p>
       </div>
     );
@@ -37,7 +68,24 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect }: Props)
 
   return (
     <div className="rounded-xl border border-border bg-card p-6">
-      <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
+        {onRefresh && (
+          <div className="flex items-center gap-3">
+            {lastRefreshed && (
+              <span className="text-xs text-muted-foreground">{lastRefreshed.toLocaleTimeString()}</span>
+            )}
+            <button
+              onClick={wrappedRefresh}
+              disabled={refreshLoading}
+              className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+              title="Refresh symphonies"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshLoading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        )}
+      </div>
       <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
         <table className="w-full text-sm">
           <thead>

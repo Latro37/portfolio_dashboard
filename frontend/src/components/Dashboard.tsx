@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo } from "@/lib/api";
 import { PortfolioHeader } from "./PortfolioHeader";
 import { PerformanceChart } from "./PerformanceChart";
@@ -33,7 +33,9 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [symphonies, setSymphonies] = useState<SymphonyInfo[]>([]);
   const [selectedSymphony, setSelectedSymphony] = useState<SymphonyInfo | null>(null);
+  const [symphonyScrollTo, setSymphonyScrollTo] = useState<"trade-preview" | undefined>(undefined);
   const [showMetricsGuide, setShowMetricsGuide] = useState(false);
+  const [symphoniesRefreshing, setSymphoniesRefreshing] = useState(false);
 
   // Resolve the account_id query param based on selection
   const resolvedAccountId = selectedCredential === "__all__"
@@ -175,6 +177,8 @@ export default function Dashboard() {
           summary={summary!}
           onSync={handleSync}
           syncing={syncing}
+          todayDollarChange={symphonies.length ? symphonies.reduce((sum, s) => sum + s.last_dollar_change, 0) : undefined}
+          todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
           accountSwitcher={
             accounts.length > 0 ? (
               <AccountSwitcher
@@ -216,11 +220,30 @@ export default function Dashboard() {
         <SymphonyList
           symphonies={symphonies}
           showAccountColumn={selectedCredential === "__all__" || selectedSubAccount === "all"}
-          onSelect={setSelectedSymphony}
+          onSelect={(sym) => { setSelectedSymphony(sym); setSymphonyScrollTo(undefined); }}
+          onRefresh={async () => {
+            setSymphoniesRefreshing(true);
+            try {
+              const syms = await api.getSymphonies(resolvedAccountId);
+              setSymphonies(syms);
+            } catch { /* ignore */ }
+            finally { setSymphoniesRefreshing(false); }
+          }}
+          refreshLoading={symphoniesRefreshing}
         />
 
         {/* Next Automated Trade Preview */}
-        <TradePreview accountId={resolvedAccountId} />
+        <TradePreview
+          accountId={resolvedAccountId}
+          portfolioValue={summary?.portfolio_value}
+          onSymphonyClick={(symphonyId) => {
+            const match = symphonies.find((s) => s.id === symphonyId);
+            if (match) {
+              setSelectedSymphony(match);
+              setSymphonyScrollTo("trade-preview");
+            }
+          }}
+        />
 
         {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
         <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />
@@ -229,7 +252,7 @@ export default function Dashboard() {
         <div className="pt-2 pb-4 text-center">
           <button
             onClick={() => setShowMetricsGuide(true)}
-            className="text-xs text-muted-foreground/60 hover:text-foreground transition-colors"
+            className="cursor-pointer text-xs text-muted-foreground/60 hover:text-foreground transition-colors"
           >
             Metrics Guide
           </button>
@@ -240,7 +263,8 @@ export default function Dashboard() {
       {selectedSymphony && (
         <SymphonyDetail
           symphony={selectedSymphony}
-          onClose={() => setSelectedSymphony(null)}
+          onClose={() => { setSelectedSymphony(null); setSymphonyScrollTo(undefined); }}
+          scrollToSection={symphonyScrollTo}
         />
       )}
 

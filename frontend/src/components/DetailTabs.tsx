@@ -134,7 +134,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                 <span>{txTotal.toLocaleString()} transactions</span>
                 <div className="flex gap-2">
                   <button
-                    className="rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
+                    className="cursor-pointer rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
                     disabled={txPage === 0}
                     onClick={() => loadTxPage(txPage - 1)}
                   >
@@ -142,7 +142,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                   </button>
                   <span>Page {txPage + 1} / {totalPages}</span>
                   <button
-                    className="rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
+                    className="cursor-pointer rounded px-2 py-1 hover:bg-muted disabled:opacity-30"
                     disabled={txPage >= totalPages - 1}
                     onClick={() => loadTxPage(txPage + 1)}
                   >

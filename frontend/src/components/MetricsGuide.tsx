@@ -34,7 +34,7 @@ export function MetricsGuide({ onClose }: Props) {
       <div className="relative mx-4 my-8 w-full max-w-4xl rounded-2xl border border-border bg-background shadow-2xl">
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 z-10 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+          className="cursor-pointer absolute right-4 top-4 z-10 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
         >
           <X className="h-5 w-5" />
         </button>

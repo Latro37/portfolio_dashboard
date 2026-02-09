@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { X, RefreshCw } from "lucide-react";
 import {
   api,
@@ -25,6 +25,7 @@ import { InfoTooltip, TWR_TOOLTIP_TEXT } from "./InfoTooltip";
 interface Props {
   symphony: SymphonyInfo;
   onClose: () => void;
+  scrollToSection?: "trade-preview";
 }
 
 type Tab = "live" | "backtest";
@@ -123,7 +124,7 @@ function periodStartDate(period: Period): string {
   }
 }
 
-export function SymphonyDetail({ symphony, onClose }: Props) {
+export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [tab, setTab] = useState<Tab>("live");
   const [chartMode, setChartMode] = useState<ChartMode>("portfolio");
   const [liveData, setLiveData] = useState<PerformancePoint[]>([]);
@@ -134,6 +135,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   const [tradePreview, setTradePreview] = useState<SymphonyTradePreview | null>(null);
   const [loadingTradePreview, setLoadingTradePreview] = useState(false);
   const [tradePreviewRefreshedAt, setTradePreviewRefreshedAt] = useState<Date | null>(null);
+  const tradePreviewRef = useRef<HTMLDivElement>(null);
   const [period, setPeriod] = useState<Period>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -191,6 +193,19 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
   useEffect(() => {
     fetchTradePreview();
   }, [s.id, s.account_id]);
+
+  // Auto-refresh trade preview every 60s
+  useEffect(() => {
+    const id = setInterval(fetchTradePreview, 60_000);
+    return () => clearInterval(id);
+  }, [s.id, s.account_id]);
+
+  // Scroll to trade preview section if requested
+  useEffect(() => {
+    if (scrollToSection === "trade-preview" && tradePreviewRef.current) {
+      tradePreviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [scrollToSection, tradePreview]);
 
   // Fetch live summary metrics from backend (period-aware or custom date range)
   useEffect(() => {
@@ -414,7 +429,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+          className="cursor-pointer absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
         >
           <X className="h-5 w-5" />
         </button>
@@ -485,7 +500,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
           <div className="flex rounded-lg bg-muted p-0.5 w-fit">
             <button
               onClick={() => setTab("live")}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
                 tab === "live" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -493,7 +508,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
             </button>
             <button
               onClick={() => setTab("backtest")}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
                 tab === "backtest" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -533,7 +548,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                       <button
                         key={m}
                         onClick={() => setChartMode(m)}
-                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                        className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                           active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
@@ -551,7 +566,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                     <button
                       key={p}
                       onClick={() => { setPeriod(p); setCustomStart(""); setCustomEnd(""); }}
-                      className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                         period === p && !customStart && !customEnd
                           ? "bg-background text-foreground shadow-sm"
                           : "text-muted-foreground hover:text-foreground"
@@ -570,7 +585,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                   <span className="text-muted-foreground">to</span>
                   <input type="date" value={customEnd || (filteredBacktestData.length ? filteredBacktestData[filteredBacktestData.length - 1].date : "")} onChange={(e) => setCustomEnd(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
                   {(customStart || customEnd) && (
-                    <button onClick={() => { setCustomStart(""); setCustomEnd(""); }} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>
+                    <button onClick={() => { setCustomStart(""); setCustomEnd(""); }} className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Clear</button>
                   )}
                 </div>
               </div>
@@ -786,7 +801,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
 
           {/* Trade Preview */}
           {tab === "live" && (
-            <div>
+            <div ref={tradePreviewRef}>
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
                   Next Automated Trade Preview
@@ -800,7 +815,7 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
                   <button
                     onClick={fetchTradePreview}
                     disabled={loadingTradePreview}
-                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
                     title="Refresh trade preview"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${loadingTradePreview ? "animate-spin" : ""}`} />
@@ -958,7 +973,7 @@ function HistoricalAllocations({ tdvmWeights, label, isLive }: { tdvmWeights: Re
           <button
             onClick={() => setPage(Math.max(0, page - 1))}
             disabled={page === 0}
-            className="rounded px-2 py-1 bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="cursor-pointer rounded px-2 py-1 bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             Prev
           </button>
@@ -968,7 +983,7 @@ function HistoricalAllocations({ tdvmWeights, label, isLive }: { tdvmWeights: Re
           <button
             onClick={() => setPage(Math.min(pageCount - 1, page + 1))}
             disabled={page >= pageCount - 1}
-            className="rounded px-2 py-1 bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="cursor-pointer rounded px-2 py-1 bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             Next
           </button>

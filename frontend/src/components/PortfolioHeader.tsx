@@ -10,11 +10,15 @@ interface Props {
   onSync: () => void;
   syncing: boolean;
   accountSwitcher?: ReactNode;
+  todayDollarChange?: number;
+  todayPctChange?: number;
 }
 
-export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher }: Props) {
-  const dailyPositive = summary.daily_return_pct >= 0;
+export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher, todayDollarChange, todayPctChange }: Props) {
   const totalPositive = summary.total_return_dollars >= 0;
+  const dayDollar = todayDollarChange ?? 0;
+  const dayPct = todayPctChange ?? summary.daily_return_pct;
+  const dayPositive = dayPct >= 0;
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -27,8 +31,10 @@ export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher }: P
           <span className={totalPositive ? "text-emerald-400" : "text-red-400"}>
             {totalPositive ? "+" : ""}${summary.total_return_dollars.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
-          <span className={dailyPositive ? "text-emerald-400" : "text-red-400"}>
-            {dailyPositive ? "+" : ""}{summary.daily_return_pct.toFixed(2)}% today
+          <span className={dayPositive ? "text-emerald-400" : "text-red-400"}>
+            {dayDollar >= 0 ? "+" : ""}${dayDollar.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {" "}
+            ({dayPct >= 0 ? "+" : ""}{dayPct.toFixed(2)}%) today
           </span>
         </div>
       </div>
@@ -41,7 +47,7 @@ export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher }: P
           size="sm"
           onClick={onSync}
           disabled={syncing}
-          className="gap-2"
+          className="cursor-pointer gap-2"
         >
           <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
           {syncing ? "Syncing" : "Update"}

@@ -1,21 +1,43 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { api, TradePreviewItem } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 
 interface Props {
   accountId?: string;
+  portfolioValue?: number;
+  onSymphonyClick?: (symphonyId: string) => void;
+}
+
+interface SymphonyBreakdown {
+  id: string;
+  name: string;
+  notional: number;
+  quantity: number;
+  prevWeight: number;
+  nextWeight: number;
+}
+
+interface GroupedRow {
+  ticker: string;
+  side: "BUY" | "SELL";
+  totalNotional: number;
+  totalQuantity: number;
+  totalPrevValue: number;
+  symphonies: SymphonyBreakdown[];
 }
 
 function fmtDollar(v: number): string {
   return "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function TradePreview({ accountId }: Props) {
+export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Props) {
   const [trades, setTrades] = useState<TradePreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   const fetchPreview = async () => {
@@ -36,26 +58,42 @@ export function TradePreview({ accountId }: Props) {
     if (accountId) fetchPreview();
   }, [accountId]);
 
-  // Group by ticker+side, aggregate notional/quantity, collect symphony names
+  useAutoRefresh(fetchPreview, 60_000);
+
+  const toggleExpand = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Group by ticker+side, aggregate notional/quantity, collect per-symphony details
   const grouped = useMemo(() => {
-    const map = new Map<string, {
-      ticker: string;
-      side: "BUY" | "SELL";
-      totalNotional: number;
-      totalQuantity: number;
-      symphonies: string[];
-      prevWeight: number;
-      nextWeight: number;
-    }>();
+    const map = new Map<string, GroupedRow>();
 
     for (const t of trades) {
       const key = `${t.ticker}|${t.side}`;
       const existing = map.get(key);
+      const breakdown: SymphonyBreakdown = {
+        id: t.symphony_id,
+        name: t.symphony_name,
+        notional: t.notional,
+        quantity: t.quantity,
+        prevWeight: t.prev_weight,
+        nextWeight: t.next_weight,
+      };
       if (existing) {
         existing.totalNotional += t.notional;
         existing.totalQuantity += t.quantity;
-        if (!existing.symphonies.includes(t.symphony_name)) {
-          existing.symphonies.push(t.symphony_name);
+        existing.totalPrevValue += t.prev_value;
+        const already = existing.symphonies.find((s) => s.id === t.symphony_id);
+        if (already) {
+          already.notional += t.notional;
+          already.quantity += t.quantity;
+        } else {
+          existing.symphonies.push(breakdown);
         }
       } else {
         map.set(key, {
@@ -63,9 +101,8 @@ export function TradePreview({ accountId }: Props) {
           side: t.side,
           totalNotional: t.notional,
           totalQuantity: t.quantity,
-          symphonies: [t.symphony_name],
-          prevWeight: t.prev_weight,
-          nextWeight: t.next_weight,
+          totalPrevValue: t.prev_value,
+          symphonies: [breakdown],
         });
       }
     }
@@ -74,6 +111,11 @@ export function TradePreview({ accountId }: Props) {
       (a, b) => Math.abs(b.totalNotional) - Math.abs(a.totalNotional)
     );
   }, [trades]);
+
+  const handleSymphonyClick = (e: React.MouseEvent, symphonyId: string) => {
+    e.stopPropagation();
+    onSymphonyClick?.(symphonyId);
+  };
 
   return (
     <div className="rounded-xl border border-border bg-card p-6">
@@ -90,7 +132,7 @@ export function TradePreview({ accountId }: Props) {
           <button
             onClick={fetchPreview}
             disabled={loading}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             title="Refresh trade preview"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -114,39 +156,86 @@ export function TradePreview({ accountId }: Props) {
       )}
 
       {grouped.length > 0 && (
-        <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
-          <table className="w-full text-sm">
+        <div className="max-h-[400px] overflow-y-auto overflow-x-auto">
+          <table className="w-full" style={{ minWidth: 600 }}>
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
-                <th className="pb-2 pr-3 font-medium">Ticker</th>
-                <th className="pb-2 pr-3 font-medium">Side</th>
-                <th className="pb-2 pr-3 font-medium text-right">Shares</th>
-                <th className="pb-2 pr-3 font-medium text-right">Notional</th>
-                <th className="pb-2 pr-3 font-medium text-right">Weight Change</th>
-                <th className="pb-2 font-medium">Symphony</th>
+                <th className="pb-2 pr-5 font-medium whitespace-nowrap">Ticker</th>
+                <th className="pb-2 px-5 font-medium whitespace-nowrap">Side</th>
+                <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Shares</th>
+                <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Notional</th>
+                <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Weight Change</th>
+                <th className="pb-2 pl-5 font-medium whitespace-nowrap w-full">Symphony</th>
               </tr>
             </thead>
-            <tbody>
-              {grouped.map((row, i) => (
-                <tr key={`${row.ticker}-${row.side}-${i}`} className="border-b border-border/50">
-                  <td className="py-2 pr-3 font-medium">{row.ticker}</td>
-                  <td className={`py-2 pr-3 font-semibold ${row.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
-                    {row.side}
-                  </td>
-                  <td className="py-2 pr-3 text-right whitespace-nowrap">
-                    {Math.abs(row.totalQuantity).toFixed(2)}
-                  </td>
-                  <td className={`py-2 pr-3 text-right whitespace-nowrap ${row.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
-                    {fmtDollar(row.totalNotional)}
-                  </td>
-                  <td className="py-2 pr-3 text-right whitespace-nowrap text-muted-foreground">
-                    {row.prevWeight.toFixed(1)}% → {row.nextWeight.toFixed(1)}%
-                  </td>
-                  <td className="py-2 text-muted-foreground truncate max-w-[200px]" title={row.symphonies.join(", ")}>
-                    {row.symphonies.join(", ")}
-                  </td>
-                </tr>
-              ))}
+            <tbody className="text-sm">
+              {grouped.map((row, i) => {
+                const key = `${row.ticker}|${row.side}`;
+                const isMulti = row.symphonies.length > 1;
+                const isOpen = expanded.has(key);
+                const acctPrevWeight = portfolioValue ? (row.totalPrevValue / portfolioValue) * 100 : 0;
+                const acctNextWeight = portfolioValue ? ((row.totalPrevValue + row.totalNotional) / portfolioValue) * 100 : 0;
+                return (
+                  <>
+                    <tr key={key} className="border-b border-border/50">
+                      <td className="py-2.5 pr-5 font-medium whitespace-nowrap">{row.ticker}</td>
+                      <td className={`py-2.5 px-5 font-semibold whitespace-nowrap ${row.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
+                        {row.side}
+                      </td>
+                      <td className="py-2.5 px-5 text-right whitespace-nowrap">
+                        {Math.abs(row.totalQuantity).toFixed(2)}
+                      </td>
+                      <td className={`py-2.5 px-5 text-right whitespace-nowrap ${row.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
+                        {fmtDollar(row.totalNotional)}
+                      </td>
+                      <td className="py-2.5 px-5 text-right whitespace-nowrap text-muted-foreground">
+                        {acctPrevWeight.toFixed(1)}% &rarr; {acctNextWeight.toFixed(1)}%
+                      </td>
+                      <td className="py-2.5 pl-5">
+                        {isMulti ? (
+                          <button
+                            onClick={() => toggleExpand(key)}
+                            className="cursor-pointer inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+                          >
+                            {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            Multiple Trades ({row.symphonies.length})
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => handleSymphonyClick(e, row.symphonies[0].id)}
+                            className="cursor-pointer text-muted-foreground hover:text-foreground truncate block w-full max-w-full transition-colors text-left"
+                            title={row.symphonies[0].name}
+                          >
+                            {row.symphonies[0].name}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {isMulti && isOpen && row.symphonies.map((sym) => (
+                      <tr key={`${key}-${sym.id}`} className="border-b border-border/20 bg-muted/20">
+                        <td className="py-1.5 pr-5" />
+                        <td className="py-1.5 px-5" />
+                        <td className="py-1.5 px-5" />
+                        <td className={`py-1.5 px-5 text-right whitespace-nowrap text-xs ${row.side === "BUY" ? "text-emerald-400/70" : "text-red-400/70"}`}>
+                          {fmtDollar(sym.notional)}
+                        </td>
+                        <td className="py-1.5 px-5 text-right whitespace-nowrap text-xs text-muted-foreground/70">
+                          {sym.prevWeight.toFixed(1)}% &rarr; {sym.nextWeight.toFixed(1)}%
+                        </td>
+                        <td className="py-1.5 pl-5">
+                          <button
+                            onClick={(e) => handleSymphonyClick(e, sym.id)}
+                            className="cursor-pointer text-xs text-muted-foreground hover:text-foreground truncate block w-full max-w-full transition-colors text-left"
+                            title={sym.name}
+                          >
+                            {sym.name}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>
