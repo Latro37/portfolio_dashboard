@@ -247,11 +247,25 @@ class TestComputeVolatility:
         assert vol == pytest.approx(expected, rel=1e-6)
 
     def test_flat_zero(self):
+        # All zeros are filtered out as non-trading days → too few returns
         assert compute_volatility([0.0, 0.0, 0.0]) == 0.0
 
     def test_too_few_returns(self):
         assert compute_volatility([0.01]) == 0.0
         assert compute_volatility([]) == 0.0
+
+    def test_excludes_non_trading_days(self):
+        """Zero-return (weekend/holiday) days should be excluded from vol."""
+        import numpy as np
+        trading_rets = [0.02, -0.01, 0.015, -0.005]
+        # Mix in weekend zeros — vol should be the same as trading-only
+        mixed = [0.02, 0.0, 0.0, -0.01, 0.015, 0.0, 0.0, -0.005]
+        vol_clean = compute_volatility(trading_rets)
+        vol_mixed = compute_volatility(mixed)
+        assert vol_clean == pytest.approx(vol_mixed, rel=1e-6)
+        # And both should match the numpy calculation on trading returns only
+        expected = float(np.std(trading_rets, ddof=1)) * math.sqrt(252)
+        assert vol_mixed == pytest.approx(expected, rel=1e-6)
 
 
 # =====================================================================
@@ -275,6 +289,14 @@ class TestComputeSharpe:
         sharpe = compute_sharpe(rets, 0.0)
         assert isinstance(sharpe, float)
 
+    def test_excludes_non_trading_days(self):
+        """Weekend zeros should not affect Sharpe."""
+        trading_rets = [0.02, -0.005, 0.015, 0.01, -0.002]
+        mixed = [0.02, 0.0, -0.005, 0.015, 0.0, 0.01, -0.002, 0.0]
+        sharpe_clean = compute_sharpe(trading_rets, 0.0002)
+        sharpe_mixed = compute_sharpe(mixed, 0.0002)
+        assert sharpe_clean == pytest.approx(sharpe_mixed, rel=1e-6)
+
 
 # =====================================================================
 # compute_sortino
@@ -292,6 +314,14 @@ class TestComputeSortino:
 
     def test_too_few(self):
         assert compute_sortino([0.01], 0.0002) == 0.0
+
+    def test_excludes_non_trading_days(self):
+        """Weekend zeros should not affect Sortino."""
+        trading_rets = [0.02, -0.01, 0.015, -0.005, 0.01]
+        mixed = [0.02, 0.0, -0.01, 0.015, 0.0, -0.005, 0.01, 0.0]
+        sortino_clean = compute_sortino(trading_rets, 0.0002)
+        sortino_mixed = compute_sortino(mixed, 0.0002)
+        assert sortino_clean == pytest.approx(sortino_mixed, rel=1e-6)
 
 
 # =====================================================================

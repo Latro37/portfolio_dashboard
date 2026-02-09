@@ -172,10 +172,15 @@ def compute_volatility(daily_returns: List[float]) -> float:
 
     *daily_returns* should NOT include the leading day-0 zero; pass
     ``daily_returns[1:]``.
+
+    Non-trading days (weekends/holidays with exactly 0.0 return) are
+    excluded so that only actual trading-day returns contribute to the
+    standard deviation, matching industry convention (√252 annualisation).
     """
-    if len(daily_returns) < 2:
+    trading = [r for r in daily_returns if r != 0.0]
+    if len(trading) < 2:
         return 0.0
-    vol = float(np.std(daily_returns, ddof=1))
+    vol = float(np.std(trading, ddof=1))
     return vol * math.sqrt(252)
 
 
@@ -183,13 +188,17 @@ def compute_sharpe(daily_returns: List[float], rf_daily: float) -> float:
     """Annualized Sharpe ratio.
 
     *daily_returns* should NOT include the leading day-0 zero.
+
+    Non-trading days (exactly 0.0 return) are excluded so that the
+    risk-adjusted ratio reflects actual trading-day performance only.
     """
-    if len(daily_returns) < 2:
+    trading = [r for r in daily_returns if r != 0.0]
+    if len(trading) < 2:
         return 0.0
-    vol = float(np.std(daily_returns, ddof=1))
+    vol = float(np.std(trading, ddof=1))
     if vol <= 0:
         return 0.0
-    excess = [r - rf_daily for r in daily_returns]
+    excess = [r - rf_daily for r in trading]
     return float(np.mean(excess)) / vol * math.sqrt(252)
 
 
@@ -197,14 +206,18 @@ def compute_sortino(daily_returns: List[float], rf_daily: float) -> float:
     """Annualized Sortino ratio.
 
     *daily_returns* should NOT include the leading day-0 zero.
+
+    Non-trading days (exactly 0.0 return) are excluded so that only
+    actual trading-day downside deviation is measured.
     """
-    if len(daily_returns) < 2:
+    trading = [r for r in daily_returns if r != 0.0]
+    if len(trading) < 2:
         return 0.0
-    downside = [min(r - rf_daily, 0) for r in daily_returns]
+    downside = [min(r - rf_daily, 0) for r in trading]
     downside_dev = float(np.std(downside, ddof=1)) if len(downside) > 1 else 0.0
     if downside_dev <= 0:
         return 0.0
-    excess_mean = float(np.mean([r - rf_daily for r in daily_returns]))
+    excess_mean = float(np.mean([r - rf_daily for r in trading]))
     return excess_mean / downside_dev * math.sqrt(252)
 
 

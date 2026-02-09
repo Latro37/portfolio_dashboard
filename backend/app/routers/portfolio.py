@@ -220,7 +220,7 @@ def get_summary(
             best_day_date = str(row["date"])
         if row["daily_return_pct"] == m["worst_day_pct"] and m["worst_day_pct"] != 0:
             worst_day_date = str(row["date"])
-        if row["max_drawdown"] == m["max_drawdown"] and m["max_drawdown"] != 0:
+        if row["current_drawdown"] == m["max_drawdown"] and m["max_drawdown"] != 0 and max_dd_date is None:
             max_dd_date = str(row["date"])
 
     total_pv = daily_series[-1]["portfolio_value"]

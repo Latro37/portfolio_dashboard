@@ -416,20 +416,24 @@ max_dd, cur_dd = compute_drawdown(equity)
 
 **Why √252?** Returns are assumed to be independent and identically distributed. Under this assumption, the variance of a sum of N independent variables is N times the variance of one. So annual variance = 252 × daily variance, and annual std dev = √252 × daily std dev. This is a simplification — real returns exhibit autocorrelation and fat tails — but it's the industry standard.
 
+**Trading days only:** Non-trading days (weekends and holidays) where the portfolio value is unchanged produce a 0.0% daily return. These are **excluded** before computing standard deviation. Including them would artificially reduce measured volatility (more data points clustered at zero) while still annualizing with √252, which assumes each data point is a trading day. This matches the standard practice used by Bloomberg, Morningstar, and CFA Institute — volatility is computed from trading-day returns only and annualized with √252 (the approximate number of US equity trading days per year).
+
 **Formula:**
 
 ```
-volatility = std_dev(daily_returns[1:], ddof=1) × √252
+trading_returns = [r for r in daily_returns if r ≠ 0.0]
+volatility = std_dev(trading_returns, ddof=1) × √252
 ```
 
 **Implementation:** `compute_volatility(daily_returns)` → `float`
 
 ```python
-# backend/app/services/metrics.py, line 139-148
+# backend/app/services/metrics.py
 def compute_volatility(daily_returns):
-    if len(daily_returns) < 2:
+    trading = [r for r in daily_returns if r != 0.0]
+    if len(trading) < 2:
         return 0.0
-    vol = float(np.std(daily_returns, ddof=1))
+    vol = float(np.std(trading, ddof=1))
     return vol * math.sqrt(252)
 ```
 
@@ -460,7 +464,8 @@ def compute_volatility(daily_returns):
 **Formula:**
 
 ```
-Sharpe = mean(daily_return - rf_daily) / std_dev(daily_return) × √252
+trading_returns = [r for r in daily_returns if r ≠ 0.0]
+Sharpe = mean(trading_returns - rf_daily) / std_dev(trading_returns) × √252
 
 where:
   rf_daily = (1 + annual_risk_free_rate) ^ (1/252) - 1
@@ -468,17 +473,20 @@ where:
 
 The risk-free rate defaults to 5% annually (current approximate T-bill yield).
 
+Non-trading days are excluded for the same reasons as volatility (see above). Including weekend zeros would drag the mean excess return negative (0 − rf_daily < 0 on each flat day) and reduce standard deviation, producing a Sharpe ratio that reflects calendar-day dilution rather than actual trading performance.
+
 **Implementation:** `compute_sharpe(daily_returns, rf_daily)` → `float`
 
 ```python
-# backend/app/services/metrics.py, line 151-162
+# backend/app/services/metrics.py
 def compute_sharpe(daily_returns, rf_daily):
-    if len(daily_returns) < 2:
+    trading = [r for r in daily_returns if r != 0.0]
+    if len(trading) < 2:
         return 0.0
-    vol = float(np.std(daily_returns, ddof=1))
+    vol = float(np.std(trading, ddof=1))
     if vol <= 0:
         return 0.0
-    excess = [r - rf_daily for r in daily_returns]
+    excess = [r - rf_daily for r in trading]
     return float(np.mean(excess)) / vol * math.sqrt(252)
 ```
 
@@ -509,18 +517,21 @@ where:
 
 Only negative excess returns contribute to the downside deviation.
 
+As with volatility and Sharpe, non-trading days (0.0% return) are excluded so that only actual trading-day downside risk is measured.
+
 **Implementation:** `compute_sortino(daily_returns, rf_daily)` → `float`
 
 ```python
-# backend/app/services/metrics.py, line 165-177
+# backend/app/services/metrics.py
 def compute_sortino(daily_returns, rf_daily):
-    if len(daily_returns) < 2:
+    trading = [r for r in daily_returns if r != 0.0]
+    if len(trading) < 2:
         return 0.0
-    downside = [min(r - rf_daily, 0) for r in daily_returns]
+    downside = [min(r - rf_daily, 0) for r in trading]
     downside_dev = float(np.std(downside, ddof=1))
     if downside_dev <= 0:
         return 0.0
-    excess_mean = float(np.mean([r - rf_daily for r in daily_returns]))
+    excess_mean = float(np.mean([r - rf_daily for r in trading]))
     return excess_mean / downside_dev * math.sqrt(252)
 ```
 
