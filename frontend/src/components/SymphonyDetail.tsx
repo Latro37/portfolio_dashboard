@@ -192,13 +192,22 @@ export function SymphonyDetail({ symphony, onClose }: Props) {
     fetchTradePreview();
   }, [s.id, s.account_id]);
 
-  // Fetch live summary metrics from backend (period-aware)
+  // Fetch live summary metrics from backend (period-aware or custom date range)
   useEffect(() => {
-    const p = customStart ? undefined : (period === "ALL" ? undefined : period);
-    api
-      .getSymphonySummary(s.id, s.account_id, p)
-      .then(setLiveSummary)
-      .catch(() => setLiveSummary(null));
+    if (customStart || customEnd) {
+      // Custom date range — pass explicit start/end dates
+      api
+        .getSymphonySummary(s.id, s.account_id, undefined, customStart || undefined, customEnd || undefined)
+        .then(setLiveSummary)
+        .catch(() => setLiveSummary(null));
+    } else {
+      // Preset period
+      const p = period === "ALL" ? undefined : period;
+      api
+        .getSymphonySummary(s.id, s.account_id, p)
+        .then(setLiveSummary)
+        .catch(() => setLiveSummary(null));
+    }
   }, [s.id, s.account_id, period, customStart, customEnd]);
 
   // Filter live data by period/custom dates (client-side, data already fetched as ALL)

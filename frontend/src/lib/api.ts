@@ -348,9 +348,9 @@ export const api = {
     fetchJSON<SymphonyBacktest>(
       `/symphonies/${symphonyId}/backtest?account_id=${encodeURIComponent(accountId)}${forceRefresh ? "&force_refresh=true" : ""}`
     ),
-  getSymphonySummary: (symphonyId: string, accountId: string, period?: string) =>
+  getSymphonySummary: (symphonyId: string, accountId: string, period?: string, startDate?: string, endDate?: string) =>
     fetchJSON<SymphonySummary>(
-      `/symphonies/${symphonyId}/summary?account_id=${encodeURIComponent(accountId)}${period ? `&period=${period}` : ""}`
+      `/symphonies/${symphonyId}/summary?account_id=${encodeURIComponent(accountId)}${period ? `&period=${period}` : ""}${startDate ? `&start_date=${startDate}` : ""}${endDate ? `&end_date=${endDate}` : ""}`
     ),
   getSymphonyAllocations: (symphonyId: string, accountId: string) =>
     fetchJSON<Record<string, Record<string, number>>>(

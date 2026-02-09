@@ -217,6 +217,8 @@ def get_symphony_summary(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
     period: Optional[str] = Query(None, description="Period filter: 1D,1W,1M,3M,6M,YTD,1Y,ALL"),
+    start_date: Optional[str] = Query(None, description="Custom start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="Custom end date YYYY-MM-DD"),
     db: Session = Depends(get_db),
 ):
     """Period-aware summary metrics for a single symphony, computed from stored data."""
@@ -227,12 +229,17 @@ def get_symphony_summary(
     if not rows:
         raise HTTPException(404, "No stored data for this symphony. Run sync first.")
 
-    # Apply period filter
-    all_dates = [r.date for r in rows]
-    if period and period != "ALL" and all_dates:
-        cutoff = _period_cutoff(period, all_dates[-1])
-        if cutoff:
-            rows = [r for r in rows if r.date >= cutoff]
+    # Apply date filters: custom dates take precedence over period presets
+    if start_date or end_date:
+        sd = date.fromisoformat(start_date) if start_date else None
+        ed = date.fromisoformat(end_date) if end_date else None
+        rows = [r for r in rows if (sd is None or r.date >= sd) and (ed is None or r.date <= ed)]
+    elif period and period != "ALL":
+        all_dates = [r.date for r in rows]
+        if all_dates:
+            cutoff = _period_cutoff(period, all_dates[-1])
+            if cutoff:
+                rows = [r for r in rows if r.date >= cutoff]
 
     if not rows:
         raise HTTPException(404, "No data in selected period.")
