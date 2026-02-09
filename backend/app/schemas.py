@@ -75,6 +75,7 @@ class PortfolioSummary(BaseModel):
     cagr: float
     time_weighted_return: float
     money_weighted_return: float
+    money_weighted_return_period: float
     sharpe_ratio: float
     calmar_ratio: float
     sortino_ratio: float

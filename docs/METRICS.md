@@ -245,6 +245,8 @@ def compute_mwr(dates_list, pv_list, ext_flows):
 
 **Stored as:** `money_weighted_return` (annualized %), `money_weighted_return_period` (period %)
 
+**UI note:** The Dashboard metric card labeled "MWR" displays the **period** return (`money_weighted_return_period`), not the annualized value. This makes it directly comparable to the TWR card, which also shows the period return. Both TWR and MWR use the same time basis so users can compare them side-by-side to gauge deposit timing impact.
+
 ---
 
 ### 5. CAGR (Compound Annual Growth Rate)
@@ -284,19 +286,19 @@ def compute_cagr(pv_start, pv_end, days_elapsed):
 
 ### 6. Annualized Return
 
-**What it is:** The TWR return scaled linearly to a one-year rate. Unlike CAGR (which uses portfolio values and compounds), this simply divides the TWR percentage by the number of years elapsed.
+**What it is:** The TWR return compounded to a one-year rate. This converts the cumulative period TWR into the equivalent annual growth rate assuming reinvestment.
 
-**Why it matters:** Provides a quick, intuitive "annual rate" from TWR. For short periods (< 1 year), it extrapolates what the return would be if it continued at the same pace for a full year. For long periods, it averages the total TWR across years.
+**Why it matters:** Provides a standardized annual rate from TWR, enabling comparison across periods of different lengths. A 26% return over 6 months and a 60% return over 18 months can both be expressed as annualized figures for fair comparison. This is the same compounding approach used by CAGR and is the industry standard for annualizing returns.
 
 **How to interpret:**
-- For periods < 1 year: this is an *extrapolation*, not a guarantee
+- For periods < 1 year: this is an *extrapolation* assuming the same compound growth continues
 - For exactly 1 year: equals TWR
-- For periods > 1 year: gives a simple average annual rate (not compounded)
+- For periods > 1 year: gives the equivalent steady annual compound rate
 
 **Formula:**
 
 ```
-annualized_return = TWR_pct / years
+annualized_return = ((1 + TWR_decimal) ^ (1 / years) - 1) × 100
 
 where:
   years = days_elapsed / 365.25
@@ -305,23 +307,55 @@ where:
 **Implementation:** `compute_annualized_return(twr_decimal, days_elapsed)` → `float`
 
 ```python
-# backend/app/services/metrics.py, line 111-116
+# backend/app/services/metrics.py
 def compute_annualized_return(twr_decimal, days_elapsed):
     if days_elapsed <= 0:
         return 0.0
     years = days_elapsed / 365.25
-    return (twr_decimal * 100) * (1 / years)
+    return ((1 + twr_decimal) ** (1 / years) - 1) * 100
 ```
 
 **Stored as:** `annualized_return` (percentage)
+
+#### Linear vs. Compound Annualization
+
+There are two ways to annualize a cumulative return:
+
+| Method | Formula | Description |
+|---|---|---|
+| **Linear** (simple average) | `TWR% / years` | Divides the total return evenly across years |
+| **Compound** (CAGR-style) | `((1 + TWR)^(1/years) - 1) × 100` | Finds the steady annual rate that, when compounded, reproduces the total return |
+
+This application uses the **compound** method. Here's why the linear method is misleading:
+
+**Example — 100% total return over 5 years:**
+
+| Method | Calculation | Annualized Result |
+|---|---|---|
+| Linear | `100% / 5` | **20.0%** per year |
+| Compound | `(1 + 1.00)^(1/5) - 1` | **14.9%** per year |
+
+If you actually earned a steady 20% per year for 5 years, you'd end up with `1.20^5 = 2.488`, or a **149% return** — far more than 100%. The linear method overstates performance because it ignores the compounding effect: each year's gains generate additional gains in subsequent years. Dividing the total by the number of years effectively double-counts this "growth on growth."
+
+The gap widens with higher returns and longer periods:
+
+| Total Return | Period | Linear | Compound | Overstatement |
+|---|---|---|---|---|
+| 50% | 2 years | 25.0% | 22.5% | +2.5% |
+| 100% | 5 years | 20.0% | 14.9% | +5.1% |
+| 300% | 10 years | 30.0% | 14.9% | +15.1% |
+
+The 300% / 10-year case is striking: linear annualization claims 30% per year, but the actual compound rate is only 14.9%. An investor expecting 30% annual growth based on the linear figure would be severely misled — 14.9% compounded for 10 years doubles your money twice (4×), while 30% compounded for 10 years would yield 13.8× growth.
+
+**Rule of thumb:** For short periods (< 1 year) with modest returns, the two methods produce nearly identical results. The divergence becomes material for multi-year periods or returns above ~20%.
 
 ---
 
 ### 7. Drawdown (Max & Current)
 
-**What it is:** Drawdown measures the decline from a portfolio's peak value to a subsequent trough. **Max drawdown** is the largest peak-to-trough decline ever observed in the measurement period. **Current drawdown** measures how far below the all-time peak the portfolio sits right now.
+**What it is:** Drawdown measures the decline from a portfolio's peak value to a subsequent trough, computed from the **deposit-adjusted equity curve** (growth of $1 based on TWR daily returns) rather than raw portfolio values. This ensures that deposits and withdrawals are not counted as gains or losses. **Max drawdown** is the largest peak-to-trough decline ever observed in the measurement period. **Current drawdown** measures how far below the all-time peak the portfolio sits right now.
 
-**Why it matters:** Drawdown is the single most important *risk* metric for most investors. While volatility measures daily fluctuation symmetrically, drawdown captures the **pain of losing money** — how bad it actually got. A max drawdown of -30% means that at some point, the portfolio lost 30% from its peak. This is psychologically and financially significant because:
+**Why it matters:** Drawdown is the single most important *risk* metric for most investors. While volatility measures daily fluctuation symmetrically, drawdown captures the **pain of losing money** — how bad it actually got. A max drawdown of -30% means that at some point, the portfolio's *investment performance* lost 30% from its peak. This is psychologically and financially significant because:
 
 1. A 30% loss requires a 43% gain just to break even
 2. Deep drawdowns test investor discipline — many sell at the bottom
@@ -337,30 +371,31 @@ def compute_annualized_return(twr_decimal, days_elapsed):
 **Formula:**
 
 ```
+# Build deposit-adjusted equity curve from daily returns
+equity[0] = 1.0
+equity[i] = equity[i-1] × (1 + daily_return[i])
+
+# Compute drawdown from equity curve (not raw portfolio value)
 For each day i:
-  peak[i] = max(value[0], value[1], ..., value[i])
-  drawdown[i] = (value[i] / peak[i]) - 1
+  peak[i] = max(equity[0], equity[1], ..., equity[i])
+  drawdown[i] = (equity[i] / peak[i]) - 1
 
 max_drawdown = min(drawdown[0], drawdown[1], ..., drawdown[n])
 current_drawdown = drawdown[n]
 ```
 
-**Implementation:** `compute_drawdown(pv_series)` → `(max_dd, current_dd)`
+**Why equity curve, not raw values?** If an investor withdraws $25,000, the raw portfolio value drops — but the *investments* didn't lose money. Using the deposit-adjusted equity curve (which strips out cash flows via daily returns) ensures that only actual investment losses appear as drawdowns.
+
+**Implementation:** `compute_drawdown(equity_series)` → `(max_dd, current_dd)`
+
+The `_compute_row` function in `compute_all_metrics` builds the equity curve from daily returns before passing it to `compute_drawdown`:
 
 ```python
-# backend/app/services/metrics.py, line 119-136
-def compute_drawdown(pv_series):
-    peak = pv_series[0]
-    max_dd = 0.0
-    for v in pv_series:
-        if v > peak:
-            peak = v
-        dd = (v / peak - 1) if peak > 0 else 0.0
-        if dd < max_dd:
-            max_dd = dd
-    current_peak = max(pv_series)
-    current_dd = (pv_series[-1] / current_peak - 1) if current_peak > 0 else 0.0
-    return max_dd, current_dd
+# backend/app/services/metrics.py — inside _compute_row
+equity = [1.0]
+for r in daily_rets[1 : i + 1]:
+    equity.append(equity[-1] * (1 + r))
+max_dd, cur_dd = compute_drawdown(equity)
 ```
 
 **Stored as:** `max_drawdown` (percentage, negative), `current_drawdown` (percentage, negative)
@@ -732,7 +767,7 @@ Displayed as a 6-column grid of cards:
 
 | Row 2 | | | | | |
 |---|---|---|---|---|---|
-| **Cum. Return** (%) | **MWR** (%) | **W / L** (count) | **Calmar** | **Max Drawdown** (%) | **Worst Day** (%) |
+| **Cum. Return** (%) | **MWR** (%, period) | **W / L** (count) | **Calmar** | **Max Drawdown** (%) | **Worst Day** (%) |
 
 Tooltips on TWR, MWR, Best Day, Worst Day, and Max Drawdown provide additional context (date of occurrence or explanation text).
 

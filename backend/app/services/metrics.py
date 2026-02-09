@@ -140,11 +140,11 @@ def compute_cagr(pv_start: float, pv_end: float, days_elapsed: int) -> float:
 
 
 def compute_annualized_return(twr_decimal: float, days_elapsed: int) -> float:
-    """Simple annualized return: TWR percentage spread over years."""
+    """Compound annualized return from cumulative TWR decimal."""
     if days_elapsed <= 0:
         return 0.0
     years = days_elapsed / 365.25
-    return (twr_decimal * 100) * (1 / years)
+    return ((1 + twr_decimal) ** (1 / years) - 1) * 100
 
 
 def compute_drawdown(pv_series: List[float]) -> Tuple[float, float]:

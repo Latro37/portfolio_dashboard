@@ -46,7 +46,7 @@ export function MetricCards({ summary }: Props) {
       <Metric label="Volatility" value={s.annualized_volatility.toFixed(1) + "%"} />
       <Metric label="Best Day" value={fmtPct(s.best_day_pct)} color="text-emerald-400" tooltip={s.best_day_date ?? undefined} />
       <Metric label="Cumulative Return" value={fmtPct(s.cumulative_return_pct)} color={colorPct(s.cumulative_return_pct)} />
-      <Metric label="MWR" value={fmtPct(s.money_weighted_return)} color={colorPct(s.money_weighted_return)} tooltip="Measures your actual return accounting for when and how much money you deposited or withdrew. Weights each cash flow by how long it was invested, so a large deposit right before a gain counts more than a small one. Better reflects your actual investor experience." />
+      <Metric label="MWR" value={fmtPct(s.money_weighted_return_period)} color={colorPct(s.money_weighted_return_period)} tooltip="Measures your actual return accounting for when and how much money you deposited or withdrew. Weights each cash flow by how long it was invested, so a large deposit right before a gain counts more than a small one. Better reflects your actual investor experience." />
       <Metric label="W / L" value={`${s.num_wins} / ${s.num_losses}`} />
       <Metric label="Calmar" value={s.calmar_ratio.toFixed(2)} />
       <Metric label="Max Drawdown" value={fmtPct(s.max_drawdown)} color="text-red-400" tooltip={s.max_drawdown_date ?? undefined} />

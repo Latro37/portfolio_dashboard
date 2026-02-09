@@ -69,6 +69,7 @@ export interface Summary {
   cagr: number;
   time_weighted_return: number;
   money_weighted_return: number;
+  money_weighted_return_period: number;
   sharpe_ratio: number;
   calmar_ratio: number;
   sortino_ratio: number;

@@ -235,6 +235,7 @@ def get_summary(
         cagr=round(m.get("cagr", 0), 4),
         time_weighted_return=round(m.get("time_weighted_return", 0), 4),
         money_weighted_return=round(m.get("money_weighted_return", 0), 4),
+        money_weighted_return_period=round(m.get("money_weighted_return_period", 0), 4),
         sharpe_ratio=round(m.get("sharpe_ratio", 0), 4),
         calmar_ratio=round(m.get("calmar_ratio", 0), 4),
         sortino_ratio=round(m.get("sortino_ratio", 0), 4),

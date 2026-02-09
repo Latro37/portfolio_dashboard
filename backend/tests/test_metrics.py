@@ -167,18 +167,36 @@ class TestComputeCAGR:
 
 class TestComputeAnnualizedReturn:
     def test_one_year(self):
-        # 10% TWR over exactly 1 year
+        # 10% TWR over exactly 1 year → compound annualized ≈ 10%
         result = compute_annualized_return(0.10, 365)
-        # Should be 10% * (1 / (365/365.25)) ≈ 10.07%
         assert result == pytest.approx(10.0, rel=0.02)
 
     def test_half_year(self):
-        # 5% TWR over half a year → annualized ~10%
+        # 5% TWR over half a year → compound annualized ≈ 10.25%
         result = compute_annualized_return(0.05, 183)
-        assert result == pytest.approx(10.0, rel=0.05)
+        assert result == pytest.approx(10.25, rel=0.05)
 
     def test_zero_days(self):
         assert compute_annualized_return(0.10, 0) == 0.0
+
+    def test_compound_not_linear(self):
+        # 26% TWR over 195 days (~0.534 years)
+        # Linear would give: 26 / 0.534 ≈ 48.7%
+        # Compound gives: (1.26)^(1/0.534) - 1 ≈ 54.3%
+        result = compute_annualized_return(0.26, 195)
+        assert result > 52.0   # must be higher than linear ~48.7%
+        assert result < 57.0
+        # Verify it matches the compound formula exactly
+        years = 195 / 365.25
+        expected = ((1.26) ** (1 / years) - 1) * 100
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_doubling_in_half_year(self):
+        # 100% TWR in 183 days → compound annualized = (2.0)^(365.25/183) - 1 ≈ 300%+
+        result = compute_annualized_return(1.0, 183)
+        years = 183 / 365.25
+        expected = ((2.0) ** (1 / years) - 1) * 100
+        assert result == pytest.approx(expected, rel=1e-6)
 
 
 # =====================================================================
