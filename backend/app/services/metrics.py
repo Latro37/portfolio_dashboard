@@ -209,12 +209,18 @@ def compute_sortino(daily_returns: List[float], rf_daily: float) -> float:
 
     Non-trading days (exactly 0.0 return) are excluded so that only
     actual trading-day downside deviation is measured.
+
+    Downside deviation uses the **target downside deviation** (TDD),
+    also called the second-order root lower partial moment (RLPM₂).
+    Unlike ``np.std``, this does NOT subtract the mean before squaring —
+    it is ``sqrt(sum(min(r-T,0)² ) / N)`` per the original Sortino &
+    van der Meer (1991) definition and the CFA Institute CIPM programme.
     """
     trading = [r for r in daily_returns if r != 0.0]
     if len(trading) < 2:
         return 0.0
-    downside = [min(r - rf_daily, 0) for r in trading]
-    downside_dev = float(np.std(downside, ddof=1)) if len(downside) > 1 else 0.0
+    downside_sq = [min(r - rf_daily, 0) ** 2 for r in trading]
+    downside_dev = math.sqrt(sum(downside_sq) / len(trading))
     if downside_dev <= 0:
         return 0.0
     excess_mean = float(np.mean([r - rf_daily for r in trading]))

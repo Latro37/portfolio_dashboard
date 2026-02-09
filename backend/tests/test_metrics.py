@@ -311,6 +311,7 @@ class TestComputeSortino:
         rets = [0.02, -0.01, 0.015, -0.005, 0.01]
         sortino = compute_sortino(rets, 0.0002)
         assert isinstance(sortino, float)
+        assert sortino > 0  # positive mean excess, positive Sortino
 
     def test_too_few(self):
         assert compute_sortino([0.01], 0.0002) == 0.0
@@ -322,6 +323,30 @@ class TestComputeSortino:
         sortino_clean = compute_sortino(trading_rets, 0.0002)
         sortino_mixed = compute_sortino(mixed, 0.0002)
         assert sortino_clean == pytest.approx(sortino_mixed, rel=1e-6)
+
+    def test_rlpm_not_std(self):
+        """Downside deviation must use RLPM₂ (no mean subtraction), not np.std.
+
+        RLPM₂ = sqrt(sum(min(r-T,0)²) / N)
+        np.std would subtract the mean first, understating downside risk.
+        """
+        rets = [0.02, -0.01, 0.015, -0.005, 0.01]
+        rf = 0.0002
+        N = len(rets)
+        # Compute expected RLPM₂ manually
+        downside_sq = [min(r - rf, 0) ** 2 for r in rets]
+        expected_dd = math.sqrt(sum(downside_sq) / N)
+        excess_mean = sum(r - rf for r in rets) / N
+        expected_sortino = excess_mean / expected_dd * math.sqrt(252)
+        result = compute_sortino(rets, rf)
+        assert result == pytest.approx(expected_sortino, rel=1e-6)
+
+        # Verify it does NOT equal what np.std would give
+        import numpy as np
+        downside_arr = [min(r - rf, 0) for r in rets]
+        std_based_dd = float(np.std(downside_arr, ddof=1))
+        std_based_sortino = excess_mean / std_based_dd * math.sqrt(252)
+        assert result != pytest.approx(std_based_sortino, rel=0.01)
 
 
 # =====================================================================

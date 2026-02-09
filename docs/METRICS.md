@@ -113,6 +113,8 @@ def compute_daily_returns(pv, deposits):
 
 **Stored as:** `daily_return_pct` (percentage, e.g. `0.52` means +0.52%)
 
+**Cash flow timing assumption:** The denominator `value[i-1]` implicitly assumes cash flows arrive at the **end of the day**, so the day's return is earned entirely on the prior-day balance. This is the standard **Simple Dietz** approach for daily-level calculations. CFA GIPS recommends revaluing the portfolio at the time of each significant cash flow, but since Composer's API provides only end-of-day values, this is the best available approximation and matches what most portfolio trackers use with daily data.
+
 ---
 
 ### 2. Cumulative Return
@@ -509,15 +511,27 @@ def compute_sharpe(daily_returns, rf_daily):
 **Formula:**
 
 ```
-Sortino = mean(daily_return - rf_daily) / downside_deviation × √252
+trading_returns = [r for r in daily_returns if r ≠ 0.0]
+Sortino = mean(trading_returns - rf_daily) / TDD × √252
 
 where:
-  downside_deviation = std_dev(min(daily_return - rf_daily, 0), ddof=1)
+  TDD = sqrt( sum(min(r_i - rf_daily, 0)²) / N )
+  N   = total number of trading days (not just below-target days)
 ```
 
-Only negative excess returns contribute to the downside deviation.
+Only below-target excess returns contribute to the TDD. Returns above the target contribute 0² = 0 to the sum, but are still counted in N — this means strategies that rarely underperform the target have lower TDD.
 
 As with volatility and Sharpe, non-trading days (0.0% return) are excluded so that only actual trading-day downside risk is measured.
+
+**Downside deviation method:** The denominator uses the **target downside deviation** (TDD), also called the second-order root lower partial moment (RLPM₂):
+
+```
+TDD = sqrt( sum(min(r_i - T, 0)²) / N )
+```
+
+where T is the target return (rf_daily) and N is the total number of trading days (not just the negative ones). This is the formula specified by Sortino & van der Meer (1991) and used by the CFA Institute’s CIPM (Certificate in Investment Performance Measurement) programme.
+
+**Why not `std()` of negative returns?** A common but incorrect shortcut uses `np.std(min(r-T, 0))`, which subtracts the mean of the downside array before squaring. This understates downside deviation (and thus overstates the Sortino ratio) because: (1) the mean of the downside array is negative, so subtracting it reduces each squared deviation, and (2) it treats the frequency of below-target returns differently than the original formulation. The RLPM₂ formula does NOT subtract the mean — it directly measures the root-mean-square of below-target deviations.
 
 **Implementation:** `compute_sortino(daily_returns, rf_daily)` → `float`
 
@@ -527,8 +541,8 @@ def compute_sortino(daily_returns, rf_daily):
     trading = [r for r in daily_returns if r != 0.0]
     if len(trading) < 2:
         return 0.0
-    downside = [min(r - rf_daily, 0) for r in trading]
-    downside_dev = float(np.std(downside, ddof=1))
+    downside_sq = [min(r - rf_daily, 0) ** 2 for r in trading]
+    downside_dev = math.sqrt(sum(downside_sq) / len(trading))
     if downside_dev <= 0:
         return 0.0
     excess_mean = float(np.mean([r - rf_daily for r in trading]))
