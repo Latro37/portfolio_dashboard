@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { Info } from "lucide-react";
 
 interface Props {
@@ -8,12 +9,32 @@ interface Props {
 }
 
 export function InfoTooltip({ text, className }: Props) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  const show = () => {
+    if (!ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    setPos({ x: r.left + r.width / 2, y: r.top });
+  };
+  const hide = () => setPos(null);
+
   return (
-    <span className={`relative group/tip inline-flex ${className || ""}`}>
+    <span
+      ref={ref}
+      className={`inline-flex ${className || ""}`}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+    >
       <Info className="h-3.5 w-3.5 text-foreground/40 cursor-help" />
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-foreground w-64 opacity-0 group-hover/tip:opacity-100 transition-opacity pointer-events-none z-10">
-        {text}
-      </span>
+      {pos && (
+        <span
+          className="fixed px-2.5 py-1.5 rounded bg-zinc-800 border border-zinc-700 text-xs text-foreground w-64 text-left pointer-events-none z-50 normal-case tracking-normal font-normal"
+          style={{ left: pos.x, top: pos.y, transform: "translate(-50%, -100%) translateY(-6px)" }}
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }

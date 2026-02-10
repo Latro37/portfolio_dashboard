@@ -94,14 +94,19 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
               {showAccountColumn && <th className="pb-2 pr-3 font-medium whitespace-nowrap">Account</th>}
               <th className="pb-2 pr-3 font-medium w-full">Name</th>
               <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">Today</th>
-              <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">Net Deposits</th>
+              <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">Deposits</th>
               <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">Value</th>
               <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">Profit</th>
-              <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">Cum. Return</th>
+              <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">
+                <span className="inline-flex items-center gap-1 justify-end">
+                  Return
+                  <InfoTooltip text="Cumulative Return" />
+                </span>
+              </th>
               <th className="pb-2 font-medium text-right whitespace-nowrap">
                 <span className="inline-flex items-center gap-1 justify-end">
                   TWR
-                  <InfoTooltip text={TWR_TOOLTIP_TEXT} />
+                  <InfoTooltip text="Time Weighted Return" />
                 </span>
               </th>
             </tr>

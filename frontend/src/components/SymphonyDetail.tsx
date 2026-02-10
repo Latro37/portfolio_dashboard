@@ -14,6 +14,7 @@ import { isMarketOpen, isWithinTradingSession } from "@/lib/marketHours";
 import {
   AreaChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -82,6 +83,44 @@ const TOOLTIP_STYLE = {
   fontSize: 13,
 };
 
+// Custom tooltip for backtest chart with overlay delta (backtest is baseline)
+function backtestOverlayTooltip(
+  primaryKey: string, primaryLabel: string,
+  oKey: string, oLabel: string,
+  showOverlay: boolean,
+  fmtDate: (d: string) => string,
+) {
+  return ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
+    const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
+    const pVal = primaryEntry?.value as number | undefined;
+    const oVal = overlayEntry?.value as number | undefined;
+    const hasBoth = pVal != null && oVal != null;
+    const delta = hasBoth ? pVal - oVal : null;
+    return (
+      <div style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px", margin: 0 }}>
+        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{fmtDate(String(label))}</p>
+        {pVal != null && (
+          <p style={{ margin: 0, color: primaryEntry?.color || "#e4e4e7", lineHeight: 1.6 }}>
+            {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
+          </p>
+        )}
+        {showOverlay && oVal != null && (
+          <p style={{ margin: 0, color: overlayEntry?.color || "#f59e0b", lineHeight: 1.6 }}>
+            {oLabel} : {formatPctAxis(oVal)}
+          </p>
+        )}
+        {showOverlay && delta != null && (
+          <p style={{ margin: 0, color: delta >= 0 ? "#10b981" : "#ef4444", lineHeight: 1.6 }}>
+            Δ : {delta >= 0 ? "+" : ""}{formatPctAxis(delta)}
+          </p>
+        )}
+      </div>
+    );
+  };
+}
+
 // --- Metric card ---
 function Metric({ label, value, color, subValue, tooltip, valueTooltip, subValueColor, subValueTooltip, subValueLarge }: { label: string; value: string; color?: string; subValue?: string; tooltip?: string; valueTooltip?: string; subValueColor?: string; subValueTooltip?: string; subValueLarge?: boolean }) {
   return (
@@ -142,6 +181,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [customEnd, setCustomEnd] = useState("");
   const [liveSummary, setLiveSummary] = useState<SymphonySummary | null>(null);
   const baseLiveDataRef = useRef<PerformancePoint[]>([]);
+  const [showBacktestOverlay, setShowBacktestOverlay] = useState(false);
+  const [showLiveOverlay, setShowLiveOverlay] = useState(false);
 
   const s = symphony;
 
@@ -368,6 +409,80 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
   const btFormatDate = makeDateFormatter(filteredBacktestData);
 
+  // Overlay data: merge backtest TWR onto live data and vice versa by date.
+  // The overlay is rebased multiplicatively so it starts at 0% on the first
+  // overlapping date: rebased = ((1+twr)/(1+baseTwr) - 1) * 100.
+  // This ensures both series are on the same scale.
+  const mergedLiveData = useMemo(() => {
+    if (!filteredLiveData.length) return filteredLiveData;
+
+    // Rebase live TWR to start at 0% from the first visible date
+    const liveBaseFactor = 1 + filteredLiveData[0].time_weighted_return / 100;
+
+    const btByDate: Record<string, number> = {};
+    const btDdByDate: Record<string, number> = {};
+    for (const pt of filteredBacktestData) {
+      btByDate[pt.date] = pt.twr;
+      btDdByDate[pt.date] = pt.drawdown;
+    }
+    // Find the backtest growth factor at the first overlapping live date
+    let btBaseFactor: number | null = null;
+    for (const pt of filteredLiveData) {
+      if (btByDate[pt.date] != null) { btBaseFactor = 1 + btByDate[pt.date] / 100; break; }
+    }
+
+    // Compute rebased live drawdown from rebased TWR (tracks peak within visible window)
+    let peakGrowth = 1;
+    return filteredLiveData.map((pt) => {
+      const rebasedTwr = liveBaseFactor !== 0
+        ? ((1 + pt.time_weighted_return / 100) / liveBaseFactor - 1) * 100
+        : pt.time_weighted_return;
+      const growth = 1 + rebasedTwr / 100;
+      peakGrowth = Math.max(peakGrowth, growth);
+      const rebasedDd = peakGrowth > 0 ? (growth / peakGrowth - 1) * 100 : 0;
+      return {
+        ...pt,
+        time_weighted_return: rebasedTwr,
+        current_drawdown: rebasedDd,
+        backtestTwr: btByDate[pt.date] != null && btBaseFactor != null && btBaseFactor !== 0
+          ? ((1 + btByDate[pt.date] / 100) / btBaseFactor - 1) * 100
+          : null,
+        backtestDrawdown: btDdByDate[pt.date] ?? null,
+      };
+    });
+  }, [filteredLiveData, filteredBacktestData]);
+
+  const mergedBacktestData = useMemo(() => {
+    if (!filteredBacktestData.length) return filteredBacktestData;
+    const liveByDate: Record<string, number> = {};
+    for (const pt of filteredLiveData) liveByDate[pt.date] = pt.time_weighted_return;
+    // Find the live growth factor at the first overlapping backtest date
+    let baseFactor: number | null = null;
+    for (const pt of filteredBacktestData) {
+      if (liveByDate[pt.date] != null) { baseFactor = 1 + liveByDate[pt.date] / 100; break; }
+    }
+
+    // Compute live drawdown from rebased live TWR for overlay
+    const liveDdByDate: Record<string, number> = {};
+    if (baseFactor != null && baseFactor !== 0) {
+      let peakGrowth = 1;
+      for (const pt of filteredLiveData) {
+        const rebasedTwr = ((1 + pt.time_weighted_return / 100) / baseFactor - 1) * 100;
+        const growth = 1 + rebasedTwr / 100;
+        peakGrowth = Math.max(peakGrowth, growth);
+        liveDdByDate[pt.date] = peakGrowth > 0 ? (growth / peakGrowth - 1) * 100 : 0;
+      }
+    }
+
+    return filteredBacktestData.map((pt) => ({
+      ...pt,
+      liveTwr: liveByDate[pt.date] != null && baseFactor != null && baseFactor !== 0
+        ? ((1 + liveByDate[pt.date] / 100) / baseFactor - 1) * 100
+        : null,
+      liveDrawdown: liveDdByDate[pt.date] ?? null,
+    }));
+  }, [filteredBacktestData, filteredLiveData]);
+
   // Live metrics: values from backend /summary, date lookups from client-side data
   const liveMetrics = useMemo(() => {
     const empty = { sharpe: null as number | null, maxDrawdown: null as number | null, maxDrawdownDate: "", annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, bestDayDate: "", worstDayDate: "", cumReturn: null as number | null, twr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
@@ -578,7 +693,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
               </div>
             ) : (
               <PerformanceChart
-                data={filteredLiveData}
+                data={mergedLiveData as any}
                 period={period}
                 onPeriodChange={(p) => setPeriod(p as Period)}
                 startDate={customStart}
@@ -588,6 +703,12 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 portfolioLabel="Symphony Value"
                 chartMode={chartMode}
                 onChartModeChange={setChartMode}
+                overlayKey="backtestTwr"
+                overlayLabel="Backtest"
+                overlayColor="#6366f1"
+                showOverlay={showBacktestOverlay}
+                onOverlayToggle={setShowBacktestOverlay}
+                drawdownOverlayKey="backtestDrawdown"
               />
             )
           ) : (
@@ -596,8 +717,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 {/* Chart mode toggle */}
                 <div className="flex rounded-lg bg-muted p-0.5">
-                  {(["portfolio", "twr", "drawdown"] as ChartMode[]).map((m) => {
-                    const active = chartMode === m || (m === "portfolio" && (chartMode === "portfolio" || chartMode === "mwr"));
+                  {(["twr", "drawdown"] as ChartMode[]).map((m) => {
+                    const active = chartMode === m || (m === "twr" && chartMode !== "drawdown");
                     return (
                       <button
                         key={m}
@@ -606,7 +727,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                           active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        {m === "portfolio" ? "Symphony Value" : m === "twr" ? "TWR" : "Drawdown"}
+                        {m === "twr" ? "Return" : "Drawdown"}
                       </button>
                     );
                   })}
@@ -652,59 +773,86 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 <div className="flex h-[280px] items-center justify-center text-sm text-muted-foreground">
                   No backtest data available
                 </div>
-              ) : (chartMode === "portfolio" || chartMode === "mwr") ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={filteredBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                    <defs>
-                      <linearGradient id="btValGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-                    <YAxis tickFormatter={formatValue} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(l: any) => btFormatDate(String(l))} formatter={(v: any) => [formatValue(Number(v)), "Backtest Value"]} />
-                    <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fill="url(#btValGrad)" dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : chartMode === "twr" ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={filteredBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                    <defs>
-                      <linearGradient id="btTwrGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset={backtestTwrOffset} stopColor="#10b981" stopOpacity={0.05} />
-                        <stop offset={backtestTwrOffset} stopColor="#ef4444" stopOpacity={0.15} />
-                        <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
-                      </linearGradient>
-                      <linearGradient id="btTwrStroke" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset={backtestTwrOffset} stopColor="#10b981" />
-                        <stop offset={backtestTwrOffset} stopColor="#ef4444" />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-                    <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                    <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(l: any) => btFormatDate(String(l))} formatter={(v: any) => [formatPctAxis(Number(v)), "TWR"]} />
-                    <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={filteredBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                    <defs>
-                      <linearGradient id="btDdGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
-                        <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-                    <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                    <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} labelFormatter={(l: any) => btFormatDate(String(l))} formatter={(v: any) => [formatPctAxis(Number(v)), "Drawdown"]} />
-                    <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
+              ) : null}
+              {chartMode !== "drawdown" && filteredBacktestData.length > 0 && !loadingBacktest && (
+                <>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <AreaChart data={mergedBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                      <defs>
+                        <linearGradient id="btTwrGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
+                          <stop offset={backtestTwrOffset} stopColor="#10b981" stopOpacity={0.05} />
+                          <stop offset={backtestTwrOffset} stopColor="#ef4444" stopOpacity={0.15} />
+                          <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
+                        </linearGradient>
+                        <linearGradient id="btTwrStroke" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset={backtestTwrOffset} stopColor="#10b981" />
+                          <stop offset={backtestTwrOffset} stopColor="#ef4444" />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+                      <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+                      <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
+                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate)} />
+                      <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
+                      {showLiveOverlay && (
+                        <Line type="monotone" dataKey="liveTwr" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+                      )}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <div className="mt-3 flex items-center justify-center gap-4">
+                    <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-emerald-400 cursor-default">
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: "#10b981" }} />
+                      Backtest
+                    </button>
+                    <button
+                      onClick={() => setShowLiveOverlay(!showLiveOverlay)}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        showLiveOverlay ? "text-amber-400" : "text-muted-foreground/40 line-through"
+                      }`}
+                    >
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showLiveOverlay ? "#f59e0b" : "#71717a" }} />
+                      Live
+                    </button>
+                  </div>
+                </>
+              )}
+              {chartMode === "drawdown" && filteredBacktestData.length > 0 && (
+                <>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <AreaChart data={mergedBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                      <defs>
+                        <linearGradient id="btDdGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
+                          <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+                      <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+                      <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
+                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate)} />
+                      <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
+                      {showLiveOverlay && (
+                        <Line type="monotone" dataKey="liveDrawdown" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+                      )}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <div className="mt-3 flex items-center justify-center gap-4">
+                    <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-red-400 cursor-default">
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: "#ef4444" }} />
+                      Backtest
+                    </button>
+                    <button
+                      onClick={() => setShowLiveOverlay(!showLiveOverlay)}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        showLiveOverlay ? "text-amber-400" : "text-muted-foreground/40 line-through"
+                      }`}
+                    >
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showLiveOverlay ? "#f59e0b" : "#71717a" }} />
+                      Live
+                    </button>
+                  </div>
+                </>
               )}
 
               {/* Backtest stats summary */}

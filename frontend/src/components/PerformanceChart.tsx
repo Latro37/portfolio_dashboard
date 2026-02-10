@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   AreaChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -30,6 +31,12 @@ interface Props {
   portfolioLabel?: string;
   chartMode?: ChartMode;
   onChartModeChange?: (m: ChartMode) => void;
+  overlayKey?: string;
+  overlayLabel?: string;
+  overlayColor?: string;
+  showOverlay?: boolean;
+  onOverlayToggle?: (v: boolean) => void;
+  drawdownOverlayKey?: string;
 }
 
 const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
@@ -47,6 +54,12 @@ export function PerformanceChart({
   portfolioLabel,
   chartMode: controlledMode,
   onChartModeChange,
+  overlayKey,
+  overlayLabel,
+  overlayColor = "#6366f1",
+  showOverlay = false,
+  onOverlayToggle,
+  drawdownOverlayKey,
 }: Props) {
   const [internalMode, setInternalMode] = useState<ChartMode>("portfolio");
   const mode = controlledMode ?? internalMode;
@@ -88,6 +101,39 @@ export function PerformanceChart({
     "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   const formatPct = (v: number) => v.toFixed(2) + "%";
+
+  // Custom tooltip for TWR/Drawdown modes with overlay delta
+  const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string) => {
+    return ({ active, payload, label }: any) => {
+      if (!active || !payload?.length) return null;
+      const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
+      const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
+      const pVal = primaryEntry?.value as number | undefined;
+      const oVal = overlayEntry?.value as number | undefined;
+      const hasBoth = pVal != null && oVal != null;
+      const delta = hasBoth ? pVal - oVal : null;
+      return (
+        <div style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px", margin: 0 }}>
+          <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
+          {pVal != null && (
+            <p style={{ margin: 0, color: primaryEntry?.color || "#e4e4e7", lineHeight: 1.6 }}>
+              {showOverlay && oKey ? "Live" : primaryLabel} : {formatPct(pVal)}
+            </p>
+          )}
+          {showOverlay && oVal != null && (
+            <p style={{ margin: 0, color: overlayEntry?.color || overlayColor, lineHeight: 1.6 }}>
+              {oLabel} : {formatPct(oVal)}
+            </p>
+          )}
+          {showOverlay && delta != null && (
+            <p style={{ margin: 0, color: delta >= 0 ? "#10b981" : "#ef4444", lineHeight: 1.6 }}>
+              Δ : {delta >= 0 ? "+" : ""}{formatPct(delta)}
+            </p>
+          )}
+        </div>
+      );
+    };
+  };
 
   const isCustomRange = startDate !== "" || endDate !== "";
   const displayStart = startDate || (hasData ? data[0].date : "");
@@ -301,16 +347,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #27272a",
-                  borderRadius: 8,
-                  fontSize: 13,
-                }}
-                labelFormatter={(label: any) => formatDate(String(label))}
-                formatter={(value: any) => [formatPct(Number(value)), "TWR"]}
-              />
+              <Tooltip content={renderOverlayTooltip("time_weighted_return", "TWR", overlayKey, overlayLabel || "Backtest")} />
               <Area
                 type="monotone"
                 dataKey="time_weighted_return"
@@ -319,6 +356,17 @@ export function PerformanceChart({
                 fill="url(#twrGradSplit)"
                 dot={false}
               />
+              {overlayKey && showOverlay && (
+                <Line
+                  type="monotone"
+                  dataKey={overlayKey}
+                  stroke={overlayColor}
+                  strokeWidth={1.5}
+                  strokeDasharray="6 3"
+                  dot={false}
+                  connectNulls
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         ) : mode === "mwr" ? (
@@ -397,16 +445,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #27272a",
-                  borderRadius: 8,
-                  fontSize: 13,
-                }}
-                labelFormatter={(label: any) => formatDate(String(label))}
-                formatter={(value: any) => [formatPct(Number(value)), "Drawdown"]}
-              />
+              <Tooltip content={renderOverlayTooltip("current_drawdown", "Drawdown", drawdownOverlayKey, overlayLabel || "Backtest")} />
               <Area
                 type="monotone"
                 dataKey="current_drawdown"
@@ -416,11 +455,43 @@ export function PerformanceChart({
                 baseValue={0}
                 dot={false}
               />
+              {drawdownOverlayKey && showOverlay && (
+                <Line
+                  type="monotone"
+                  dataKey={drawdownOverlayKey}
+                  stroke={overlayColor}
+                  strokeWidth={1.5}
+                  strokeDasharray="6 3"
+                  dot={false}
+                  connectNulls
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         )}
 
         {/* Portfolio/Deposits legend below chart */}
+        {(mode === "twr" || mode === "drawdown") && hasData && onOverlayToggle && (overlayKey || drawdownOverlayKey) && (
+          <div className="mt-3 flex items-center justify-center gap-4">
+            <button
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium cursor-default ${
+                mode === "drawdown" ? "text-red-400" : "text-emerald-400"
+              }`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: mode === "drawdown" ? "#ef4444" : "#10b981" }} />
+              Live
+            </button>
+            <button
+              onClick={() => onOverlayToggle(!showOverlay)}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                showOverlay ? "text-indigo-400" : "text-muted-foreground/40 line-through"
+              }`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showOverlay ? overlayColor : "#71717a" }} />
+              {overlayLabel || "Overlay"}
+            </button>
+          </div>
+        )}
         {mode === "portfolio" && hasData && (
           <div className="mt-3 flex items-center justify-center gap-4">
             <button
