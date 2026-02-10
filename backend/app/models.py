@@ -159,6 +159,7 @@ class SymphonyBacktestCache(Base):
     summary_metrics_json = Column(Text, nullable=False, default="{}")
     first_day = Column(Integer, default=0)
     last_market_day = Column(Integer, default=0)
+    last_semantic_update_at = Column(Text, nullable=True)
 
 
 class SymphonyAllocationHistory(Base):

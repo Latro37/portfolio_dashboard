@@ -301,6 +301,20 @@ class ComposerClient:
         logger.info("Symphony history: %d data points for %s", len(result), symphony_id)
         return result
 
+    def get_symphony_versions(self, symphony_id: str) -> List[Dict]:
+        """Fetch version history for a symphony.
+
+        Returns list of version dicts (newest first) with created_at timestamps.
+        Used to detect if a symphony has been modified since a cached backtest.
+        """
+        try:
+            data = self._get_json(f"api/v0.1/symphonies/{symphony_id}/versions")
+            versions = data if isinstance(data, list) else data.get("versions", [])
+            return versions
+        except Exception as e:
+            logger.warning("Failed to fetch versions for %s: %s", symphony_id, e)
+            return []
+
     def get_symphony_backtest(self, symphony_id: str) -> Dict:
         """Run backtest for an existing symphony.
 

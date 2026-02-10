@@ -400,7 +400,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
       sharpe: liveSummary.sharpe_ratio,
       maxDrawdown: liveSummary.max_drawdown,
       maxDrawdownDate,
-      annualized: liveSummary.annualized_return,
+      annualized: liveSummary.annualized_return_cum,
       calmar: liveSummary.calmar_ratio,
       winRate: liveSummary.win_rate,
       bestDay: liveSummary.best_day_pct,
@@ -429,7 +429,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     if (sm && period === "ALL" && !customStart && !customEnd) {
       return {
         cumReturn: sm.cumulative_return_pct / 100,
-        annualized: sm.annualized_return / 100,
+        annualized: (sm.annualized_return_cum ?? sm.annualized_return) / 100,
         sharpe: sm.sharpe_ratio,
         sortino: sm.sortino_ratio,
         calmar: sm.calmar_ratio,

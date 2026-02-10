@@ -200,6 +200,7 @@ export interface SymphonySummary {
   money_weighted_return_period: number;
   cagr: number;
   annualized_return: number;
+  annualized_return_cum: number;
   sharpe_ratio: number;
   sortino_ratio: number;
   calmar_ratio: number;
@@ -218,6 +219,7 @@ export interface SymphonySummary {
 export interface BacktestSummaryMetrics {
   cumulative_return_pct: number;
   annualized_return: number;
+  annualized_return_cum: number;
   time_weighted_return: number;
   cagr: number;
   sharpe_ratio: number;

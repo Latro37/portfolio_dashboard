@@ -53,6 +53,7 @@ def _migrate_add_columns():
     # Map of (table_name, column_name, column_default_sql)
     _MIGRATIONS = [
         ("symphony_backtest_cache", "summary_metrics_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("symphony_backtest_cache", "last_semantic_update_at", "TEXT"),
     ]
 
     with engine.connect() as conn:

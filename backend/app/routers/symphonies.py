@@ -59,6 +59,7 @@ def _compute_backtest_summary(dvm_capital: Dict, first_day: int, last_market_day
     return {
         "cumulative_return_pct": last.get("cumulative_return_pct", 0),
         "annualized_return": last.get("annualized_return", 0),
+        "annualized_return_cum": last.get("annualized_return_cum", 0),
         "time_weighted_return": last.get("time_weighted_return", 0),
         "cagr": last.get("cagr", 0),
         "sharpe_ratio": last.get("sharpe_ratio", 0),
@@ -281,6 +282,7 @@ def get_symphony_summary(
         "money_weighted_return_period": last.get("money_weighted_return_period", 0),
         "cagr": last.get("cagr", 0),
         "annualized_return": last.get("annualized_return", 0),
+        "annualized_return_cum": last.get("annualized_return_cum", 0),
         "sharpe_ratio": last.get("sharpe_ratio", 0),
         "sortino_ratio": last.get("sortino_ratio", 0),
         "calmar_ratio": last.get("calmar_ratio", 0),
@@ -400,6 +402,7 @@ def get_symphony_summary_live(
         "money_weighted_return_period": m.get("money_weighted_return_period", 0),
         "cagr": m.get("cagr", 0),
         "annualized_return": m.get("annualized_return", 0),
+        "annualized_return_cum": m.get("annualized_return_cum", 0),
         "sharpe_ratio": m.get("sharpe_ratio", 0),
         "sortino_ratio": m.get("sortino_ratio", 0),
         "calmar_ratio": m.get("calmar_ratio", 0),
@@ -471,25 +474,54 @@ def get_symphony_backtest(
     force_refresh: bool = Query(False, description="Force refresh cache"),
     db: Session = Depends(get_db),
 ):
-    """Get backtest results for a symphony, using cache when available."""
-    # Check cache
+    """Get backtest results for a symphony, using cache when available.
+
+    Cache invalidation strategy:
+    1. TTL-based: cache expires after CACHE_TTL_HOURS.
+    2. Version-based: on cache hit, fetch the symphony's version history
+       via the lightweight /versions endpoint and compare the newest
+       version timestamp against the stored last_semantic_update_at.
+       If the symphony was edited since the cache was built, re-fetch.
+    """
+    client = _get_client_for_account(db, account_id)
+    use_cache = False
+
     if not force_refresh:
         cached = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
         if cached and cached.cached_at > datetime.utcnow() - timedelta(hours=CACHE_TTL_HOURS):
-            summary_metrics = json.loads(cached.summary_metrics_json) if cached.summary_metrics_json else {}
-            return {
-                "stats": json.loads(cached.stats_json),
-                "dvm_capital": json.loads(cached.dvm_capital_json),
-                "tdvm_weights": json.loads(cached.tdvm_weights_json),
-                "benchmarks": json.loads(cached.benchmarks_json),
-                "summary_metrics": summary_metrics,
-                "first_day": cached.first_day,
-                "last_market_day": cached.last_market_day,
-                "cached_at": cached.cached_at.isoformat(),
-            }
+            # Lightweight version check — detect symphony edits
+            stale = False
+            try:
+                versions = client.get_symphony_versions(symphony_id)
+                if versions:
+                    newest = versions[0] if isinstance(versions, list) else {}
+                    newest_ts = newest.get("created_at") or newest.get("updated_at") or ""
+                    if newest_ts and cached.last_semantic_update_at:
+                        stale = newest_ts > cached.last_semantic_update_at
+                    elif newest_ts and not cached.last_semantic_update_at:
+                        stale = True  # old cache without version info
+            except Exception:
+                pass  # on failure, serve cache
+
+            if not stale:
+                use_cache = True
+
+    if use_cache and cached:
+        logger.info("Serving cached backtest for %s", symphony_id)
+        summary_metrics = json.loads(cached.summary_metrics_json) if cached.summary_metrics_json else {}
+        return {
+            "stats": json.loads(cached.stats_json),
+            "dvm_capital": json.loads(cached.dvm_capital_json),
+            "tdvm_weights": json.loads(cached.tdvm_weights_json),
+            "benchmarks": json.loads(cached.benchmarks_json),
+            "summary_metrics": summary_metrics,
+            "first_day": cached.first_day,
+            "last_market_day": cached.last_market_day,
+            "cached_at": cached.cached_at.isoformat(),
+        }
 
     # Fetch fresh backtest
-    client = _get_client_for_account(db, account_id)
+    logger.info("Fetching fresh backtest for %s (force=%s)", symphony_id, force_refresh)
     try:
         data = client.get_symphony_backtest(symphony_id)
     except Exception as e:
@@ -501,6 +533,7 @@ def get_symphony_backtest(
     benchmarks = stats.get("benchmarks", {})
     first_day = data.get("first_day", 0)
     last_market_day = data.get("last_market_day", 0)
+    semantic_ts = data.get("last_semantic_update_at", "")
 
     # Pre-compute summary metrics from backtest series
     # dvm_capital is {symphony_id: {day_offset: value}} — extract the inner series
@@ -513,29 +546,23 @@ def get_symphony_backtest(
     # Upsert cache
     existing = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
     now = datetime.utcnow()
+    cache_fields = dict(
+        account_id=account_id,
+        cached_at=now,
+        stats_json=json.dumps(stats),
+        dvm_capital_json=json.dumps(dvm_capital),
+        tdvm_weights_json=json.dumps(tdvm_weights),
+        benchmarks_json=json.dumps(benchmarks),
+        summary_metrics_json=json.dumps(summary_metrics),
+        first_day=first_day,
+        last_market_day=last_market_day,
+        last_semantic_update_at=semantic_ts or None,
+    )
     if existing:
-        existing.account_id = account_id
-        existing.cached_at = now
-        existing.stats_json = json.dumps(stats)
-        existing.dvm_capital_json = json.dumps(dvm_capital)
-        existing.tdvm_weights_json = json.dumps(tdvm_weights)
-        existing.benchmarks_json = json.dumps(benchmarks)
-        existing.summary_metrics_json = json.dumps(summary_metrics)
-        existing.first_day = first_day
-        existing.last_market_day = last_market_day
+        for k, v in cache_fields.items():
+            setattr(existing, k, v)
     else:
-        db.add(SymphonyBacktestCache(
-            symphony_id=symphony_id,
-            account_id=account_id,
-            cached_at=now,
-            stats_json=json.dumps(stats),
-            dvm_capital_json=json.dumps(dvm_capital),
-            tdvm_weights_json=json.dumps(tdvm_weights),
-            benchmarks_json=json.dumps(benchmarks),
-            summary_metrics_json=json.dumps(summary_metrics),
-            first_day=first_day,
-            last_market_day=last_market_day,
-        ))
+        db.add(SymphonyBacktestCache(symphony_id=symphony_id, **cache_fields))
     db.commit()
 
     return {

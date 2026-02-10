@@ -85,7 +85,7 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
 
         {/* Transactions */}
         <TabsContent value="transactions">
-          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { maxHeight: metricsHeight } : { maxHeight: 500 }}>
+          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { minHeight: metricsHeight, maxHeight: metricsHeight } : { minHeight: 500, maxHeight: 500 }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -148,7 +148,7 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
 
         {/* Cash Flows */}
         <TabsContent value="cashflows">
-          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { maxHeight: metricsHeight } : { maxHeight: 500 }}>
+          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { minHeight: metricsHeight, maxHeight: metricsHeight } : { minHeight: 500, maxHeight: 500 }}>
             {/* Manual entry form */}
             {!showManualForm ? (
               <div className="mb-4">
@@ -274,38 +274,70 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
         {/* All Metrics (latest row) */}
         <TabsContent value="metrics">
           <CardContent className="pt-4" ref={metricsRef}>
-            {summary && (
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
-                {Object.entries(summary).map(([key, value]) => {
-                  if (key === "annualized_return" || key === "cagr" || key === "money_weighted_return") return null;
-                  if (key === "portfolio_value" || key === "net_deposits" || key === "total_fees" || key === "total_dividends" || key === "last_updated") return null;
-                  if (typeof value === "string" || value === null) return null;
-                  const labelOverrides: Record<string, string> = {
-                    annualized_return_cum: "Annualized Return",
-                    money_weighted_return_period: "MWR",
-                  };
-                  const label = labelOverrides[key] ?? key
-                    .replace(/_/g, " ")
-                    .replace(/\bpct\b/g, "%")
-                    .replace(/\b\w/g, (c) => c.toUpperCase());
-                  const numVal = typeof value === "number" ? value : 0;
-                  const display = key.includes("pct") || key.includes("return") || key.includes("rate") ||
-                    key.includes("drawdown") || key.includes("volatility") || key.includes("day_pct")
-                    ? numVal.toFixed(2) + "%"
-                    : key.includes("dollar")
-                    ? "$" + numVal.toLocaleString(undefined, { minimumFractionDigits: 2 })
-                    : key.includes("ratio") || key.includes("factor")
-                    ? numVal.toFixed(4)
-                    : String(value);
-                  return (
-                    <div key={key} className="flex justify-between gap-2 border-b border-border/20 pb-2">
-                      <span className="text-muted-foreground">{label}</span>
-                      <span className="font-medium tabular-nums">{display}</span>
+            {summary && (() => {
+              const s = summary;
+              const fPct = (v: number) => v.toFixed(2) + "%";
+              const fRatio = (v: number) => v.toFixed(2);
+              const fInt = (v: number) => String(Math.round(v));
+
+              const sections: { title: string; items: { label: string; value: string }[] }[] = [
+                {
+                  title: "Returns",
+                  items: [
+                    { label: "Cumulative Return", value: fPct(s.cumulative_return_pct) },
+                    { label: "Annualized Return", value: fPct(s.annualized_return_cum) },
+                    { label: "TWR", value: fPct(s.time_weighted_return) },
+                    { label: "MWR", value: fPct(s.money_weighted_return_period) },
+                    { label: "Daily Return", value: fPct(s.daily_return_pct) },
+                  ],
+                },
+                {
+                  title: "Risk",
+                  items: [
+                    { label: "Max Drawdown", value: fPct(s.max_drawdown) },
+                    { label: "Current Drawdown", value: fPct(s.current_drawdown) },
+                    { label: "Annualized Volatility", value: fPct(s.annualized_volatility) },
+                  ],
+                },
+                {
+                  title: "Risk-Adjusted",
+                  items: [
+                    { label: "Sharpe Ratio", value: fRatio(s.sharpe_ratio) },
+                    { label: "Sortino Ratio", value: fRatio(s.sortino_ratio) },
+                    { label: "Calmar Ratio", value: fRatio(s.calmar_ratio) },
+                  ],
+                },
+                {
+                  title: "Win / Loss",
+                  items: [
+                    { label: "Win Rate", value: fPct(s.win_rate) },
+                    { label: "W / L", value: `${fInt(s.num_wins)} / ${fInt(s.num_losses)}` },
+                    { label: "Avg Win / Avg Loss", value: `${fPct(s.avg_win_pct)} / ${fPct(s.avg_loss_pct)}` },
+                    { label: "Best Day", value: fPct(s.best_day_pct) },
+                    { label: "Worst Day", value: fPct(s.worst_day_pct) },
+                    { label: "Profit Factor", value: fRatio(s.profit_factor) },
+                  ],
+                },
+              ];
+
+              return (
+                <div className="space-y-5">
+                  {sections.map((section) => (
+                    <div key={section.title}>
+                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">{section.title}</h4>
+                      <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-4">
+                        {section.items.map((item) => (
+                          <div key={item.label} className="flex justify-between gap-2 border-b border-border/20 pb-2">
+                            <span className="text-muted-foreground">{item.label}</span>
+                            <span className="font-medium tabular-nums">{item.value}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </CardContent>
         </TabsContent>
       </Tabs>
