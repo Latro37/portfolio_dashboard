@@ -1,0 +1,410 @@
+# Architecture
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python 3.10+, FastAPI, SQLAlchemy, Pydantic |
+| Database | SQLite (file-based, zero config) |
+| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, Recharts |
+| External API | Composer Trade REST API |
+| Deployment | Docker Compose (optional) |
+
+## High-Level Overview
+
+```mermaid
+graph TB
+    subgraph External
+        COMPOSER[Composer API]
+    end
+
+    subgraph Backend ["Backend (FastAPI :8000)"]
+        API[API Routers]
+        SYNC[Sync Service]
+        METRICS[Metrics Engine]
+        CLIENT[Composer Client]
+        DB[(SQLite DB)]
+    end
+
+    subgraph Frontend ["Frontend (Next.js :3000)"]
+        DASH[Dashboard]
+        SYMPH[Symphony Detail]
+        CHARTS[Charts & Metrics]
+    end
+
+    DASH -->|fetch| API
+    SYMPH -->|fetch| API
+    API --> METRICS
+    API --> DB
+    SYNC --> CLIENT
+    CLIENT --> COMPOSER
+    SYNC --> DB
+    API -->|backtest| CLIENT
+```
+
+## Data Flow
+
+### Initial Sync & Incremental Updates
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant API
+    participant SyncService
+    participant ComposerAPI
+    participant DB
+
+    User->>Frontend: Click "Update"
+    Frontend->>API: POST /api/sync
+    API->>SyncService: trigger_sync()
+
+    SyncService->>ComposerAPI: Fetch transactions
+    ComposerAPI-->>SyncService: Transaction history
+    SyncService->>DB: Upsert transactions
+
+    SyncService->>ComposerAPI: Fetch portfolio values
+    ComposerAPI-->>SyncService: Daily portfolio data
+    SyncService->>DB: Upsert daily_portfolio
+
+    SyncService->>ComposerAPI: Fetch cash flows
+    ComposerAPI-->>SyncService: Deposits, fees, dividends
+    SyncService->>DB: Upsert cash_flows
+
+    SyncService->>DB: Reconstruct holdings_history
+    SyncService->>DB: Store symphony daily data
+
+    API-->>Frontend: Sync complete
+    Frontend->>API: GET /api/summary
+    API->>DB: Read daily data
+    API->>API: compute_all_metrics() live
+    API-->>Frontend: Summary + metrics
+```
+
+### Live Metrics Computation
+
+Metrics are **computed on the fly** from stored daily portfolio data — not read from pre-computed tables. This ensures consistency across all views.
+
+```mermaid
+flowchart LR
+    A[daily_portfolio rows] --> B[compute_all_metrics]
+    B --> C{Last row}
+    C --> D[/api/summary response]
+    C --> E[MetricCards display]
+    C --> F[All Metrics tab]
+```
+
+### Symphony Backtest with Cache Invalidation
+
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant API
+    participant Cache
+    participant ComposerAPI
+
+    Frontend->>API: GET /symphonies/{id}/backtest
+
+    API->>Cache: Check cached result
+    alt Cache hit & TTL valid
+        API->>ComposerAPI: GET /symphonies/{id}/versions
+        ComposerAPI-->>API: Version history
+
+        alt Symphony unchanged
+            Cache-->>API: Return cached data
+            API-->>Frontend: Cached backtest
+        else Symphony was edited
+            API->>ComposerAPI: POST /symphonies/{id}/backtest
+            ComposerAPI-->>API: Fresh backtest data
+            API->>Cache: Update cache + version timestamp
+            API-->>Frontend: Fresh backtest
+        end
+    else Cache miss or TTL expired
+        API->>ComposerAPI: POST /symphonies/{id}/backtest
+        ComposerAPI-->>API: Fresh backtest data
+        API->>Cache: Store with version timestamp
+        API-->>Frontend: Fresh backtest
+    end
+```
+
+## Project Structure
+
+```
+composer_portfolio_visualizer/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                # FastAPI app, CORS, lifespan (account discovery)
+│   │   ├── config.py              # Settings from .env + accounts.json loader
+│   │   ├── database.py            # SQLAlchemy engine, session, migrations
+│   │   ├── models.py              # ORM table definitions
+│   │   ├── schemas.py             # Pydantic request/response models
+│   │   ├── composer_client.py     # Composer REST API wrapper
+│   │   ├── services/
+│   │   │   ├── sync.py            # Full backfill + incremental sync logic
+│   │   │   ├── metrics.py         # All metric computations (TWR, MWR, Sharpe, etc.)
+│   │   │   └── holdings.py        # Holdings reconstruction from trades
+│   │   └── routers/
+│   │       ├── portfolio.py       # Portfolio endpoints (summary, performance, holdings, etc.)
+│   │       ├── symphonies.py      # Symphony endpoints (list, summary, backtest, allocations)
+│   │       └── health.py          # Health check + metrics guide
+│   ├── tests/
+│   │   ├── test_metrics.py        # 83 metric computation tests
+│   │   └── conftest.py            # Shared test fixtures
+│   ├── data/                      # SQLite database (auto-created)
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx           # Root page — renders Dashboard
+│   │   │   ├── layout.tsx         # App shell, fonts, metadata
+│   │   │   └── globals.css        # Tailwind base + dark theme variables
+│   │   ├── components/
+│   │   │   ├── Dashboard.tsx      # Main layout: header, chart, metrics, tabs
+│   │   │   ├── PortfolioHeader.tsx# Portfolio value, sync button, account switcher
+│   │   │   ├── AccountSwitcher.tsx# Sub-account dropdown
+│   │   │   ├── PerformanceChart.tsx# Recharts area chart with period selector
+│   │   │   ├── MetricCards.tsx    # Key metric tiles (return, Sharpe, drawdown, etc.)
+│   │   │   ├── DetailTabs.tsx     # All Metrics / Transactions / Non-Trade Activity tabs
+│   │   │   ├── HoldingsPie.tsx    # Donut chart of current holdings
+│   │   │   ├── HoldingsList.tsx   # Holdings table with history navigation
+│   │   │   ├── SymphonyList.tsx   # Symphony cards grid
+│   │   │   ├── SymphonyDetail.tsx # Symphony modal: live/backtest charts + metrics
+│   │   │   ├── TradePreview.tsx   # Pending rebalance trades
+│   │   │   ├── MetricsGuide.tsx   # METRICS.md viewer overlay
+│   │   │   └── InfoTooltip.tsx    # Reusable tooltip component
+│   │   ├── hooks/
+│   │   │   └── useAutoRefresh.ts  # Auto-refresh during market hours
+│   │   └── lib/
+│   │       ├── api.ts             # Backend API client + TypeScript interfaces
+│   │       ├── marketHours.ts     # US market hours detection
+│   │       └── utils.ts           # Tailwind class merge utility
+│   ├── package.json
+│   └── Dockerfile
+├── docs/
+│   ├── ARCHITECTURE.md            # This file
+│   └── METRICS.md                 # Detailed metric formulas
+├── accounts.json.example          # Credential template (multi-account)
+├── .env.example                   # Optional config overrides
+├── docker-compose.yml
+├── start.py                       # One-command launcher
+└── README.md
+```
+
+## API Reference
+
+### Portfolio Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/metrics-guide` | Serve METRICS.md as plain text |
+| GET | `/api/accounts` | List discovered sub-accounts |
+| GET | `/api/summary` | Portfolio summary with all latest metrics (computed live) |
+| GET | `/api/summary/live` | Summary with today's value replaced by live intraday data |
+| GET | `/api/performance` | Performance chart series (filterable by period, date range) |
+| GET | `/api/holdings` | Holdings for a specific date (defaults to latest) |
+| GET | `/api/holdings-history` | All dates with position counts |
+| GET | `/api/transactions` | Paginated transaction history (filterable by symbol) |
+| GET | `/api/cash-flows` | All cash flow events (deposits, withdrawals, fees, dividends) |
+| POST | `/api/cash-flows/manual` | Add a manual deposit or withdrawal |
+| GET | `/api/sync/status` | Current sync state per account |
+| POST | `/api/sync` | Trigger full backfill or incremental update |
+
+All portfolio endpoints accept an optional `account_id` query parameter:
+- Omit or `all` — aggregate across all accounts
+- `all:<credential_name>` — aggregate across one credential's sub-accounts
+- Specific UUID — single sub-account
+
+### Symphony Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/symphonies` | List all symphonies with live stats and current holdings |
+| GET | `/api/symphonies/{id}/performance` | Daily performance series for charting |
+| GET | `/api/symphonies/{id}/summary` | Period-aware computed metrics |
+| GET | `/api/symphonies/{id}/summary/live` | Summary with live intraday value overlay |
+| GET | `/api/symphonies/{id}/backtest` | Backtest results (cached, version-check invalidation) |
+| GET | `/api/symphonies/{id}/allocations` | Historical allocation snapshots |
+| GET | `/api/trade-preview` | Pending rebalance trades across all symphonies |
+| GET | `/api/symphonies/{id}/trade-preview` | Pending trades for one symphony |
+
+## Database Schema
+
+```mermaid
+erDiagram
+    accounts {
+        text id PK "Composer account UUID"
+        text credential_name "Label from accounts.json"
+        text account_type "INDIVIDUAL, IRA_ROTH, etc."
+        text display_name "Friendly name"
+        text status
+    }
+
+    transactions {
+        int id PK
+        text account_id FK
+        date date
+        text symbol
+        text action "buy / sell"
+        float quantity
+        float price
+        float total_amount
+        text order_id UK "unique per account"
+    }
+
+    holdings_history {
+        int id PK
+        text account_id FK
+        date date
+        text symbol
+        float quantity
+    }
+
+    cash_flows {
+        int id PK
+        text account_id FK
+        date date
+        text type "deposit / withdrawal / fee_cat / dividend"
+        float amount "signed"
+        text description
+    }
+
+    daily_portfolio {
+        text account_id PK
+        date date PK
+        float portfolio_value
+        float cash_balance
+        float net_deposits
+        float total_fees
+        float total_dividends
+    }
+
+    daily_metrics {
+        text account_id PK
+        date date PK
+        float daily_return_pct
+        float cumulative_return_pct
+        float time_weighted_return
+        float sharpe_ratio
+        float sortino_ratio
+        float max_drawdown
+        float annualized_volatility
+    }
+
+    benchmark_data {
+        date date PK
+        text symbol "default: SPY"
+        float close
+    }
+
+    symphony_daily_portfolio {
+        text account_id PK
+        text symphony_id PK
+        date date PK
+        float portfolio_value
+        float net_deposits
+    }
+
+    symphony_backtest_cache {
+        text symphony_id PK
+        text account_id
+        datetime cached_at
+        text stats_json
+        text dvm_capital_json
+        text summary_metrics_json
+        text last_semantic_update_at "version tracking"
+    }
+
+    symphony_allocation_history {
+        int id PK
+        text account_id
+        text symphony_id
+        date date
+        text ticker
+        float allocation_pct
+        float value
+    }
+
+    sync_state {
+        text account_id PK
+        text key PK "e.g. last_sync_date"
+        text value
+    }
+
+    accounts ||--o{ transactions : has
+    accounts ||--o{ holdings_history : has
+    accounts ||--o{ cash_flows : has
+    accounts ||--o{ daily_portfolio : has
+    accounts ||--o{ daily_metrics : has
+    accounts ||--o{ symphony_daily_portfolio : has
+    accounts ||--o{ symphony_allocation_history : has
+    accounts ||--o{ sync_state : has
+```
+
+## Frontend Component Tree
+
+```mermaid
+graph TD
+    Page["page.tsx"]
+    Page --> Dashboard
+
+    Dashboard --> PortfolioHeader
+    Dashboard --> PerformanceChart
+    Dashboard --> MetricCards
+    Dashboard --> HoldingsPie
+    Dashboard --> HoldingsList
+    Dashboard --> DetailTabs
+    Dashboard --> SymphonyList
+    Dashboard --> TradePreview
+
+    PortfolioHeader --> AccountSwitcher
+
+    SymphonyList -->|click| SymphonyDetail
+
+    DetailTabs -->|tab: All Metrics| AllMetrics["Grouped metrics display"]
+    DetailTabs -->|tab: Transactions| TxTable["Paginated transaction table"]
+    DetailTabs -->|tab: Non-Trade Activity| CashFlowTable["Cash flow table + manual entry form"]
+
+    SymphonyDetail -->|tab: Live| LiveCharts["Performance + drawdown charts"]
+    SymphonyDetail -->|tab: Backtest| BacktestCharts["Backtest chart + metrics"]
+    SymphonyDetail --> Holdings["Current holdings table"]
+```
+
+## Key Design Decisions
+
+### Live Metric Computation
+
+Metrics displayed on the dashboard are **not** read from the `daily_metrics` table. Instead, `/api/summary` aggregates raw `daily_portfolio` rows and calls `compute_all_metrics()` on the fly. This guarantees that MetricCards, the All Metrics tab, and symphony summaries always show consistent, up-to-date values.
+
+### Dual Annualized Return
+
+Two annualized return calculations are maintained:
+
+- **`annualized_return`** — TWR-based (time-weighted, deposit-immune)
+- **`annualized_return_cum`** — cumulative-return-based (simple, intuitive)
+
+The dashboard displays the cumulative-based variant as "Annualized Return" since it's more intuitive for end users. TWR is shown separately. The Calmar ratio uses the cumulative-based variant.
+
+### Backtest Cache Strategy
+
+Symphony backtests are relatively more expensive API calls. The caching strategy uses two layers:
+
+1. **TTL** — cache expires after 24 hours regardless
+2. **Version check** — on cache hit, a lightweight call to `/symphonies/{id}/versions` checks if the symphony was edited since the cache was built. If so, the cache is invalidated and a fresh backtest is fetched.
+
+The `last_semantic_update_at` timestamp from the version history is stored alongside the cached data for comparison.
+
+### Multi-Account Aggregation
+
+All portfolio endpoints support three modes via the `account_id` query parameter:
+
+- **Single account** — pass a specific UUID
+- **Credential group** — `all:<name>` aggregates all sub-accounts under one credential set
+- **Global** — omit or pass `all` to aggregate everything
+
+Aggregation sums `portfolio_value` and `net_deposits` across accounts per day, then computes metrics on the combined series.
+
+### Schema Migrations
+
+SQLite doesn't support full ALTER TABLE operations. The app uses a lightweight migration system in `database.py` that checks for missing columns on startup and adds them via `ALTER TABLE ADD COLUMN`. New columns are registered in the `_MIGRATIONS` list.

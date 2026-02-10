@@ -2,49 +2,89 @@
 
 A portfolio tracker and analytics dashboard for [Composer](https://www.composer.trade/) accounts. Built with a Python/FastAPI backend, SQLite database, and Next.js frontend.
 
-![Dark theme dashboard with M1 Finance-inspired design](https://img.shields.io/badge/theme-dark-1a1a2e)
-
 ## Features
 
+- **Multi-account support** — manage multiple Composer accounts from a single dashboard
 - **Full historical backfill** — transactions, holdings, deposits, fees, dividends
 - **Incremental updates** — only fetches new data after initial sync
 - **20+ metrics** — Sharpe, Sortino, Calmar, TWR, MWR, drawdown, win rate, volatility, and more
-- **M1-inspired dashboard** — dark theme, performance chart, holdings donut, metric cards
+- **Symphony analytics** — per-symphony live metrics, backtest charts, allocation history
+- **Backtest caching** — cached with version-check invalidation (detects symphony edits in Composer)
+- **Trade preview** — see pending rebalance trades before they execute
+- **Live intraday overlay** — real-time portfolio value updates during market hours
+- **Dark-themed dashboard** — performance chart, holdings donut, metric cards
 - **One-click sync** — Update button in the UI triggers data refresh
+- **Manual cash flow entries** — add deposits/withdrawals not captured by the API
 
-## Quick Start
+## Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- A Composer account with API credentials
+
+## Setup
 
 ### 1. Get Composer API Credentials
 
 Generate an API key from your Composer account settings.
 
-### 2. Configure
+### 2. Configure Credentials
+Copy `accounts.json.example` to `accounts.json`.
+```bash
+cp accounts.json.example accounts.json
+```
+
+Edit `accounts.json` with your API credentials (supports multiple accounts):
+
+```json
+[
+  {
+    "name": "Primary",
+    "api_key_id": "your-api-key-id",
+    "api_secret": "your-api-secret"
+  },
+//   Add any additional accounts with comma-separated objects
+  {
+    "name": "Wife",
+    "api_key_id": "wife-api-key-id",
+    "api_secret": "wife-api-secret"
+  }
+]
+```
+
+### 3. Optional Settings
+
+Copy `.env.example` to `.env` to override defaults (database path, benchmark ticker, risk-free rate):
 
 ```bash
 cp .env.example .env
-# Edit .env with your credentials:
-#   COMPOSER_API_KEY_ID=...
-#   COMPOSER_API_SECRET=...
-#   COMPOSER_ACCOUNT_ID=...
 ```
 
-### 3. Run
+## Running
+
+### Windows (double-click)
+
+Double-click **`start.bat`**. It checks for Python, launches everything, and opens the dashboard in your browser automatically.
+
+### Command Line
 
 ```bash
 python start.py
 ```
 
-This installs dependencies and starts both the backend (port 8001) and frontend (port 3000).
+This checks prerequisites, installs dependencies, starts both the backend (port 8000) and frontend (port 3000), and opens your browser.
 
 Open **http://localhost:3000** and click **Update** to run the initial data sync.
 
-### Manual Setup (alternative)
+### Manual Start
+
+If you prefer to start each piece separately:
 
 ```bash
 # Backend
 cd backend
 pip install -r requirements.txt
-python -m uvicorn app.main:app --port 8001
+python -m uvicorn app.main:app --port 8000
 
 # Frontend (in another terminal)
 cd frontend
@@ -52,82 +92,18 @@ npm install
 npm run dev
 ```
 
-## Architecture
+## Security & Privacy
 
-```
-composer_portfolio_visualizer/
-├── backend/
-│   └── app/
-│       ├── main.py              # FastAPI entry point
-│       ├── config.py            # Settings from .env
-│       ├── database.py          # SQLAlchemy + SQLite
-│       ├── models.py            # DB tables
-│       ├── schemas.py           # Pydantic models
-│       ├── composer_client.py   # Composer API wrapper
-│       ├── services/
-│       │   ├── sync.py          # Backfill + incremental sync
-│       │   ├── metrics.py       # All metric computations
-│       │   └── holdings.py      # Holdings reconstruction
-│       └── routers/
-│           ├── portfolio.py     # All API routes
-│           └── health.py        # Health check
-├── frontend/
-│   └── src/
-│       ├── app/page.tsx         # Dashboard entry
-│       ├── components/          # React components
-│       └── lib/api.ts           # Backend API client
-├── .env.example
-├── start.py                     # One-command launcher
-└── README.md
-```
+- **Your API keys stay on your machine.** They are stored in `accounts.json`, which is `.gitignored` — it is never committed to version control and most coding assistants won't read it.
+- **All network traffic goes directly to Composer's API** (`api.composer.trade`). This app does not send data to any other server.
+- **No telemetry or analytics.** Nothing is phoned home.
+- **All data is stored locally** in a SQLite database file (`backend/data/portfolio.db`). Nothing is uploaded anywhere.
+- **The code is fully auditable.** Every file is plain-text source code you can review before running.
 
-## API Endpoints
+## Documentation
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| GET | `/api/summary` | Portfolio summary + all latest metrics |
-| GET | `/api/performance?period=1M` | Performance chart data (1D/1W/1M/3M/YTD/1Y/ALL) |
-| GET | `/api/holdings?date=2025-12-01` | Holdings for a date (defaults to latest) |
-| GET | `/api/holdings-history` | All holdings dates with position counts |
-| GET | `/api/transactions?limit=50&symbol=TQQQ` | Transaction history |
-| GET | `/api/cash-flows` | Deposits, fees, dividends |
-| GET | `/api/metrics` | All daily metrics |
-| GET | `/api/sync/status` | Sync state |
-| POST | `/api/sync` | Trigger backfill or incremental update |
-
-## Database
-
-SQLite database stored at `backend/data/portfolio.db`. Tables:
-
-- **transactions** — all trades (deduped by order_id)
-- **holdings_history** — daily holdings snapshots (reconstructed from trades + splits)
-- **cash_flows** — deposits, withdrawals, fees, dividends
-- **daily_portfolio** — daily portfolio value + cumulative deposits/fees/dividends
-- **daily_metrics** — all computed metrics per day
-- **benchmark_data** — SPY daily closes (for Sharpe, Sortino)
-- **sync_state** — tracks backfill status and last sync date
-
-## Metrics
-
-| Metric | Description |
-|--------|-------------|
-| Portfolio Value | Current total value |
-| Net Deposits | Cumulative deposits minus CAT fees |
-| Total Return ($) | PV - Net Deposits |
-| Daily Return % | Simple daily return |
-| Cumulative Return % | Total return / net deposits |
-| CAGR | Annualized TWR |
-| Time-Weighted Return | Chain-linked daily returns |
-| Money-Weighted Return | Modified Dietz / XIRR |
-| Win Rate | % of positive return days |
-| Sharpe Ratio | Excess return / volatility (annualized) |
-| Sortino Ratio | Excess return / downside deviation |
-| Calmar Ratio | Annualized return / max drawdown |
-| Max Drawdown | Largest peak-to-trough decline |
-| Annualized Volatility | Std dev × √252 |
-| Best/Worst Day | Max/min single-day return |
-| Profit Factor | Sum of wins / |sum of losses| |
+- **[Architecture](docs/ARCHITECTURE.md)** — project structure, data flow, API reference, database schema
+- **[Metrics](docs/METRICS.md)** — detailed metric formulas and calculations
 
 ## License
 
