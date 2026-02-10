@@ -13,9 +13,12 @@ from app.models import (
     Account, SymphonyBacktestCache, SymphonyAllocationHistory,
     SymphonyDailyPortfolio, SymphonyDailyMetrics,
 )
+import requests
+
 from app.composer_client import ComposerClient
 from app.config import load_accounts, get_settings
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
+from app.market_hours import is_within_trading_session
 import time
 
 logger = logging.getLogger(__name__)
@@ -609,6 +612,15 @@ def get_trade_preview(
             continue
         try:
             dry_run_data = client.dry_run(account_uuids=aid_list)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 400:
+                body = e.response.json() if e.response.text else {}
+                errors = body.get("errors", [])
+                if any(err.get("code") == "dry-run-markets-closed" for err in errors):
+                    logger.info("Markets closed — skipping dry-run for credential %s", cred_name)
+                    continue
+            logger.warning("Dry-run failed for credential %s: %s", cred_name, e)
+            continue
         except Exception as e:
             logger.warning("Dry-run failed for credential %s: %s", cred_name, e)
             continue
@@ -650,6 +662,22 @@ def get_symphony_trade_preview(
     client = _get_client_for_account(db, account_id)
     try:
         data = client.get_trade_preview(symphony_id, broker_account_uuid=account_id)
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 400:
+            body = e.response.json() if e.response.text else {}
+            errors = body.get("errors", [])
+            if any(err.get("code") == "dry-run-markets-closed" for err in errors):
+                logger.info("Markets closed — returning empty trade preview for %s", symphony_id)
+                return {
+                    "symphony_id": symphony_id,
+                    "symphony_name": "",
+                    "rebalanced": False,
+                    "next_rebalance_after": "",
+                    "symphony_value": 0,
+                    "recommended_trades": [],
+                    "markets_closed": True,
+                }
+        raise HTTPException(500, f"Trade preview failed: {e}")
     except Exception as e:
         raise HTTPException(500, f"Trade preview failed: {e}")
 

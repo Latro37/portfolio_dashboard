@@ -17,6 +17,7 @@ from app.models import (
 from app.services.holdings import reconstruct_holdings
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.config import get_settings
+from app.market_hours import is_after_close, get_allocation_target_date
 
 logger = logging.getLogger(__name__)
 
@@ -425,19 +426,29 @@ def _recompute_metrics(db: Session, account_id: str):
 
 
 def _sync_symphony_allocations(db: Session, client: ComposerClient, account_id: str):
-    """Snapshot current symphony holdings as today's allocation history."""
-    today = date.today()
-    # Skip if today is a weekend (no market data)
-    if today.weekday() >= 5:
-        logger.info("Skipping symphony allocation snapshot on weekend for %s", account_id)
+    """Snapshot current symphony holdings mapped to the next trading day.
+
+    Only runs after market close (4:00 PM ET) through before market open
+    (9:30 AM ET).  Date logic:
+      - 4:00 PM – midnight ET  → target date = next calendar day
+      - midnight – 9:30 AM ET  → target date = today
+      - Weekends / during market hours → skip
+    """
+    target = get_allocation_target_date()
+    if target is None:
+        logger.info("Skipping symphony allocation snapshot during market hours for %s", account_id)
         return
 
-    # Check if we already have a snapshot for today
+    if not is_after_close():
+        logger.info("Skipping symphony allocation snapshot — not in post-close window for %s", account_id)
+        return
+
+    # Check if we already have a snapshot for the target date
     existing = db.query(SymphonyAllocationHistory).filter_by(
-        account_id=account_id, date=today
+        account_id=account_id, date=target
     ).first()
     if existing:
-        logger.info("Symphony allocations already captured for %s on %s", account_id, today)
+        logger.info("Symphony allocations already captured for %s on %s", account_id, target)
         return
 
     try:
@@ -458,7 +469,7 @@ def _sync_symphony_allocations(db: Session, client: ComposerClient, account_id: 
             db.add(SymphonyAllocationHistory(
                 account_id=account_id,
                 symphony_id=sym_id,
-                date=today,
+                date=target,
                 ticker=ticker,
                 allocation_pct=round(h.get("allocation", 0) * 100, 2),
                 value=round(h.get("value", 0), 2),
@@ -466,8 +477,8 @@ def _sync_symphony_allocations(db: Session, client: ComposerClient, account_id: 
             new_count += 1
 
     db.commit()
-    logger.info("Symphony allocations captured for %s: %d holdings across %d symphonies",
-                account_id, new_count, len(symphonies))
+    logger.info("Symphony allocations captured for %s (target date %s): %d holdings across %d symphonies",
+                account_id, target, new_count, len(symphonies))
 
 
 # ------------------------------------------------------------------

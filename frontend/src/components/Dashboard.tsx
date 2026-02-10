@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo } from "@/lib/api";
-import { isMarketOpen } from "@/lib/marketHours";
+import { isMarketOpen, isAfterClose, todayET } from "@/lib/marketHours";
 import { PortfolioHeader } from "./PortfolioHeader";
 import { PerformanceChart } from "./PerformanceChart";
 import { MetricCards } from "./MetricCards";
@@ -116,6 +116,31 @@ export default function Dashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Once-per-day post-close update: ensure a full data refresh happens
+  // after market close each trading day, regardless of the Live toggle.
+  // Runs immediately on mount AND on a 60s interval so there's no delay
+  // when the user opens the app after close.
+  useEffect(() => {
+    if (!resolvedAccountId) return;
+    const doPostCloseUpdate = async () => {
+      if (!isAfterClose()) return;
+      const today = todayET();
+      const lastCloseUpdate = localStorage.getItem("last_post_close_update");
+      if (lastCloseUpdate === today) return;
+      localStorage.setItem("last_post_close_update", today);
+      try {
+        await api.triggerSync(resolvedAccountId);
+        await fetchData();
+      } catch {
+        // If it fails, clear the flag so it retries next interval
+        localStorage.removeItem("last_post_close_update");
+      }
+    };
+    doPostCloseUpdate(); // immediate check on mount
+    const id = setInterval(doPostCloseUpdate, 60_000);
+    return () => clearInterval(id);
+  }, [resolvedAccountId, fetchData]);
 
   const toggleLive = useCallback((enabled: boolean) => {
     setLiveEnabled(enabled);

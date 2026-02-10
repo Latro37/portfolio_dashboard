@@ -10,7 +10,7 @@ import {
   SymphonySummary,
   SymphonyTradePreview,
 } from "@/lib/api";
-import { isMarketOpen } from "@/lib/marketHours";
+import { isMarketOpen, isWithinTradingSession } from "@/lib/marketHours";
 import {
   AreaChart,
   Area,
@@ -244,9 +244,10 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     }
   }, [s.id, s.account_id, s.value, s.net_deposits, period, customStart, customEnd]);
 
-  // Auto-refresh trade preview + live metrics every 60s
+  // Auto-refresh trade preview + live metrics every 60s (only during trading session)
   useEffect(() => {
     const id = setInterval(() => {
+      if (!isWithinTradingSession()) return;
       fetchTradePreview();
       refreshLiveMetrics();
     }, 60_000);
