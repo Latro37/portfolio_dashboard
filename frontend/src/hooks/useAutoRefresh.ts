@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 export function useAutoRefresh(
   fn: () => void | Promise<void>,
   intervalMs = 60_000,
+  enabled = true,
 ) {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const fnRef = useRef(fn);
@@ -20,12 +21,13 @@ export function useAutoRefresh(
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     const id = setInterval(() => {
       fnRef.current();
       setLastRefreshed(new Date());
     }, intervalMs);
     return () => clearInterval(id);
-  }, [intervalMs]);
+  }, [intervalMs, enabled]);
 
   return { lastRefreshed, refresh };
 }

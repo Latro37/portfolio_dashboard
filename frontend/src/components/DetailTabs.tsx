@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, TransactionRow, CashFlowRow } from "@/lib/api";
+import { api, Summary, TransactionRow, CashFlowRow } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -9,14 +9,14 @@ import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingDown, Plus } from "lu
 
 interface Props {
   accountId?: string;
+  summary?: Summary;
   onDataChange?: () => void;
 }
 
-export function DetailTabs({ accountId, onDataChange }: Props) {
+export function DetailTabs({ accountId, summary, onDataChange }: Props) {
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [txTotal, setTxTotal] = useState(0);
   const [cashFlows, setCashFlows] = useState<CashFlowRow[]>([]);
-  const [metrics, setMetrics] = useState<Record<string, unknown>[]>([]);
   const [txPage, setTxPage] = useState(0);
   const PAGE_SIZE = 50;
   const metricsRef = useRef<HTMLDivElement>(null);
@@ -57,21 +57,13 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
       setTxTotal(d.total);
     });
     api.getCashFlows(accountId).then((data) => setCashFlows(data));
-    const qs = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
-    fetch((process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api") + "/metrics" + qs)
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setMetrics(data);
-        }
-      });
   }, [accountId]);
 
   useEffect(() => {
     if (metricsRef.current) {
       setMetricsHeight(metricsRef.current.scrollHeight);
     }
-  }, [metrics]);
+  }, [summary]);
 
   const loadTxPage = (page: number) => {
     setTxPage(page);
@@ -282,11 +274,17 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
         {/* All Metrics (latest row) */}
         <TabsContent value="metrics">
           <CardContent className="pt-4" ref={metricsRef}>
-            {metrics.length > 0 && (
+            {summary && (
               <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
-                {Object.entries(metrics[metrics.length - 1]).map(([key, value]) => {
-                  if (key === "date" || key === "account_id") return null;
-                  const label = key
+                {Object.entries(summary).map(([key, value]) => {
+                  if (key === "annualized_return" || key === "cagr" || key === "money_weighted_return") return null;
+                  if (key === "portfolio_value" || key === "net_deposits" || key === "total_fees" || key === "total_dividends" || key === "last_updated") return null;
+                  if (typeof value === "string" || value === null) return null;
+                  const labelOverrides: Record<string, string> = {
+                    annualized_return_cum: "Annualized Return",
+                    money_weighted_return_period: "MWR",
+                  };
+                  const label = labelOverrides[key] ?? key
                     .replace(/_/g, " ")
                     .replace(/\bpct\b/g, "%")
                     .replace(/\b\w/g, (c) => c.toUpperCase());

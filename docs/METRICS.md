@@ -327,11 +327,11 @@ def compute_cagr(pv_start, pv_end, days_elapsed):
 
 ---
 
-### 6. Annualized Return
+### 6. Annualized Return (TWR-based)
 
-**What it is:** The TWR return compounded to a one-year rate. This converts the cumulative period TWR into the equivalent annual growth rate assuming reinvestment.
+**What it is:** The Time-Weighted Return compounded to a one-year rate. Converts the cumulative TWR into the equivalent annual growth rate assuming reinvestment.
 
-**Why it matters:** Provides a standardized annual rate from TWR, enabling comparison across periods of different lengths. A 26% return over 6 months and a 60% return over 18 months can both be expressed as annualized figures for fair comparison. This is the same compounding approach used by CAGR and is the industry standard for annualizing returns.
+**Why it matters:** Provides a standardized annual rate from TWR, enabling comparison across periods of different lengths. Because it is based on TWR, it isolates pure strategy performance independent of cash-flow timing — the CFA GIPS standard for comparing fund managers.
 
 **How to interpret:**
 - For periods < 1 year: this is an *extrapolation* assuming the same compound growth continues
@@ -359,6 +359,39 @@ def compute_annualized_return(twr_decimal, days_elapsed):
 ```
 
 **Stored as:** `annualized_return` (percentage)
+
+---
+
+### 6b. Annualized Return (Cumulative-Return-based)
+
+**What it is:** The cumulative return (profit ÷ net deposits) compounded to a one-year rate. Converts your real-world dollar gain into an equivalent annual growth rate.
+
+**Why it matters:** Users intuitively think of their investment growth as "I deposited X, I now have Y, what annual rate is that?" Basing annualized return on cumulative return directly answers that question. This is the metric shown in the dashboard's **Annualized Return** card.
+
+**How it differs from the TWR-based version:** TWR strips out the impact of cash flow timing — useful for comparing strategies, but doesn't reflect the investor's actual dollar experience. Cumulative return = `(PV − net_deposits) / net_deposits`, so annualizing it gives the intuitive "my money is growing at X% per year."
+
+**Formula:**
+
+```
+cum_ret_decimal = (portfolio_value - net_deposits) / net_deposits
+annualized_return_cum = ((1 + cum_ret_decimal) ^ (1 / years) - 1) × 100
+
+where:
+  years = days_elapsed / 365.25
+```
+
+**Implementation:** `compute_annualized_return_cumulative(cum_ret_decimal, days_elapsed)` → `float`
+
+```python
+# backend/app/services/metrics.py
+def compute_annualized_return_cumulative(cum_ret_decimal, days_elapsed):
+    if days_elapsed <= 0:
+        return 0.0
+    years = days_elapsed / 365.25
+    return ((1 + cum_ret_decimal) ** (1 / years) - 1) * 100
+```
+
+**Stored as:** `annualized_return_cum` (percentage)
 
 #### Linear vs. Compound Annualization
 

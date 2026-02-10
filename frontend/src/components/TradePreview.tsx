@@ -9,6 +9,7 @@ interface Props {
   accountId?: string;
   portfolioValue?: number;
   onSymphonyClick?: (symphonyId: string) => void;
+  autoRefreshEnabled?: boolean;
 }
 
 interface SymphonyBreakdown {
@@ -33,7 +34,7 @@ function fmtDollar(v: number): string {
   return "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Props) {
+export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoRefreshEnabled = true }: Props) {
   const [trades, setTrades] = useState<TradePreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +67,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick }: Pro
     if (accountId) fetchPreview();
   }, [accountId]);
 
-  useAutoRefresh(fetchPreview, 60_000);
+  useAutoRefresh(fetchPreview, 60_000, autoRefreshEnabled);
 
   const toggleExpand = (key: string) => {
     setExpanded((prev) => {

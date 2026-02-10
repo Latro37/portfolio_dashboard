@@ -140,11 +140,27 @@ def compute_cagr(pv_start: float, pv_end: float, days_elapsed: int) -> float:
 
 
 def compute_annualized_return(twr_decimal: float, days_elapsed: int) -> float:
-    """Compound annualized return from cumulative TWR decimal."""
+    """Compound annualized return from cumulative TWR decimal.
+
+    Annualizes the Time-Weighted Return — measures pure strategy
+    performance independent of cash-flow timing.
+    """
     if days_elapsed <= 0:
         return 0.0
     years = days_elapsed / 365.25
     return ((1 + twr_decimal) ** (1 / years) - 1) * 100
+
+
+def compute_annualized_return_cumulative(cum_ret_decimal: float, days_elapsed: int) -> float:
+    """Compound annualized return from cumulative return decimal.
+
+    Annualizes the cumulative return (profit / net_deposits) — reflects
+    the real-world dollar growth rate of the investor's capital.
+    """
+    if days_elapsed <= 0:
+        return 0.0
+    years = days_elapsed / 365.25
+    return ((1 + cum_ret_decimal) ** (1 / years) - 1) * 100
 
 
 def compute_drawdown(pv_series: List[float]) -> Tuple[float, float]:
@@ -310,6 +326,9 @@ def _compute_row(
     row["cagr"] = round(compute_cagr(pv[0], pv[i], days_elapsed) * 100, 4)
     ann_ret = compute_annualized_return(twr_dec, days_elapsed)
     row["annualized_return"] = round(ann_ret, 4)
+    cum_ret_dec = compute_cumulative_return(pv[i], deposits[i])
+    ann_ret_cum = compute_annualized_return_cumulative(cum_ret_dec, days_elapsed)
+    row["annualized_return_cum"] = round(ann_ret_cum, 4)
 
     # --- MWR (one IRR solve) ---
     mwr_ann, mwr_period = compute_mwr(dates[: i + 1], pv[: i + 1], ext_flows)
@@ -341,10 +360,10 @@ def _compute_row(
     # --- Sortino ---
     row["sortino_ratio"] = round(compute_sortino(rets_window, rf_daily), 4)
 
-    # --- Calmar (full-precision intermediates) ---
+    # --- Calmar (full-precision intermediates, uses cumulative-based ann return) ---
     max_dd_full = max_dd * 100
     row["calmar_ratio"] = round(
-        compute_calmar(ann_ret, max_dd_full), 4
+        compute_calmar(ann_ret_cum, max_dd_full), 4
     ) if days_elapsed > 0 else 0.0
 
     # --- Best / Worst day ---

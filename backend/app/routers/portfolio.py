@@ -14,7 +14,7 @@ from app.models import (
     Transaction, CashFlow, SyncState,
 )
 from app.schemas import (
-    AccountInfo, PortfolioSummary, DailyPortfolioRow, DailyMetricsRow,
+    AccountInfo, PortfolioSummary, DailyPortfolioRow,
     HoldingsForDate, HoldingSnapshot, TransactionRow, CashFlowRow,
     PerformancePoint, SyncStatus, ManualCashFlowRequest,
 )
@@ -233,6 +233,8 @@ def get_summary(
         daily_return_pct=round(m.get("daily_return_pct", 0), 4),
         cumulative_return_pct=round(m.get("cumulative_return_pct", 0), 4),
         cagr=round(m.get("cagr", 0), 4),
+        annualized_return=round(m.get("annualized_return", 0), 4),
+        annualized_return_cum=round(m.get("annualized_return_cum", 0), 4),
         time_weighted_return=round(m.get("time_weighted_return", 0), 4),
         money_weighted_return=round(m.get("money_weighted_return", 0), 4),
         money_weighted_return_period=round(m.get("money_weighted_return_period", 0), 4),
@@ -393,6 +395,8 @@ def get_summary_live(
         "daily_return_pct": round(m.get("daily_return_pct", 0), 4),
         "cumulative_return_pct": round(m.get("cumulative_return_pct", 0), 4),
         "cagr": round(m.get("cagr", 0), 4),
+        "annualized_return": round(m.get("annualized_return", 0), 4),
+        "annualized_return_cum": round(m.get("annualized_return_cum", 0), 4),
         "time_weighted_return": round(m.get("time_weighted_return", 0), 4),
         "money_weighted_return": round(m.get("money_weighted_return", 0), 4),
         "money_weighted_return_period": round(m.get("money_weighted_return_period", 0), 4),
@@ -558,26 +562,6 @@ def get_performance(
 
 
 # ------------------------------------------------------------------
-# Metrics
-# ------------------------------------------------------------------
-
-@router.get("/metrics")
-def get_metrics(
-    account_id: Optional[str] = Query(None, description="Sub-account ID"),
-    db: Session = Depends(get_db),
-):
-    """All daily metrics."""
-    ids = _resolve_account_ids(db, account_id)
-    rows = db.query(DailyMetrics).filter(
-        DailyMetrics.account_id.in_(ids)
-    ).order_by(DailyMetrics.date).all()
-    return [
-        {c.name: getattr(r, c.name) for c in DailyMetrics.__table__.columns}
-        for r in rows
-    ]
-
-
-# ------------------------------------------------------------------
 # Holdings
 # ------------------------------------------------------------------
 
@@ -592,6 +576,8 @@ def get_holdings(
 
     base_query = db.query(HoldingsHistory).filter(HoldingsHistory.account_id.in_(ids))
 
+    rows = []
+    latest_date = None
     if target_date:
         d = date.fromisoformat(target_date)
         rows = base_query.filter(
@@ -601,15 +587,14 @@ def get_holdings(
             latest_date = rows[0].date
             rows = [r for r in rows if r.date == latest_date]
         else:
-            return {"date": target_date, "holdings": []}
+            latest_date = d
     else:
-        latest_date = base_query.with_entities(HoldingsHistory.date).order_by(
+        ld = base_query.with_entities(HoldingsHistory.date).order_by(
             HoldingsHistory.date.desc()
         ).first()
-        if not latest_date:
-            return {"date": None, "holdings": []}
-        latest_date = latest_date[0]
-        rows = base_query.filter_by(date=latest_date).all()
+        if ld:
+            latest_date = ld[0]
+            rows = base_query.filter_by(date=latest_date).all()
 
     # Fetch notional values from Composer holding-stats for market-value-based allocation
     # For single account, call the API; for aggregate, call each sub-account
@@ -633,14 +618,25 @@ def get_holdings(
         else:
             holdings_by_symbol[r.symbol] = {"symbol": r.symbol, "quantity": r.quantity}
 
-    holdings = []
-    for sym, h in holdings_by_symbol.items():
-        market_value = notional_map.get(sym, 0.0)
-        holdings.append({
-            "symbol": sym,
-            "quantity": h["quantity"],
-            "market_value": round(market_value, 2),
-        })
+    if holdings_by_symbol:
+        # Have stored history — merge with notional values
+        holdings = []
+        for sym, h in holdings_by_symbol.items():
+            market_value = notional_map.get(sym, 0.0)
+            holdings.append({
+                "symbol": sym,
+                "quantity": h["quantity"],
+                "market_value": round(market_value, 2),
+            })
+    elif notional_map:
+        # No stored history but API returned holding stats — use API data directly
+        holdings = [
+            {"symbol": sym, "quantity": 0, "market_value": round(val, 2)}
+            for sym, val in notional_map.items()
+        ]
+        latest_date = date.today()
+    else:
+        return {"date": str(latest_date) if latest_date else None, "holdings": []}
 
     total_value = sum(h["market_value"] for h in holdings)
     for h in holdings:

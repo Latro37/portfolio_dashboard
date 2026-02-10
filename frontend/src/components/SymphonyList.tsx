@@ -12,6 +12,7 @@ interface Props {
   onSelect: (symphony: SymphonyInfo) => void;
   onRefresh?: () => void | Promise<void>;
   refreshLoading?: boolean;
+  autoRefreshEnabled?: boolean;
 }
 
 function fmtDollar(v: number): string {
@@ -30,7 +31,7 @@ function colorVal(v: number): string {
   return "text-muted-foreground";
 }
 
-export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefresh, refreshLoading }: Props) {
+export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefresh, refreshLoading, autoRefreshEnabled = true }: Props) {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   const wrappedRefresh = useCallback(async () => {
@@ -38,7 +39,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
     setLastRefreshed(new Date());
   }, [onRefresh]);
 
-  useAutoRefresh(wrappedRefresh, onRefresh ? 60_000 : 999_999_999);
+  useAutoRefresh(wrappedRefresh, 60_000, !!onRefresh && autoRefreshEnabled);
 
   if (!symphonies.length) {
     return (

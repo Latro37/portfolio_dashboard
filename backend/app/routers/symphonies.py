@@ -503,7 +503,12 @@ def get_symphony_backtest(
     last_market_day = data.get("last_market_day", 0)
 
     # Pre-compute summary metrics from backtest series
-    summary_metrics = _compute_backtest_summary(dvm_capital, first_day, last_market_day)
+    # dvm_capital is {symphony_id: {day_offset: value}} — extract the inner series
+    dvm_series = {}
+    if dvm_capital:
+        first_key = next(iter(dvm_capital))
+        dvm_series = dvm_capital[first_key] if isinstance(dvm_capital[first_key], dict) else dvm_capital
+    summary_metrics = _compute_backtest_summary(dvm_series, first_day, last_market_day)
 
     # Upsert cache
     existing = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()

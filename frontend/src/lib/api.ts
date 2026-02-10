@@ -67,6 +67,8 @@ export interface Summary {
   daily_return_pct: number;
   cumulative_return_pct: number;
   cagr: number;
+  annualized_return: number;
+  annualized_return_cum: number;
   time_weighted_return: number;
   money_weighted_return: number;
   money_weighted_return_period: number;

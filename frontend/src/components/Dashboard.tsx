@@ -180,7 +180,7 @@ export default function Dashboard() {
       }
     }
 
-    // 3. Live holdings from symphony data
+    // 3. Live holdings from symphony data (only if non-empty)
     const holdingMap = new Map<string, { value: number; pctChange: number }>(); 
     for (const sym of freshSymphonies) {
       for (const h of sym.holdings) {
@@ -192,19 +192,21 @@ export default function Dashboard() {
         }
       }
     }
-    const totalValue = Array.from(holdingMap.values()).reduce((s, h) => s + h.value, 0);
-    const liveHoldings: HoldingsResponse = {
-      date: new Date().toISOString().slice(0, 10),
-      holdings: Array.from(holdingMap.entries())
-        .map(([symbol, h]) => ({
-          symbol,
-          quantity: 0, // not available from symphony holdings
-          market_value: h.value,
-          allocation_pct: totalValue > 0 ? (h.value / totalValue) * 100 : 0,
-        }))
-        .sort((a, b) => b.market_value - a.market_value),
-    };
-    setHoldings(liveHoldings);
+    if (holdingMap.size > 0) {
+      const totalValue = Array.from(holdingMap.values()).reduce((s, h) => s + h.value, 0);
+      const liveHoldings: HoldingsResponse = {
+        date: new Date().toISOString().slice(0, 10),
+        holdings: Array.from(holdingMap.entries())
+          .map(([symbol, h]) => ({
+            symbol,
+            quantity: 0, // not available from symphony holdings
+            market_value: h.value,
+            allocation_pct: totalValue > 0 ? (h.value / totalValue) * 100 : 0,
+          }))
+          .sort((a, b) => b.market_value - a.market_value),
+      };
+      setHoldings(liveHoldings);
+    }
   }, [liveEnabled, resolvedAccountId, period, customStart, customEnd]);
 
   const handleCredentialChange = (credName: string) => {
@@ -277,25 +279,23 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
-        {/* Live toggle */}
-        <div className="flex items-center justify-end">
-          <button
-            onClick={() => toggleLive(!liveEnabled)}
-            className="cursor-pointer flex items-center gap-2 rounded-full border border-border/50 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-            title={liveEnabled ? "Live updates enabled — click to disable" : "Live updates disabled — click to enable"}
-          >
-            <span className={`inline-block h-2 w-2 rounded-full transition-colors ${liveEnabled ? "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"}`} />
-            <span className={liveEnabled ? "text-foreground" : "text-muted-foreground"}>Live</span>
-          </button>
-        </div>
-
-        {/* Header: PV, daily change, account switcher, sync button */}
+        {/* Header: PV, total/today change, live toggle, account switcher, sync */}
         <PortfolioHeader
           summary={summary!}
           onSync={handleSync}
           syncing={syncing}
           todayDollarChange={symphonies.length ? symphonies.reduce((sum, s) => sum + s.last_dollar_change, 0) : undefined}
           todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
+          liveToggle={
+            <button
+              onClick={() => toggleLive(!liveEnabled)}
+              className="cursor-pointer flex items-center gap-2 rounded-full border border-border/50 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+              title={liveEnabled ? "Live updates enabled — click to disable" : "Live updates disabled — click to enable"}
+            >
+              <span className={`inline-block h-2 w-2 rounded-full transition-colors ${liveEnabled ? "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"}`} />
+              <span className={liveEnabled ? "text-foreground" : "text-muted-foreground"}>Live</span>
+            </button>
+          }
           accountSwitcher={
             accounts.length > 0 ? (
               <AccountSwitcher
@@ -348,12 +348,14 @@ export default function Dashboard() {
             finally { setSymphoniesRefreshing(false); }
           }}
           refreshLoading={symphoniesRefreshing}
+          autoRefreshEnabled={liveEnabled}
         />
 
         {/* Next Automated Trade Preview */}
         <TradePreview
           accountId={resolvedAccountId}
           portfolioValue={symphonies.length ? symphonies.reduce((s, x) => s + x.value, 0) : summary?.portfolio_value}
+          autoRefreshEnabled={liveEnabled}
           onSymphonyClick={(symphonyId) => {
             const match = symphonies.find((s) => s.id === symphonyId);
             if (match) {
@@ -364,7 +366,7 @@ export default function Dashboard() {
         />
 
         {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
-        <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />
+        <DetailTabs accountId={resolvedAccountId} summary={summary ?? undefined} onDataChange={fetchData} />
 
         {/* Metrics Guide link */}
         <div className="pt-2 pb-4 text-center">

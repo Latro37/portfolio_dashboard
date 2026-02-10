@@ -12,6 +12,7 @@ from app.services.metrics import (
     compute_mwr,
     compute_cagr,
     compute_annualized_return,
+    compute_annualized_return_cumulative,
     compute_drawdown,
     compute_volatility,
     compute_sharpe,
@@ -167,12 +168,12 @@ class TestComputeCAGR:
 
 class TestComputeAnnualizedReturn:
     def test_one_year(self):
-        # 10% TWR over exactly 1 year → compound annualized ≈ 10%
+        # 10% return over exactly 1 year → compound annualized ≈ 10%
         result = compute_annualized_return(0.10, 365)
         assert result == pytest.approx(10.0, rel=0.02)
 
     def test_half_year(self):
-        # 5% TWR over half a year → compound annualized ≈ 10.25%
+        # 5% return over half a year → compound annualized ≈ 10.25%
         result = compute_annualized_return(0.05, 183)
         assert result == pytest.approx(10.25, rel=0.05)
 
@@ -180,7 +181,7 @@ class TestComputeAnnualizedReturn:
         assert compute_annualized_return(0.10, 0) == 0.0
 
     def test_compound_not_linear(self):
-        # 26% TWR over 195 days (~0.534 years)
+        # 26% return over 195 days (~0.534 years)
         # Linear would give: 26 / 0.534 ≈ 48.7%
         # Compound gives: (1.26)^(1/0.534) - 1 ≈ 54.3%
         result = compute_annualized_return(0.26, 195)
@@ -192,11 +193,43 @@ class TestComputeAnnualizedReturn:
         assert result == pytest.approx(expected, rel=1e-6)
 
     def test_doubling_in_half_year(self):
-        # 100% TWR in 183 days → compound annualized = (2.0)^(365.25/183) - 1 ≈ 300%+
+        # 100% return in 183 days → compound annualized = (2.0)^(365.25/183) - 1 ≈ 300%+
         result = compute_annualized_return(1.0, 183)
         years = 183 / 365.25
         expected = ((2.0) ** (1 / years) - 1) * 100
         assert result == pytest.approx(expected, rel=1e-6)
+
+
+# =====================================================================
+# compute_annualized_return_cumulative
+# =====================================================================
+
+class TestComputeAnnualizedReturnCumulative:
+    def test_one_year(self):
+        # 10% cumulative return over exactly 1 year → annualized ≈ 10%
+        result = compute_annualized_return_cumulative(0.10, 365)
+        assert result == pytest.approx(10.0, rel=0.02)
+
+    def test_half_year(self):
+        # 5% cumulative return over half a year → annualized ≈ 10.25%
+        result = compute_annualized_return_cumulative(0.05, 183)
+        assert result == pytest.approx(10.25, rel=0.05)
+
+    def test_zero_days(self):
+        assert compute_annualized_return_cumulative(0.10, 0) == 0.0
+
+    def test_matches_formula(self):
+        # 15% cumulative return over 200 days
+        result = compute_annualized_return_cumulative(0.15, 200)
+        years = 200 / 365.25
+        expected = ((1.15) ** (1 / years) - 1) * 100
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_same_math_as_twr_version(self):
+        # Both functions use identical math, just different semantic inputs
+        result_twr = compute_annualized_return(0.20, 300)
+        result_cum = compute_annualized_return_cumulative(0.20, 300)
+        assert result_twr == pytest.approx(result_cum, rel=1e-10)
 
 
 # =====================================================================
@@ -419,7 +452,7 @@ class TestComputeAllMetrics:
         assert len(results) == 5
         expected_keys = {
             "date", "daily_return_pct", "total_return_dollars", "cumulative_return_pct",
-            "time_weighted_return", "cagr", "annualized_return",
+            "time_weighted_return", "cagr", "annualized_return", "annualized_return_cum",
             "money_weighted_return", "money_weighted_return_period",
             "win_rate", "num_wins", "num_losses", "avg_win_pct", "avg_loss_pct",
             "max_drawdown", "current_drawdown",
@@ -661,7 +694,7 @@ class TestCrossValidation:
         results = compute_all_metrics(drawdown_series["daily_rows"], drawdown_series["cash_flows"])
         last = results[-1]
         if last["max_drawdown"] != 0:
-            expected_calmar = last["annualized_return"] / abs(last["max_drawdown"])
+            expected_calmar = last["annualized_return_cum"] / abs(last["max_drawdown"])
             assert last["calmar_ratio"] == pytest.approx(expected_calmar, abs=0.01)
 
     def test_perf_series_matches_all_metrics(self, deposit_series):

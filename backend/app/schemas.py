@@ -48,6 +48,7 @@ class DailyMetricsRow(BaseModel):
     total_return_dollars: float
     cagr: float
     annualized_return: float
+    annualized_return_cum: float
     time_weighted_return: float
     money_weighted_return: float
     win_rate: float
@@ -73,6 +74,8 @@ class PortfolioSummary(BaseModel):
     daily_return_pct: float
     cumulative_return_pct: float
     cagr: float
+    annualized_return: float
+    annualized_return_cum: float
     time_weighted_return: float
     money_weighted_return: float
     money_weighted_return_period: float
