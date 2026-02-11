@@ -165,3 +165,29 @@ def save_symphony_export_path(local_path: str):
         data["symphony_export"] = {}
     data["symphony_export"]["local_path"] = local_path
     _save_accounts_json(data)
+
+
+def load_screenshot_config() -> Optional[dict]:
+    """Return the screenshot config block, or None if not configured.
+
+    Always re-reads accounts.json from disk.
+    """
+    global _accounts_json_cache
+    try:
+        _accounts_json_cache = None
+        data = _load_accounts_json()
+        cfg = data.get("screenshot")
+        if not cfg or not isinstance(cfg, dict):
+            return None
+        return cfg
+    except Exception:
+        return None
+
+
+def save_screenshot_config(config: dict):
+    """Persist the screenshot config block into accounts.json."""
+    global _accounts_json_cache
+    _accounts_json_cache = None
+    data = _load_accounts_json()
+    data["screenshot"] = config
+    _save_accounts_json(data)

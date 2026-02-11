@@ -173,7 +173,9 @@ composer_portfolio_visualizer/
 │   │   │   ├── SymphonyDetail.tsx # Symphony modal: live/backtest charts + metrics
 │   │   │   ├── TradePreview.tsx   # Pending rebalance trades
 │   │   │   ├── MetricsGuide.tsx   # METRICS.md viewer overlay
-│   │   │   ├── SettingsModal.tsx  # Export path + Google Drive config
+│   │   │   ├── SettingsModal.tsx  # Export path + daily snapshot config
+│   │   │   ├── SnapshotView.tsx   # Off-screen screenshot render (1200×900, 4:3)
+│   │   │   ├── Toast.tsx          # Lightweight toast notifications
 │   │   │   └── InfoTooltip.tsx    # Reusable tooltip component
 │   │   ├── hooks/
 │   │   │   ├── useAutoRefresh.ts  # Auto-refresh during market hours
@@ -203,6 +205,8 @@ composer_portfolio_visualizer/
 | GET | `/api/health` | Health check |
 | GET | `/api/config` | Client-safe config (Finnhub key, export status) |
 | POST | `/api/config/symphony-export` | Save symphony export local path |
+| POST | `/api/config/screenshot` | Save daily snapshot configuration |
+| POST | `/api/screenshot` | Upload PNG screenshot to configured folder |
 | GET | `/api/metrics-guide` | Serve METRICS.md as plain text |
 | GET | `/api/accounts` | List discovered sub-accounts |
 | GET | `/api/summary` | Portfolio summary with all latest metrics (computed live) |
@@ -440,6 +444,21 @@ Symphony definitions (logic trees) are automatically exported as JSON files:
 2. When the **backtest endpoint** detects a stale cache (symphony edited since last backtest), it triggers `export_single_symphony()` for immediate export of the changed symphony.
 
 Files are saved locally as `<SymphonyName>/<SymphonyName>_<YYYY-MM-DD>.json`. The local export path is configured via the frontend Settings modal (`POST /api/config/symphony-export`) and persisted in `accounts.json`.
+
+### Daily Snapshot
+
+A configurable screenshot feature that captures a clean portfolio snapshot image:
+
+1. **Automatic**: After the once-per-day post-close sync (4 PM ET), if enabled in settings, `Dashboard.tsx` renders an off-screen `SnapshotView` component and captures it via `html-to-image`.
+2. **Manual**: A camera button in `PortfolioHeader.tsx` triggers the same capture flow on demand.
+3. The captured PNG is POSTed to `POST /api/screenshot`, which saves it as `Snapshot_YYYY-MM-DD.png` in the configured folder.
+
+The snapshot layout is a fixed 1200×900px (4:3) dark card with:
+- Header (date, optional portfolio value + today's change)
+- One full-width chart (TWR / Portfolio Value / MWR / Drawdown — user-configurable)
+- Metric cards in a 4-column grid (user selects which metrics to include)
+
+Configuration is stored in `accounts.json` under the `screenshot` key and managed via the Settings modal's "Daily Snapshot" section. Options include: account, chart type, date range (preset or custom start date), hide portfolio value, and metric selection.
 
 ### Schema Migrations
 

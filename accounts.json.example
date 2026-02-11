@@ -3,6 +3,16 @@
   "symphony_export": {
     "local_path": ""
   },
+  "screenshot": {
+    "enabled": false,
+    "local_path": "",
+    "account_id": "",
+    "chart_mode": "twr",
+    "period": "ALL",
+    "custom_start": "",
+    "hide_portfolio_value": false,
+    "metrics": ["twr", "sharpe", "max_drawdown", "volatility", "cumulative_return_pct", "calmar", "win_rate", "best_day"]
+  },
   "accounts": [
     {
       "name": "Primary",

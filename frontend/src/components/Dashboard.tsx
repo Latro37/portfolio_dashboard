@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo } from "@/lib/api";
+import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig } from "@/lib/api";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
 import { isMarketOpen, isAfterClose, todayET } from "@/lib/marketHours";
 import { PortfolioHeader } from "./PortfolioHeader";
@@ -16,8 +16,11 @@ import { TradePreview } from "./TradePreview";
 import { MetricsGuide } from "./MetricsGuide";
 import { SettingsModal } from "./SettingsModal";
 import { AccountSwitcher } from "./AccountSwitcher";
+import { SnapshotView, DEFAULT_METRICS } from "./SnapshotView";
+import { ToastContainer, showToast } from "./Toast";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toPng } from "html-to-image";
 
 type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
 
@@ -51,6 +54,10 @@ export default function Dashboard() {
   const baseHoldingsRef = useRef<HoldingsResponse | null>(null);
   const basePerformanceRef = useRef<PerformancePoint[]>([]);
   const baseSummaryRef = useRef<Summary | null>(null);
+  const [screenshotConfig, setScreenshotConfig] = useState<ScreenshotConfig | null>(null);
+  const [snapshotVisible, setSnapshotVisible] = useState(false);
+  const snapshotRef = useRef<HTMLDivElement>(null);
+  const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary } | null>(null);
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
@@ -65,7 +72,10 @@ export default function Dashboard() {
 
   // Load accounts + config on mount
   useEffect(() => {
-    api.getConfig().then((cfg) => setFinnhubKey(cfg.finnhub_api_key)).catch(() => {});
+    api.getConfig().then((cfg) => {
+      setFinnhubKey(cfg.finnhub_api_key);
+      if (cfg.screenshot) setScreenshotConfig(cfg.screenshot);
+    }).catch(() => {});
     api.getAccounts().then((accts) => {
       setAccounts(accts);
       if (accts.length > 0) {
@@ -126,6 +136,64 @@ export default function Dashboard() {
     fetchData();
   }, [fetchData]);
 
+  // Snapshot capture logic (must be defined before the post-close useEffect that references it)
+  const triggerSnapshot = useCallback(async (autoMode = false) => {
+    let cfg = screenshotConfig;
+    try {
+      const appCfg = await api.getConfig();
+      if (appCfg.screenshot) {
+        cfg = appCfg.screenshot;
+        setScreenshotConfig(cfg);
+      }
+    } catch { /* use cached */ }
+
+    if (!cfg) {
+      if (!autoMode) showToast("Configure screenshot settings first", "error");
+      return;
+    }
+    if (autoMode && !cfg.enabled) return;
+    if (!cfg.local_path) {
+      if (!autoMode) showToast("Set a screenshot save folder in Settings", "error");
+      return;
+    }
+
+    const ssAccountId = cfg.account_id || resolvedAccountId;
+    const ssPeriod = cfg.period === "custom" ? undefined : cfg.period;
+    const ssStart = cfg.period === "custom" ? cfg.custom_start : undefined;
+
+    try {
+      const [ssSum, ssPerf] = await Promise.all([
+        api.getSummary(ssAccountId, ssPeriod, ssStart, undefined),
+        api.getPerformance(ssAccountId, ssPeriod, ssStart, undefined),
+      ]);
+      setSnapshotData({ perf: ssPerf, sum: ssSum });
+      setSnapshotVisible(true);
+
+      // Wait for render then capture
+      await new Promise((r) => setTimeout(r, 500));
+
+      if (snapshotRef.current) {
+        const dataUrl = await toPng(snapshotRef.current, {
+          width: 1200,
+          height: 900,
+          pixelRatio: 2,
+          backgroundColor: "#09090b",
+        });
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const dateStr = todayET();
+        await api.uploadScreenshot(blob, dateStr);
+        showToast("Screenshot saved");
+      }
+    } catch (e) {
+      console.error("Screenshot capture failed:", e);
+      if (!autoMode) showToast("Screenshot failed", "error");
+    } finally {
+      setSnapshotVisible(false);
+      setSnapshotData(null);
+    }
+  }, [screenshotConfig, resolvedAccountId]);
+
   // Once-per-day post-close update: ensure a full data refresh happens
   // after market close each trading day, regardless of the Live toggle.
   // Runs immediately on mount AND on a 60s interval so there's no delay
@@ -141,6 +209,8 @@ export default function Dashboard() {
       try {
         await api.triggerSync(resolvedAccountId);
         await fetchData();
+        // Auto-capture screenshot after post-close sync
+        triggerSnapshot(true);
       } catch {
         // If it fails, clear the flag so it retries next interval
         localStorage.removeItem("last_post_close_update");
@@ -149,7 +219,7 @@ export default function Dashboard() {
     doPostCloseUpdate(); // immediate check on mount
     const id = setInterval(doPostCloseUpdate, 60_000);
     return () => clearInterval(id);
-  }, [resolvedAccountId, fetchData]);
+  }, [resolvedAccountId, fetchData, triggerSnapshot]);
 
   const toggleLive = useCallback((enabled: boolean) => {
     setLiveEnabled(enabled);
@@ -319,6 +389,7 @@ export default function Dashboard() {
           onSync={handleSync}
           syncing={syncing}
           onSettings={() => setShowSettings(true)}
+          onSnapshot={() => triggerSnapshot(false)}
           todayDollarChange={symphonies.length ? symphonies.reduce((sum, s) => sum + s.last_dollar_change, 0) : undefined}
           todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
           liveToggle={
@@ -432,6 +503,24 @@ export default function Dashboard() {
       {showSettings && (
         <SettingsModal onClose={() => setShowSettings(false)} />
       )}
+
+      {/* Off-screen snapshot view for html-to-image capture */}
+      {snapshotVisible && snapshotData && screenshotConfig && (
+        <div style={{ position: "fixed", left: "-9999px", top: 0, zIndex: -1 }}>
+          <SnapshotView
+            ref={snapshotRef}
+            data={snapshotData.perf}
+            summary={snapshotData.sum}
+            chartMode={(screenshotConfig.chart_mode || "twr") as "portfolio" | "twr" | "mwr" | "drawdown"}
+            selectedMetrics={screenshotConfig.metrics?.length ? screenshotConfig.metrics : DEFAULT_METRICS}
+            hidePortfolioValue={screenshotConfig.hide_portfolio_value ?? false}
+            todayDollarChange={symphonies.length ? symphonies.reduce((s, x) => s + x.last_dollar_change, 0) : undefined}
+            todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
+          />
+        </div>
+      )}
+
+      <ToastContainer />
     </div>
   );
 }

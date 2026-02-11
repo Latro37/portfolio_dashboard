@@ -295,9 +295,21 @@ export interface SymphonyExportStatus {
   local_path: string;
 }
 
+export interface ScreenshotConfig {
+  enabled: boolean;
+  local_path: string;
+  account_id: string;
+  chart_mode: string;
+  period: string;
+  custom_start: string;
+  hide_portfolio_value: boolean;
+  metrics: string[];
+}
+
 export interface AppConfig {
   finnhub_api_key: string | null;
   symphony_export: SymphonyExportStatus | null;
+  screenshot: ScreenshotConfig | null;
 }
 
 export const api = {
@@ -395,6 +407,19 @@ export const api = {
       params.set("period", period);
     }
     return fetchJSON<Summary>(`/summary/live?${params.toString()}`);
+  },
+  saveScreenshotConfig: (config: ScreenshotConfig) =>
+    fetch(`${API_BASE}/config/screenshot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
+  uploadScreenshot: (blob: Blob, dateStr: string) => {
+    const form = new FormData();
+    form.append("file", blob, `Snapshot_${dateStr}.png`);
+    form.append("date", dateStr);
+    return fetch(`${API_BASE}/screenshot`, { method: "POST", body: form })
+      .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); });
   },
   getSymphonyLiveSummary: (symphonyId: string, accountId: string, livePv: number, liveNd: number, period?: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();

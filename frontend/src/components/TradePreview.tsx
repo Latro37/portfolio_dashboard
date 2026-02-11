@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { api, TradePreviewItem } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
@@ -188,8 +188,8 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
                 const acctPrevWeight = allPrevZero ? 0 : portfolioValue ? Math.max(0, (row.totalPrevValue / portfolioValue) * 100) : 0;
                 const acctNextWeight = allNextZero ? 0 : portfolioValue ? Math.max(0, ((row.totalPrevValue + row.totalNotional) / portfolioValue) * 100) : 0;
                 return (
-                  <>
-                    <tr key={key} className="border-b border-border/50">
+                  <React.Fragment key={key}>
+                    <tr className="border-b border-border/50">
                       <td className="py-2.5 pr-5 font-medium whitespace-nowrap">{row.ticker}</td>
                       <td className={`py-2.5 px-5 font-semibold whitespace-nowrap ${row.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
                         {row.side}
@@ -245,7 +245,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
                         </td>
                       </tr>
                     ))}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>

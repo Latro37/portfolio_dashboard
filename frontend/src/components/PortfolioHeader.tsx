@@ -2,7 +2,7 @@
 
 import { ReactNode } from "react";
 import { Summary } from "@/lib/api";
-import { RefreshCw, Settings } from "lucide-react";
+import { RefreshCw, Settings, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
   onSync: () => void;
   syncing: boolean;
   onSettings?: () => void;
+  onSnapshot?: () => void;
   accountSwitcher?: ReactNode;
   liveToggle?: ReactNode;
   todayDollarChange?: number;
@@ -26,7 +27,7 @@ function fmtPct(v: number) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
-export function PortfolioHeader({ summary, onSync, syncing, onSettings, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
+export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapshot, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
   const totalPositive = summary.total_return_dollars >= 0;
   const totalPct = summary.cumulative_return_pct;
   const dayDollar = todayDollarChange ?? 0;
@@ -62,6 +63,18 @@ export function PortfolioHeader({ summary, onSync, syncing, onSettings, accountS
             <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             {syncing ? "Syncing" : "Update"}
           </Button>
+          {/* Snapshot button */}
+          {onSnapshot && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onSnapshot}
+              className="cursor-pointer h-8 w-8 text-muted-foreground hover:text-foreground"
+              title="Take screenshot"
+            >
+              <Camera className="h-4 w-4" />
+            </Button>
+          )}
           {/* Settings button */}
           {onSettings && (
             <Button

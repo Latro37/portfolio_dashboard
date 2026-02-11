@@ -11,6 +11,7 @@ A portfolio tracker and analytics dashboard for [Composer](https://www.composer.
 - **Symphony analytics** — per-symphony live metrics, backtest charts, allocation history
 - **Backtest caching** — cached with version-check invalidation (detects symphony edits in Composer)
 - **Symphony structure export** — auto-saves symphony JSON definitions locally
+- **Daily snapshot** — configurable screenshot captured after market close or manually via camera button
 - **Trade preview** — see pending rebalance trades before they execute
 - **Live intraday overlay** — real-time portfolio value updates during market hours
 - **Real-time ticker quotes** — live price changes per holding via Finnhub WebSocket

@@ -5,7 +5,7 @@ import time
 from datetime import date, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,7 @@ from app.schemas import (
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.composer_client import ComposerClient
-from app.config import load_accounts, load_finnhub_key, load_symphony_export_config, save_symphony_export_path
+from app.config import load_accounts, load_finnhub_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -835,9 +835,11 @@ def get_app_config():
         export_status = {
             "local_path": export_cfg.get("local_path", ""),
         }
+    screenshot_cfg = load_screenshot_config()
     return {
         "finnhub_api_key": load_finnhub_key(),
         "symphony_export": export_status,
+        "screenshot": screenshot_cfg,
     }
 
 
@@ -852,3 +854,44 @@ def set_symphony_export_config(body: _SymphonyExportBody):
         raise HTTPException(400, "local_path is required")
     save_symphony_export_path(local_path)
     return {"ok": True, "local_path": local_path}
+
+
+@router.post("/config/screenshot")
+def set_screenshot_config(body: dict):
+    """Save screenshot configuration from the frontend settings modal."""
+    save_screenshot_config(body)
+    return {"ok": True}
+
+
+@router.post("/screenshot")
+async def upload_screenshot(request: Request):
+    """Receive a PNG screenshot and save it to the configured folder."""
+    import os
+
+    cfg = load_screenshot_config()
+    if not cfg:
+        raise HTTPException(400, "Screenshot not configured")
+    local_path = cfg.get("local_path", "")
+    if not local_path:
+        raise HTTPException(400, "Screenshot save folder not configured")
+
+    form = await request.form()
+    file = form.get("file")
+    date_str = form.get("date", "")
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+
+    if not date_str:
+        from datetime import date as _date
+        date_str = _date.today().isoformat()
+
+    os.makedirs(local_path, exist_ok=True)
+    filename = f"Snapshot_{date_str}.png"
+    filepath = os.path.join(local_path, filename)
+
+    contents = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(contents)
+
+    logger.info("Screenshot saved to %s (%d bytes)", filepath, len(contents))
+    return {"ok": True, "path": filepath}
