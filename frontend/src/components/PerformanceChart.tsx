@@ -102,37 +102,110 @@ export function PerformanceChart({
 
   const formatPct = (v: number) => v.toFixed(2) + "%";
 
-  // Custom tooltip for TWR/Drawdown modes with overlay delta
+  const fmtDelta = (d: number) => (d >= 0 ? "+" : "") + formatPct(d);
+  const dCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
+
+  // Custom tooltip for TWR/Drawdown modes with overlay delta + prev day delta
   const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string) => {
     return ({ active, payload, label }: any) => {
       if (!active || !payload?.length) return null;
+      const idx = data.findIndex((d) => d.date === label);
+      const prev: any = idx > 0 ? data[idx - 1] : null;
       const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
       const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
       const pVal = primaryEntry?.value as number | undefined;
       const oVal = overlayEntry?.value as number | undefined;
       const hasBoth = pVal != null && oVal != null;
       const delta = hasBoth ? pVal - oVal : null;
+      const pPrev = prev ? prev[primaryKey] : null;
+      const pDayD = pVal != null && pPrev != null ? Number(pVal) - Number(pPrev) : null;
+      const oPrev = prev && oKey ? prev[oKey] : null;
+      const oDayD = oVal != null && oPrev != null ? Number(oVal) - Number(oPrev) : null;
+      const pDC = pDayD != null ? dCol(pDayD) : "#71717a";
+      const oDC = oDayD != null ? dCol(oDayD) : "#71717a";
+      const dDC = delta != null ? dCol(delta) : "#71717a";
       return (
-        <div style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px", margin: 0 }}>
+        <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
           <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
           {pVal != null && (
-            <p style={{ margin: 0, color: primaryEntry?.color || "#e4e4e7", lineHeight: 1.6 }}>
-              {showOverlay && oKey ? "Live" : primaryLabel} : {formatPct(pVal)}
-            </p>
+            <div>
+              <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
+                {showOverlay && oKey ? "Live" : primaryLabel} : {formatPct(pVal)}
+              </p>
+              {pDayD != null && (
+                <p key={`pd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Δ to Prev. Day: {fmtDelta(pDayD)}</p>
+              )}
+            </div>
           )}
           {showOverlay && oVal != null && (
-            <p style={{ margin: 0, color: overlayEntry?.color || overlayColor, lineHeight: 1.6 }}>
-              {oLabel} : {formatPct(oVal)}
-            </p>
+            <div>
+              <p style={{ margin: 0, lineHeight: 1.6, color: overlayColor }}>
+                {oLabel} : {formatPct(oVal)}
+              </p>
+              {oDayD != null && (
+                <p key={`od-${oDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: oDC }}>Δ to Prev. Day: {fmtDelta(oDayD)}</p>
+              )}
+            </div>
           )}
           {showOverlay && delta != null && (
-            <p style={{ margin: 0, color: delta >= 0 ? "#10b981" : "#ef4444", lineHeight: 1.6 }}>
-              Δ : {delta >= 0 ? "+" : ""}{formatPct(delta)}
+            <p key={`dl-${dDC}`} style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: dDC }}>
+              Δ : {fmtDelta(delta)}
             </p>
           )}
         </div>
       );
     };
+  };
+
+  // Custom tooltip for Portfolio mode with prev day delta (not on Deposits)
+  const renderPortfolioTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const idx = data.findIndex((d) => d.date === label);
+    const prev = idx > 0 ? data[idx - 1] : null;
+    return (
+      <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
+        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
+        {payload.map((entry: any) => {
+          const val = Number(entry.value);
+          const isDeposits = entry.dataKey === "net_deposits";
+          const name = entry.dataKey === "portfolio_value" ? "Portfolio" : "Deposits";
+          const prevVal = prev ? (prev as any)[entry.dataKey] : null;
+          const dayD = !isDeposits && prevVal != null && prevVal !== 0 ? ((val - Number(prevVal)) / Number(prevVal)) * 100 : null;
+          const dc = dayD != null ? dCol(dayD) : "#71717a";
+          return (
+            <div key={entry.dataKey}>
+              <p style={{ margin: 0, lineHeight: 1.6, color: entry.color || "#e4e4e7" }}>
+                {name} : {formatValue(val)}
+              </p>
+              {dayD != null && (
+                <p key={`pfd-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Δ to Prev. Day: {fmtDelta(dayD)}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Custom tooltip for MWR mode with prev day delta
+  const renderMwrTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const idx = data.findIndex((d) => d.date === label);
+    const prev = idx > 0 ? data[idx - 1] : null;
+    const entry = payload[0];
+    const val = Number(entry?.value);
+    const prevVal = prev ? prev.money_weighted_return : null;
+    const dayD = prevVal != null ? val - Number(prevVal) : null;
+    const dc = dayD != null ? dCol(dayD) : "#71717a";
+    return (
+      <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
+        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
+        <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>MWR : {formatPct(val)}</p>
+        {dayD != null && (
+          <p key={`md-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Δ to Prev. Day: {fmtDelta(dayD)}</p>
+        )}
+      </div>
+    );
   };
 
   const isCustomRange = startDate !== "" || endDate !== "";
@@ -281,19 +354,7 @@ export function PerformanceChart({
                 tickLine={false}
                 width={70}
               />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #27272a",
-                  borderRadius: 8,
-                  fontSize: 13,
-                }}
-                labelFormatter={(label: any) => formatDate(String(label))}
-                formatter={(value: any, name: any) => [
-                  formatValue(Number(value)),
-                  name === "portfolio_value" ? "Portfolio" : "Deposits",
-                ]}
-              />
+              <Tooltip content={renderPortfolioTooltip} />
               {showDeposits && (
                 <Area
                   type="monotone"
@@ -374,13 +435,13 @@ export function PerformanceChart({
             <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="mwrGradSplit" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset={0} stopColor="#8b5cf6" stopOpacity={0.3} />
-                  <stop offset={mwrOffset} stopColor="#8b5cf6" stopOpacity={0.05} />
+                  <stop offset={0} stopColor="#d946ef" stopOpacity={0.3} />
+                  <stop offset={mwrOffset} stopColor="#d946ef" stopOpacity={0.05} />
                   <stop offset={mwrOffset} stopColor="#ef4444" stopOpacity={0.15} />
                   <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
                 </linearGradient>
                 <linearGradient id="mwrStrokeSplit" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset={mwrOffset} stopColor="#8b5cf6" />
+                  <stop offset={mwrOffset} stopColor="#d946ef" />
                   <stop offset={mwrOffset} stopColor="#ef4444" />
                 </linearGradient>
               </defs>
@@ -400,16 +461,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #27272a",
-                  borderRadius: 8,
-                  fontSize: 13,
-                }}
-                labelFormatter={(label: any) => formatDate(String(label))}
-                formatter={(value: any) => [formatPct(Number(value)), "MWR"]}
-              />
+              <Tooltip content={renderMwrTooltip} />
               <Area
                 type="monotone"
                 dataKey="money_weighted_return"

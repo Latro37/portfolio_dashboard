@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSlug from "rehype-slug";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -13,6 +14,7 @@ interface Props {
 
 export function MetricsGuide({ onClose }: Props) {
   const [markdown, setMarkdown] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -25,6 +27,20 @@ export function MetricsGuide({ onClose }: Props) {
       .then(setMarkdown)
       .catch(() => setMarkdown("Failed to load metrics guide."));
   }, []);
+
+  // Handle anchor link clicks within the modal
+  const handleContentClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const anchor = target.closest("a");
+    if (anchor) {
+      const href = anchor.getAttribute("href");
+      if (href?.startsWith("#")) {
+        e.preventDefault();
+        const el = contentRef.current?.querySelector(href);
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  };
 
   return (
     <div
@@ -39,7 +55,7 @@ export function MetricsGuide({ onClose }: Props) {
           <X className="h-5 w-5" />
         </button>
 
-        <div className="p-8 prose prose-invert prose-sm max-w-none
+        <div ref={contentRef} onClick={handleContentClick} className="p-8 prose prose-invert prose-sm max-w-none
           prose-headings:text-foreground prose-headings:font-semibold
           prose-h1:text-2xl prose-h1:border-b prose-h1:border-border prose-h1:pb-3 prose-h1:mb-6
           prose-h2:text-xl prose-h2:mt-10 prose-h2:mb-4
@@ -61,7 +77,7 @@ export function MetricsGuide({ onClose }: Props) {
               Loading...
             </div>
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSlug]}>{markdown}</ReactMarkdown>
           )}
         </div>
       </div>

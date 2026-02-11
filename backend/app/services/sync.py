@@ -410,16 +410,18 @@ def _recompute_metrics(db: Session, account_id: str):
     settings = get_settings()
     metrics = compute_all_metrics(daily_dicts, cf_dicts, bench_dicts, settings.risk_free_rate)
 
-    # Upsert metrics
+    # Upsert metrics (filter keys to valid model columns to avoid schema mismatch crashes)
+    _dm_cols = {c.key for c in DailyMetrics.__table__.columns} - {"account_id"}
     for m in metrics:
         d = m["date"]
+        filtered = {k: v for k, v in m.items() if k in _dm_cols}
         existing = db.query(DailyMetrics).filter_by(account_id=account_id, date=d).first()
         if existing:
-            for k, v in m.items():
+            for k, v in filtered.items():
                 if k != "date":
                     setattr(existing, k, v)
         else:
-            db.add(DailyMetrics(account_id=account_id, **m))
+            db.add(DailyMetrics(account_id=account_id, **filtered))
 
     db.commit()
     logger.info("Metrics recomputed for %s: %d rows", account_id, len(metrics))
@@ -675,19 +677,21 @@ def _recompute_symphony_metrics(db: Session, account_id: str):
             metrics_to_persist = compute_all_metrics(daily_dicts, cf_dicts, None, settings.risk_free_rate)
             logger.debug("Full backfill metrics for symphony %s: %d days", sym_id, len(metrics_to_persist))
 
-        # Persist (upsert)
+        # Persist (upsert — filter keys to valid model columns)
+        _sdm_cols = {c.key for c in SymphonyDailyMetrics.__table__.columns} - {"account_id", "symphony_id"}
         for m in metrics_to_persist:
             d = m["date"]
+            filtered = {k: v for k, v in m.items() if k in _sdm_cols}
             existing = db.query(SymphonyDailyMetrics).filter_by(
                 account_id=account_id, symphony_id=sym_id, date=d
             ).first()
             if existing:
-                for k, v in m.items():
+                for k, v in filtered.items():
                     if k != "date":
                         setattr(existing, k, v)
             else:
                 db.add(SymphonyDailyMetrics(
-                    account_id=account_id, symphony_id=sym_id, **m
+                    account_id=account_id, symphony_id=sym_id, **filtered
                 ))
 
     db.commit()

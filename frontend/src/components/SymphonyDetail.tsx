@@ -83,37 +83,60 @@ const TOOLTIP_STYLE = {
   fontSize: 13,
 };
 
-// Custom tooltip for backtest chart with overlay delta (backtest is baseline)
+// Custom tooltip for backtest chart with overlay delta + prev day delta (backtest is baseline)
+const btDCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
+const btFmtDelta = (d: number) => (d >= 0 ? "+" : "") + formatPctAxis(d);
+
 function backtestOverlayTooltip(
   primaryKey: string, primaryLabel: string,
   oKey: string, oLabel: string,
   showOverlay: boolean,
   fmtDate: (d: string) => string,
+  chartData: any[],
 ) {
   return ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
+    const idx = chartData.findIndex((d: any) => d.date === label);
+    const prev: any = idx > 0 ? chartData[idx - 1] : null;
     const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
     const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
     const pVal = primaryEntry?.value as number | undefined;
     const oVal = overlayEntry?.value as number | undefined;
     const hasBoth = pVal != null && oVal != null;
     const delta = hasBoth ? pVal - oVal : null;
+    const pPrev = prev ? prev[primaryKey] : null;
+    const pDayD = pVal != null && pPrev != null ? Number(pVal) - Number(pPrev) : null;
+    const oPrev = prev ? prev[oKey] : null;
+    const oDayD = oVal != null && oPrev != null ? Number(oVal) - Number(oPrev) : null;
+    const pDC = pDayD != null ? btDCol(pDayD) : "#71717a";
+    const oDC = oDayD != null ? btDCol(oDayD) : "#71717a";
+    const dDC = delta != null ? btDCol(delta) : "#71717a";
     return (
-      <div style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px", margin: 0 }}>
+      <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
         <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{fmtDate(String(label))}</p>
         {pVal != null && (
-          <p style={{ margin: 0, color: primaryEntry?.color || "#e4e4e7", lineHeight: 1.6 }}>
-            {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
-          </p>
+          <div>
+            <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
+              {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
+            </p>
+            {pDayD != null && (
+              <p key={`bpd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Δ to Prev. Day: {btFmtDelta(pDayD)}</p>
+            )}
+          </div>
         )}
         {showOverlay && oVal != null && (
-          <p style={{ margin: 0, color: overlayEntry?.color || "#f59e0b", lineHeight: 1.6 }}>
-            {oLabel} : {formatPctAxis(oVal)}
-          </p>
+          <div>
+            <p style={{ margin: 0, lineHeight: 1.6, color: "#f59e0b" }}>
+              {oLabel} : {formatPctAxis(oVal)}
+            </p>
+            {oDayD != null && (
+              <p key={`bod-${oDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: oDC }}>Δ to Prev. Day: {btFmtDelta(oDayD)}</p>
+            )}
+          </div>
         )}
         {showOverlay && delta != null && (
-          <p style={{ margin: 0, color: delta >= 0 ? "#10b981" : "#ef4444", lineHeight: 1.6 }}>
-            Δ : {delta >= 0 ? "+" : ""}{formatPctAxis(delta)}
+          <p key={`bdl-${dDC}`} style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: dDC }}>
+            Δ : {btFmtDelta(delta)}
           </p>
         )}
       </div>
@@ -793,7 +816,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate)} />
+                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData)} />
                       <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveTwr" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
@@ -830,7 +853,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate)} />
+                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData)} />
                       <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveDrawdown" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
@@ -938,7 +961,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {s.holdings.map((h) => (
+                    {[...s.holdings].sort((a, b) => b.value - a.value).map((h) => (
                       <tr key={h.ticker} className="border-b border-border/30">
                         <td className="py-2 pr-3 font-medium">{h.ticker}</td>
                         <td className="py-2 pr-3 text-right">{h.allocation.toFixed(1)}%</td>

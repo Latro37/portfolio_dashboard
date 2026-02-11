@@ -54,6 +54,8 @@ def _migrate_add_columns():
     _MIGRATIONS = [
         ("symphony_backtest_cache", "summary_metrics_json", "TEXT NOT NULL DEFAULT '{}'"),
         ("symphony_backtest_cache", "last_semantic_update_at", "TEXT"),
+        ("daily_metrics", "annualized_return_cum", "REAL DEFAULT 0.0"),
+        ("symphony_daily_metrics", "annualized_return_cum", "REAL DEFAULT 0.0"),
     ]
 
     with engine.connect() as conn:
