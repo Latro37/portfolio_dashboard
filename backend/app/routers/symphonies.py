@@ -123,16 +123,39 @@ def list_symphonies(
     ids = _resolve_account_ids(db, account_id)
     acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
 
+    # Pre-load stored TWR from our own metrics (authoritative, not Composer API)
+    stored_twr: dict = {}
+    for aid in ids:
+        rows = (
+            db.query(SymphonyDailyMetrics.symphony_id, SymphonyDailyMetrics.time_weighted_return)
+            .filter_by(account_id=aid)
+            .order_by(SymphonyDailyMetrics.date.desc())
+            .all()
+        )
+        seen = set()
+        for sym_id, twr in rows:
+            if sym_id not in seen:
+                stored_twr[(aid, sym_id)] = twr
+                seen.add(sym_id)
+
     result = []
     for aid in ids:
         try:
             client = _get_client_for_account(db, aid)
             symphonies = client.get_symphony_stats(aid)
             for s in symphonies:
+                sym_id = s.get("id", "")
                 total_return = s.get("value", 0) - s.get("net_deposits", 0)
                 cum_return_pct = (total_return / s.get("net_deposits", 1) * 100) if s.get("net_deposits", 0) else 0
+                # Use stored TWR (already in %) if available; fall back to API value (* 100)
+                twr = stored_twr.get((aid, sym_id))
+                if twr is None:
+                    api_twr = s.get("time_weighted_return")
+                    twr = round(api_twr * 100, 2) if api_twr is not None else 0.0
+                else:
+                    twr = round(twr, 2)
                 result.append({
-                    "id": s.get("id", ""),
+                    "id": sym_id,
                     "position_id": s.get("position_id", ""),
                     "account_id": aid,
                     "account_name": acct_names.get(aid, aid),
@@ -144,7 +167,7 @@ def list_symphonies(
                     "total_return": round(total_return, 2),
                     "cumulative_return_pct": round(cum_return_pct, 2),
                     "simple_return": round(s.get("simple_return", 0) * 100, 2),
-                    "time_weighted_return": round(s.get("time_weighted_return", 0) * 100, 2),
+                    "time_weighted_return": twr,
                     "last_dollar_change": round(s.get("last_dollar_change", 0), 2),
                     "last_percent_change": round(s.get("last_percent_change", 0) * 100, 2),
                     "sharpe_ratio": round(s.get("sharpe_ratio", 0), 2),

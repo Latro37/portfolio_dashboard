@@ -16,10 +16,13 @@ interface Props {
 export function HoldingsPie({ holdings }: Props) {
   if (!holdings || !holdings.holdings.length) return null;
 
-  const data = holdings.holdings.map((h) => ({
-    name: h.symbol,
-    value: h.allocation_pct,
-  }));
+  const data = holdings.holdings
+    .filter((h) => h.market_value > 0.01)
+    .sort((a, b) => b.market_value - a.market_value)
+    .map((h) => ({
+      name: h.symbol,
+      value: h.allocation_pct,
+    }));
 
   return (
     <Card className="border-border/50 max-h-[500px]">

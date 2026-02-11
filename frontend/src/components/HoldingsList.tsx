@@ -23,7 +23,7 @@ export function HoldingsList({ holdings }: Props) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 overflow-y-auto">
-        {holdings.holdings.map((h, i) => (
+        {[...holdings.holdings].filter((h) => h.market_value > 0.01).sort((a, b) => b.market_value - a.market_value).map((h, i) => (
           <div key={h.symbol} className="flex items-center gap-3">
             <div
               className="h-3 w-3 rounded-full flex-shrink-0"

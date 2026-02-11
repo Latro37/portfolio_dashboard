@@ -150,8 +150,8 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
                 <td className={`py-2.5 pr-3 text-right whitespace-nowrap ${colorVal(s.cumulative_return_pct)}`}>
                   {fmtPct(s.cumulative_return_pct)}
                 </td>
-                <td className={`py-2.5 text-right whitespace-nowrap ${s.time_weighted_return <= -100 ? "text-muted-foreground" : colorVal(s.time_weighted_return)}`}>
-                  {s.time_weighted_return <= -100 ? "—" : fmtPct(s.time_weighted_return)}
+                <td className={`py-2.5 text-right whitespace-nowrap ${colorVal(s.time_weighted_return)}`}>
+                  {fmtPct(s.time_weighted_return)}
                 </td>
               </tr>
             ))}

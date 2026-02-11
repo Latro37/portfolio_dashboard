@@ -67,12 +67,18 @@ export function PerformanceChart({
   const [showPortfolio, setShowPortfolio] = useState(true);
   const [showDeposits, setShowDeposits] = useState(true);
 
-  const hasData = data.length > 0;
+  // Filter out non-trading days (weekends) to avoid flat gaps in charts
+  const tradingData = data.filter((pt) => {
+    const day = new Date(pt.date + "T00:00").getDay();
+    return day !== 0 && day !== 6;
+  });
+
+  const hasData = tradingData.length > 0;
 
   // Calculate gradient offset for TWR/MWR split coloring (where 0 falls in the range)
   const calcGradientOffset = (key: keyof PerformancePoint) => {
     if (!hasData) return 0.5;
-    const vals = data.map((d) => Number(d[key]));
+    const vals = tradingData.map((d) => Number(d[key]));
     const max = Math.max(...vals);
     const min = Math.min(...vals);
     if (max <= 0) return 0;   // all negative
@@ -85,8 +91,8 @@ export function PerformanceChart({
 
   // Detect if data spans multiple calendar years
   const multiYear = hasData &&
-    new Date(data[0].date + "T00:00:00").getFullYear() !==
-    new Date(data[data.length - 1].date + "T00:00:00").getFullYear();
+    new Date(tradingData[0].date + "T00:00:00").getFullYear() !==
+    new Date(tradingData[tradingData.length - 1].date + "T00:00:00").getFullYear();
 
   const formatDate = (d: string) => {
     const dt = new Date(d + "T00:00:00");
@@ -109,8 +115,8 @@ export function PerformanceChart({
   const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string) => {
     return ({ active, payload, label }: any) => {
       if (!active || !payload?.length) return null;
-      const idx = data.findIndex((d) => d.date === label);
-      const prev: any = idx > 0 ? data[idx - 1] : null;
+      const idx = tradingData.findIndex((d) => d.date === label);
+      const prev: any = idx > 0 ? tradingData[idx - 1] : null;
       const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
       const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
       const pVal = primaryEntry?.value as number | undefined;
@@ -160,8 +166,8 @@ export function PerformanceChart({
   // Custom tooltip for Portfolio mode with prev day delta (not on Deposits)
   const renderPortfolioTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
-    const idx = data.findIndex((d) => d.date === label);
-    const prev = idx > 0 ? data[idx - 1] : null;
+    const idx = tradingData.findIndex((d) => d.date === label);
+    const prev = idx > 0 ? tradingData[idx - 1] : null;
     return (
       <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
         <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
@@ -190,8 +196,8 @@ export function PerformanceChart({
   // Custom tooltip for MWR mode with prev day delta
   const renderMwrTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
-    const idx = data.findIndex((d) => d.date === label);
-    const prev = idx > 0 ? data[idx - 1] : null;
+    const idx = tradingData.findIndex((d) => d.date === label);
+    const prev = idx > 0 ? tradingData[idx - 1] : null;
     const entry = payload[0];
     const val = Number(entry?.value);
     const prevVal = prev ? prev.money_weighted_return : null;
@@ -209,8 +215,8 @@ export function PerformanceChart({
   };
 
   const isCustomRange = startDate !== "" || endDate !== "";
-  const displayStart = startDate || (hasData ? data[0].date : "");
-  const displayEnd = endDate || (hasData ? data[data.length - 1].date : "");
+  const displayStart = startDate || (hasData ? tradingData[0].date : "");
+  const displayEnd = endDate || (hasData ? tradingData[tradingData.length - 1].date : "");
 
   return (
     <Card className="border-border/50">
@@ -328,7 +334,7 @@ export function PerformanceChart({
           </div>
         ) : mode === "portfolio" ? (
           <ResponsiveContainer width="100%" height={320}>
-            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+            <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="pvGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -379,7 +385,7 @@ export function PerformanceChart({
           </ResponsiveContainer>
         ) : mode === "twr" ? (
           <ResponsiveContainer width="100%" height={320}>
-            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+            <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="twrGradSplit" x1="0" y1="0" x2="0" y2="1">
                   <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
@@ -432,7 +438,7 @@ export function PerformanceChart({
           </ResponsiveContainer>
         ) : mode === "mwr" ? (
           <ResponsiveContainer width="100%" height={320}>
-            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+            <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="mwrGradSplit" x1="0" y1="0" x2="0" y2="1">
                   <stop offset={0} stopColor="#d946ef" stopOpacity={0.3} />
@@ -474,7 +480,7 @@ export function PerformanceChart({
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height={320}>
-            <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+            <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
