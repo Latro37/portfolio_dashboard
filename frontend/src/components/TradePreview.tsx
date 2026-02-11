@@ -5,11 +5,18 @@ import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { api, TradePreviewItem } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 
+interface PriceQuote {
+  price: number;
+  change: number;
+  changePct: number;
+}
+
 interface Props {
   accountId?: string;
   portfolioValue?: number;
   onSymphonyClick?: (symphonyId: string) => void;
   autoRefreshEnabled?: boolean;
+  finnhubKey?: string | null;
 }
 
 interface SymphonyBreakdown {
@@ -34,13 +41,37 @@ function fmtDollar(v: number): string {
   return "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoRefreshEnabled = true }: Props) {
+export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoRefreshEnabled = true, finnhubKey }: Props) {
   const [trades, setTrades] = useState<TradePreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [isFinalPreview, setIsFinalPreview] = useState(false);
+  const [priceQuotes, setPriceQuotes] = useState<Record<string, PriceQuote>>({});
+
+  const fetchPrices = async (tickers: string[]) => {
+    if (!finnhubKey || tickers.length === 0) return;
+    const results: Record<string, PriceQuote> = {};
+    await Promise.all(
+      tickers.map(async (sym) => {
+        try {
+          const res = await fetch(
+            `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${finnhubKey}`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.c && data.c > 0) {
+              const change = data.pc > 0 ? data.c - data.pc : 0;
+              const changePct = data.pc > 0 ? (change / data.pc) * 100 : 0;
+              results[sym] = { price: data.c, change, changePct };
+            }
+          }
+        } catch { /* skip */ }
+      }),
+    );
+    setPriceQuotes((prev) => ({ ...prev, ...results }));
+  };
 
   const fetchPreview = async () => {
     setLoading(true);
@@ -55,6 +86,8 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
         setTrades(data);
         setLastRefreshed(new Date());
         setIsFinalPreview(false);
+        const uniqueTickers = [...new Set(data.map((t) => t.ticker))];
+        fetchPrices(uniqueTickers);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load trade preview");
@@ -174,6 +207,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
                 <th className="pb-2 px-5 font-medium whitespace-nowrap">Side</th>
                 <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Shares</th>
                 <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Notional</th>
+                <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Today</th>
                 <th className="pb-2 px-5 font-medium text-right whitespace-nowrap">Weight Change</th>
                 <th className="pb-2 pl-5 font-medium whitespace-nowrap w-full">Symphony</th>
               </tr>
@@ -199,6 +233,15 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
                       </td>
                       <td className={`py-2.5 px-5 text-right whitespace-nowrap ${row.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
                         {fmtDollar(row.totalNotional)}
+                      </td>
+                      <td className="py-2.5 px-5 text-right whitespace-nowrap">
+                        {priceQuotes[row.ticker] ? (
+                          <span className={`tabular-nums ${priceQuotes[row.ticker].change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {priceQuotes[row.ticker].change >= 0 ? "+" : ""}{priceQuotes[row.ticker].changePct.toFixed(2)}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-5 text-right whitespace-nowrap text-muted-foreground">
                         {acctPrevWeight.toFixed(1)}% &rarr; {acctNextWeight.toFixed(1)}%
@@ -231,6 +274,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
                         <td className={`py-1.5 px-5 text-right whitespace-nowrap text-xs ${row.side === "BUY" ? "text-emerald-400/70" : "text-red-400/70"}`}>
                           {fmtDollar(sym.notional)}
                         </td>
+                        <td className="py-1.5 px-5" />
                         <td className="py-1.5 px-5 text-right whitespace-nowrap text-xs text-muted-foreground/70">
                           {sym.prevWeight.toFixed(1)}% &rarr; {sym.nextWeight.toFixed(1)}%
                         </td>

@@ -31,6 +31,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [performance, setPerformance] = useState<PerformancePoint[]>([]);
   const [holdings, setHoldings] = useState<HoldingsResponse | null>(null);
+  const [holdingsLastUpdated, setHoldingsLastUpdated] = useState<Date | null>(null);
   const [period, setPeriod] = useState<Period>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -105,6 +106,7 @@ export default function Dashboard() {
       setSummary(s);
       baseSummaryRef.current = s;
       setHoldings(h);
+      setHoldingsLastUpdated(new Date());
       baseHoldingsRef.current = h;
       try {
         const p = await api.getPerformance(
@@ -169,25 +171,35 @@ export default function Dashboard() {
       setSnapshotData({ perf: ssPerf, sum: ssSum });
       setSnapshotVisible(true);
 
-      // Wait for render then capture
-      await new Promise((r) => setTimeout(r, 500));
-
-      if (snapshotRef.current) {
-        const dataUrl = await toPng(snapshotRef.current, {
-          width: 1200,
-          height: 900,
-          pixelRatio: 2,
-          backgroundColor: "#09090b",
-        });
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        const dateStr = todayET();
-        await api.uploadScreenshot(blob, dateStr);
-        showToast("Screenshot saved");
+      // Wait for SnapshotView to render (poll for ref up to 3s)
+      let attempts = 0;
+      while (!snapshotRef.current && attempts < 30) {
+        await new Promise((r) => setTimeout(r, 100));
+        attempts++;
       }
+
+      if (!snapshotRef.current) {
+        throw new Error("SnapshotView did not mount in time");
+      }
+
+      // Extra settle time for Recharts to finish painting
+      await new Promise((r) => setTimeout(r, 300));
+
+      const dataUrl = await toPng(snapshotRef.current, {
+        width: 1200,
+        height: 900,
+        pixelRatio: 2,
+        backgroundColor: "#09090b",
+      });
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const dateStr = todayET();
+      await api.uploadScreenshot(blob, dateStr);
+      showToast("Screenshot saved");
     } catch (e) {
       console.error("Screenshot capture failed:", e);
       if (!autoMode) showToast("Screenshot failed", "error");
+      if (autoMode) throw e;
     } finally {
       setSnapshotVisible(false);
       setSnapshotData(null);
@@ -205,15 +217,16 @@ export default function Dashboard() {
       const today = todayET();
       const lastCloseUpdate = localStorage.getItem("last_post_close_update");
       if (lastCloseUpdate === today) return;
-      localStorage.setItem("last_post_close_update", today);
       try {
         await api.triggerSync(resolvedAccountId);
         await fetchData();
         // Auto-capture screenshot after post-close sync
-        triggerSnapshot(true);
-      } catch {
-        // If it fails, clear the flag so it retries next interval
-        localStorage.removeItem("last_post_close_update");
+        await triggerSnapshot(true);
+        // Only mark complete after everything succeeds (including snapshot)
+        localStorage.setItem("last_post_close_update", today);
+      } catch (e) {
+        // Don't set the flag — allows retry on next 60s interval
+        console.error("Post-close update failed, will retry:", e);
       }
     };
     doPostCloseUpdate(); // immediate check on mount
@@ -310,6 +323,7 @@ export default function Dashboard() {
           .sort((a, b) => b.market_value - a.market_value),
       };
       setHoldings(liveHoldings);
+      setHoldingsLastUpdated(new Date());
     }
   }, [liveEnabled, resolvedAccountId, period, customStart, customEnd]);
 
@@ -435,7 +449,7 @@ export default function Dashboard() {
             <HoldingsPie holdings={holdings} />
           </div>
           <div className="lg:col-span-3">
-            <HoldingsList holdings={holdings} quotes={finnhubQuotes} />
+            <HoldingsList holdings={holdings} quotes={finnhubQuotes} lastUpdated={holdingsLastUpdated} />
           </div>
         </div>
 
@@ -462,6 +476,7 @@ export default function Dashboard() {
           accountId={resolvedAccountId}
           portfolioValue={symphonies.length ? symphonies.reduce((s, x) => s + x.value, 0) : summary?.portfolio_value}
           autoRefreshEnabled={liveEnabled}
+          finnhubKey={finnhubKey}
           onSymphonyClick={(symphonyId) => {
             const match = symphonies.find((s) => s.id === symphonyId);
             if (match) {

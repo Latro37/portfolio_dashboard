@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { SymphonyInfo } from "@/lib/api";
 import { InfoTooltip, TWR_TOOLTIP_TEXT } from "./InfoTooltip";
 import { RefreshCw } from "lucide-react";
@@ -33,6 +33,14 @@ function colorVal(v: number): string {
 
 export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefresh, refreshLoading, autoRefreshEnabled = true }: Props) {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const initialSet = useRef(false);
+
+  useEffect(() => {
+    if (symphonies.length > 0 && !initialSet.current) {
+      initialSet.current = true;
+      setLastRefreshed(new Date());
+    }
+  }, [symphonies]);
 
   const wrappedRefresh = useCallback(async () => {
     await onRefresh?.();

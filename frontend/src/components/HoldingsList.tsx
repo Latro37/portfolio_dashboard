@@ -12,17 +12,25 @@ const COLORS = [
 interface Props {
   holdings: HoldingsResponse | null;
   quotes?: Record<string, QuoteData>;
+  lastUpdated?: Date | null;
 }
 
-export function HoldingsList({ holdings, quotes }: Props) {
+export function HoldingsList({ holdings, quotes, lastUpdated }: Props) {
   if (!holdings || !holdings.holdings.length) return null;
 
   return (
     <Card className="border-border/50 max-h-[500px] flex flex-col">
       <CardHeader className="pb-1 flex-shrink-0">
-        <CardTitle className="text-xl font-medium text-foreground/70">
-          Holdings &middot; {holdings.date}
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xl font-medium text-foreground/70">
+            Holdings &middot; {holdings.date}
+          </CardTitle>
+          {lastUpdated && (
+            <span className="text-xs text-muted-foreground">
+              {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-3 overflow-y-auto">
         {[...holdings.holdings].filter((h) => h.market_value > 0.01).sort((a, b) => b.market_value - a.market_value).map((h, i) => (

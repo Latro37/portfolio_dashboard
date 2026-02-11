@@ -42,9 +42,11 @@ export function invalidateApiCache(): void {
   toRemove.forEach((k) => localStorage.removeItem(k));
 }
 
-async function fetchJSON<T>(path: string): Promise<T> {
-  const cached = cacheGet<T>(path);
-  if (cached !== null) return cached;
+async function fetchJSON<T>(path: string, skipCache = false): Promise<T> {
+  if (!skipCache) {
+    const cached = cacheGet<T>(path);
+    if (cached !== null) return cached;
+  }
 
   const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
   if (res.status === 429) {
@@ -372,7 +374,7 @@ export const api = {
       body: JSON.stringify(body),
     }).then((r) => r.json()),
   getSymphonies: (accountId?: string) =>
-    fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`),
+    fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`, true),
   getSymphonyPerformance: (symphonyId: string, accountId: string) =>
     fetchJSON<PerformancePoint[]>(
       `/symphonies/${symphonyId}/performance?account_id=${encodeURIComponent(accountId)}`
@@ -390,7 +392,7 @@ export const api = {
       `/symphonies/${symphonyId}/allocations?account_id=${encodeURIComponent(accountId)}`
     ),
   getTradePreview: (accountId?: string) =>
-    fetchJSON<TradePreviewItem[]>(`/trade-preview${_qs(accountId)}`),
+    fetchJSON<TradePreviewItem[]>(`/trade-preview${_qs(accountId)}`, true),
   getSymphonyTradePreview: (symphonyId: string, accountId: string) =>
     fetchJSON<SymphonyTradePreview>(
       `/symphonies/${symphonyId}/trade-preview?account_id=${encodeURIComponent(accountId)}`
