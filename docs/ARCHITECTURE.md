@@ -142,7 +142,8 @@ composer_portfolio_visualizer/
 │   │   ├── services/
 │   │   │   ├── sync.py            # Full backfill + incremental sync logic
 │   │   │   ├── metrics.py         # All metric computations (TWR, MWR, Sharpe, etc.)
-│   │   │   └── holdings.py        # Holdings reconstruction from trades
+│   │   │   ├── holdings.py        # Holdings reconstruction from trades
+│   │   │   └── symphony_export.py # Symphony structure export (local)
 │   │   └── routers/
 │   │       ├── portfolio.py       # Portfolio endpoints (summary, performance, holdings, etc.)
 │   │       ├── symphonies.py      # Symphony endpoints (list, summary, backtest, allocations)
@@ -172,6 +173,7 @@ composer_portfolio_visualizer/
 │   │   │   ├── SymphonyDetail.tsx # Symphony modal: live/backtest charts + metrics
 │   │   │   ├── TradePreview.tsx   # Pending rebalance trades
 │   │   │   ├── MetricsGuide.tsx   # METRICS.md viewer overlay
+│   │   │   ├── SettingsModal.tsx  # Export path + Google Drive config
 │   │   │   └── InfoTooltip.tsx    # Reusable tooltip component
 │   │   ├── hooks/
 │   │   │   ├── useAutoRefresh.ts  # Auto-refresh during market hours
@@ -199,7 +201,8 @@ composer_portfolio_visualizer/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | Health check |
-| GET | `/api/config` | Client-safe config (Finnhub API key) |
+| GET | `/api/config` | Client-safe config (Finnhub key, export status) |
+| POST | `/api/config/symphony-export` | Save symphony export local path |
 | GET | `/api/metrics-guide` | Serve METRICS.md as plain text |
 | GET | `/api/accounts` | List discovered sub-accounts |
 | GET | `/api/summary` | Portfolio summary with all latest metrics (computed live) |
@@ -428,6 +431,15 @@ Live price changes per holding are streamed via a Finnhub WebSocket connection:
 5. The `HoldingsList` component displays badges like `+$1.23 (+0.5%)` next to each ticker.
 
 The WebSocket stays connected on weekdays from 9:30 AM through midnight ET (regular + extended hours). It auto-reconnects with exponential backoff (max 30s). If no Finnhub key is configured, the feature is silently disabled.
+
+### Symphony Structure Export
+
+Symphony definitions (logic trees) are automatically exported as JSON files:
+
+1. During each **daily sync** (`full_backfill` / `incremental_update`), `export_all_symphonies()` runs as a sync step. It calls `GET /api/v0.1/symphonies/{id}/versions` for each symphony and compares the latest version's `created_at` against a stored timestamp in `sync_state`. Only new/changed versions are saved.
+2. When the **backtest endpoint** detects a stale cache (symphony edited since last backtest), it triggers `export_single_symphony()` for immediate export of the changed symphony.
+
+Files are saved locally as `<SymphonyName>/<SymphonyName>_<YYYY-MM-DD>.json`. The local export path is configured via the frontend Settings modal (`POST /api/config/symphony-export`) and persisted in `accounts.json`.
 
 ### Schema Migrations
 

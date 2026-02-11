@@ -315,6 +315,18 @@ class ComposerClient:
             logger.warning("Failed to fetch versions for %s: %s", symphony_id, e)
             return []
 
+    def get_symphony_score(self, symphony_id: str) -> Dict:
+        """Fetch the full symphony structure/definition via the score endpoint.
+
+        Returns the complete logic tree, nodes, and configuration.
+        """
+        try:
+            data = self._get_json(f"api/v0.1/symphonies/{symphony_id}/score")
+            return data
+        except Exception as e:
+            logger.warning("Failed to fetch score for %s: %s", symphony_id, e)
+            return {}
+
     def get_symphony_backtest(self, symphony_id: str) -> Dict:
         """Run backtest for an existing symphony.
 

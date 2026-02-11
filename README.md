@@ -10,6 +10,7 @@ A portfolio tracker and analytics dashboard for [Composer](https://www.composer.
 - **20+ metrics** — Sharpe, Sortino, Calmar, TWR, MWR, drawdown, win rate, volatility, and more
 - **Symphony analytics** — per-symphony live metrics, backtest charts, allocation history
 - **Backtest caching** — cached with version-check invalidation (detects symphony edits in Composer)
+- **Symphony structure export** — auto-saves symphony JSON definitions locally
 - **Trade preview** — see pending rebalance trades before they execute
 - **Live intraday overlay** — real-time portfolio value updates during market hours
 - **Real-time ticker quotes** — live price changes per holding via Finnhub WebSocket
@@ -61,7 +62,16 @@ Edit `accounts.json` with your API credentials (supports multiple accounts):
 
 To enable live price changes next to each holding, sign up for a free API key at [finnhub.io](https://finnhub.io/) and add it to `accounts.json` as shown above (`finnhub_api_key`). Without this key, the dashboard works normally — you just won't see real-time ticker badges.
 
-### 4. Optional Settings
+### 4. Symphony Structure Export (Optional)
+
+Symphony definitions are automatically exported during each data sync and when edits are detected. To enable:
+
+1. Click the **gear icon** (⚙) in the dashboard header to open Settings.
+2. Enter a local folder path for exports and click Save.
+
+Exports are saved as `<SymphonyName>/<SymphonyName>_<date>.json`.
+
+### 5. Optional Settings
 
 Copy `.env.example` to `.env` to override defaults (database path, benchmark ticker, risk-free rate):
 

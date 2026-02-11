@@ -123,3 +123,45 @@ def load_finnhub_key() -> Optional[str]:
         return key if key else None
     except Exception:
         return None
+
+
+def _accounts_json_path() -> str:
+    return os.path.join(_PROJECT_ROOT, "accounts.json")
+
+
+def _save_accounts_json(data: dict):
+    """Write updated config back to accounts.json and invalidate cache."""
+    global _accounts_json_cache
+    path = _accounts_json_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    _accounts_json_cache = data
+
+
+def load_symphony_export_config() -> Optional[dict]:
+    """Return the symphony_export config block, or None if not configured.
+
+    Always re-reads accounts.json from disk so that external edits
+    (e.g. adding google_drive credentials) are picked up without restart.
+    Returns dict with keys: local_path (str), google_drive (dict|None).
+    """
+    global _accounts_json_cache
+    try:
+        _accounts_json_cache = None  # invalidate cache
+        data = _load_accounts_json()
+        cfg = data.get("symphony_export")
+        if not cfg or not isinstance(cfg, dict):
+            return None
+        return cfg
+    except Exception:
+        return None
+
+
+def save_symphony_export_path(local_path: str):
+    """Persist the symphony export local_path into accounts.json."""
+    data = _load_accounts_json()
+    if "symphony_export" not in data or not isinstance(data.get("symphony_export"), dict):
+        data["symphony_export"] = {}
+    data["symphony_export"]["local_path"] = local_path
+    _save_accounts_json(data)

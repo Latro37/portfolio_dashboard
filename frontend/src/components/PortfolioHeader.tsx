@@ -2,13 +2,14 @@
 
 import { ReactNode } from "react";
 import { Summary } from "@/lib/api";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
   summary: Summary;
   onSync: () => void;
   syncing: boolean;
+  onSettings?: () => void;
   accountSwitcher?: ReactNode;
   liveToggle?: ReactNode;
   todayDollarChange?: number;
@@ -25,7 +26,7 @@ function fmtPct(v: number) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
-export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
+export function PortfolioHeader({ summary, onSync, syncing, onSettings, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
   const totalPositive = summary.total_return_dollars >= 0;
   const totalPct = summary.cumulative_return_pct;
   const dayDollar = todayDollarChange ?? 0;
@@ -61,6 +62,17 @@ export function PortfolioHeader({ summary, onSync, syncing, accountSwitcher, liv
             <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             {syncing ? "Syncing" : "Update"}
           </Button>
+          {/* Settings button */}
+          {onSettings && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onSettings}
+              className="cursor-pointer h-8 w-8 text-muted-foreground hover:text-foreground"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          )}
         </div>
         {accountSwitcher && (
           <div className="flex items-center gap-3">

@@ -18,6 +18,7 @@ import requests
 from app.composer_client import ComposerClient
 from app.config import load_accounts, get_settings
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
+from app.services.symphony_export import export_single_symphony
 from app.market_hours import is_within_trading_session
 import time
 
@@ -529,7 +530,19 @@ def get_symphony_backtest(
             except Exception:
                 pass  # on failure, serve cache
 
-            if not stale:
+            if stale:
+                # Symphony was edited — trigger export of latest version
+                try:
+                    # Look up symphony name from stats
+                    sym_stats = client.get_symphony_stats(account_id)
+                    sym_name = next(
+                        (s.get("name", symphony_id) for s in sym_stats if s.get("id") == symphony_id),
+                        symphony_id,
+                    )
+                    export_single_symphony(client, symphony_id, sym_name)
+                except Exception as exc:
+                    logger.debug("Symphony export on edit failed for %s: %s", symphony_id, exc)
+            else:
                 use_cache = True
 
     if use_cache and cached:

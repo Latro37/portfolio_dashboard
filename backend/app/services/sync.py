@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.services.holdings import reconstruct_holdings
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
+from app.services.symphony_export import export_all_symphonies
 from app.config import get_settings
 from app.market_hours import is_after_close, get_allocation_target_date
 
@@ -105,6 +106,9 @@ def full_backfill(db: Session, client: ComposerClient, account_id: str):
     _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
     _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
 
+    # 9. Export symphony structures (local + optional Google Drive)
+    _safe_step("symphony_export", export_all_symphonies, db, client, account_id)
+
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Full backfill complete for account %s", account_id)
@@ -133,6 +137,9 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
     # Sync symphony daily data (incremental: today only) and compute symphony metrics
     _safe_step("symphony_daily", _sync_symphony_daily_incremental, db, client, account_id)
     _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
+
+    # Export symphony structures (local + optional Google Drive)
+    _safe_step("symphony_export", export_all_symphonies, db, client, account_id)
 
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Incremental update complete for %s", account_id)
@@ -347,7 +354,10 @@ def _sync_holdings_history(db: Session, client: ComposerClient, account_id: str)
 
 
 def _sync_benchmark(db: Session, account_id: str):
-    """Fetch SPY daily closes from yfinance and store."""
+    """Fetch SPY daily closes from yfinance and store.
+
+    Incremental: only fetches from the last stored benchmark date onward.
+    """
     import yfinance as yf
     settings = get_settings()
     ticker = settings.benchmark_ticker
@@ -359,8 +369,15 @@ def _sync_benchmark(db: Session, account_id: str):
     if not first:
         return
 
+    # Start from last stored benchmark date (minus 1 day buffer) for incremental
+    last_stored = db.query(func.max(BenchmarkData.date)).scalar()
+    if last_stored:
+        fetch_start = str(last_stored - timedelta(days=1))
+    else:
+        fetch_start = str(first)
+
     try:
-        data = yf.download(ticker, start=str(first), progress=False)
+        data = yf.download(ticker, start=fetch_start, progress=False)
         if data.empty:
             return
     except Exception as e:

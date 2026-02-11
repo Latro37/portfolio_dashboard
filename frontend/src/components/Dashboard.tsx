@@ -14,6 +14,7 @@ import { SymphonyList } from "./SymphonyList";
 import { SymphonyDetail } from "./SymphonyDetail";
 import { TradePreview } from "./TradePreview";
 import { MetricsGuide } from "./MetricsGuide";
+import { SettingsModal } from "./SettingsModal";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ export default function Dashboard() {
   const [selectedSymphony, setSelectedSymphony] = useState<SymphonyInfo | null>(null);
   const [symphonyScrollTo, setSymphonyScrollTo] = useState<"trade-preview" | undefined>(undefined);
   const [showMetricsGuide, setShowMetricsGuide] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [symphoniesRefreshing, setSymphoniesRefreshing] = useState(false);
   const [liveEnabled, setLiveEnabled] = useState(() => {
     if (typeof window !== "undefined") {
@@ -316,6 +318,7 @@ export default function Dashboard() {
           summary={summary!}
           onSync={handleSync}
           syncing={syncing}
+          onSettings={() => setShowSettings(true)}
           todayDollarChange={symphonies.length ? symphonies.reduce((sum, s) => sum + s.last_dollar_change, 0) : undefined}
           todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
           liveToggle={
@@ -423,6 +426,11 @@ export default function Dashboard() {
       {/* Metrics Guide overlay */}
       {showMetricsGuide && (
         <MetricsGuide onClose={() => setShowMetricsGuide(false)} />
+      )}
+
+      {/* Settings modal */}
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} />
       )}
     </div>
   );

@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,7 +22,7 @@ from app.schemas import (
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.composer_client import ComposerClient
-from app.config import load_accounts, load_finnhub_key
+from app.config import load_accounts, load_finnhub_key, load_symphony_export_config, save_symphony_export_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -827,5 +828,27 @@ def trigger_sync(
 
 @router.get("/config")
 def get_app_config():
-    """Return client-safe configuration (e.g. Finnhub API key)."""
-    return {"finnhub_api_key": load_finnhub_key()}
+    """Return client-safe configuration (e.g. Finnhub API key, export settings)."""
+    export_cfg = load_symphony_export_config()
+    export_status = None
+    if export_cfg:
+        export_status = {
+            "local_path": export_cfg.get("local_path", ""),
+        }
+    return {
+        "finnhub_api_key": load_finnhub_key(),
+        "symphony_export": export_status,
+    }
+
+
+class _SymphonyExportBody(BaseModel):
+    local_path: str
+
+@router.post("/config/symphony-export")
+def set_symphony_export_config(body: _SymphonyExportBody):
+    """Save symphony export local_path from the frontend settings modal."""
+    local_path = body.local_path.strip()
+    if not local_path:
+        raise HTTPException(400, "local_path is required")
+    save_symphony_export_path(local_path)
+    return {"ok": True, "local_path": local_path}

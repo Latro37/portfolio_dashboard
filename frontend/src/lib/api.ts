@@ -291,12 +291,23 @@ function _qs(accountId?: string, extra?: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
+export interface SymphonyExportStatus {
+  local_path: string;
+}
+
 export interface AppConfig {
   finnhub_api_key: string | null;
+  symphony_export: SymphonyExportStatus | null;
 }
 
 export const api = {
   getConfig: () => fetchJSON<AppConfig>("/config"),
+  saveSymphonyExportPath: (localPath: string) =>
+    fetch(`${API_BASE}/config/symphony-export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ local_path: localPath }),
+    }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   getAccounts: () => fetchJSON<AccountInfo[]>("/accounts"),
   getSummary: (accountId?: string, period?: string, startDate?: string, endDate?: string) => {
     const params: Record<string, string> = {};

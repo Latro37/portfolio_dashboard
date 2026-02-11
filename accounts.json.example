@@ -1,5 +1,8 @@
 {
   "finnhub_api_key": "your-finnhub-api-key",
+  "symphony_export": {
+    "local_path": ""
+  },
   "accounts": [
     {
       "name": "Primary",
@@ -7,7 +10,7 @@
       "api_secret": "your-api-secret"
     },
     {
-      "name": "Wife",
+      "name": "Spouse",
       "api_key_id": "your-api-key-id",
       "api_secret": "your-api-secret"
     }
