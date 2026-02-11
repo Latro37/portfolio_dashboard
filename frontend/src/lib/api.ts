@@ -291,7 +291,12 @@ function _qs(accountId?: string, extra?: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
+export interface AppConfig {
+  finnhub_api_key: string | null;
+}
+
 export const api = {
+  getConfig: () => fetchJSON<AppConfig>("/config"),
   getAccounts: () => fetchJSON<AccountInfo[]>("/accounts"),
   getSummary: (accountId?: string, period?: string, startDate?: string, endDate?: string) => {
     const params: Record<string, string> = {};

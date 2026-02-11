@@ -12,6 +12,7 @@ A portfolio tracker and analytics dashboard for [Composer](https://www.composer.
 - **Backtest caching** — cached with version-check invalidation (detects symphony edits in Composer)
 - **Trade preview** — see pending rebalance trades before they execute
 - **Live intraday overlay** — real-time portfolio value updates during market hours
+- **Real-time ticker quotes** — live price changes per holding via Finnhub WebSocket
 - **Dark-themed dashboard** — performance chart, holdings donut, metric cards
 - **One-click sync** — Update button in the UI triggers data refresh
 - **Manual cash flow entries** — add deposits/withdrawals not captured by the API
@@ -37,22 +38,30 @@ cp accounts.json.example accounts.json
 Edit `accounts.json` with your API credentials (supports multiple accounts):
 
 ```json
-[
-  {
-    "name": "Primary",
-    "api_key_id": "your-api-key-id",
-    "api_secret": "your-api-secret"
-  },
-//   Add any additional accounts with comma-separated objects
-  {
-    "name": "Wife",
-    "api_key_id": "wife-api-key-id",
-    "api_secret": "wife-api-secret"
-  }
-]
+{
+  "finnhub_api_key": "your-finnhub-api-key",
+  "accounts": [
+    {
+      "name": "Primary",
+      "api_key_id": "your-api-key-id",
+      "api_secret": "your-api-secret"
+    },
+    {
+      "name": "Wife",
+      "api_key_id": "wife-api-key-id",
+      "api_secret": "wife-api-secret"
+    }
+  ]
+}
 ```
 
-### 3. Optional Settings
+> **Note:** The legacy array format (without the wrapping object) is still supported for backward compatibility.
+
+### 3. Real-Time Quotes (Optional)
+
+To enable live price changes next to each holding, sign up for a free API key at [finnhub.io](https://finnhub.io/) and add it to `accounts.json` as shown above (`finnhub_api_key`). Without this key, the dashboard works normally — you just won't see real-time ticker badges.
+
+### 4. Optional Settings
 
 Copy `.env.example` to `.env` to override defaults (database path, benchmark ticker, risk-free rate):
 
@@ -95,7 +104,7 @@ npm run dev
 ## Security & Privacy
 
 - **Your API keys stay on your machine.** They are stored in `accounts.json`, which is `.gitignored` — it is never committed to version control and most coding assistants won't read it.
-- **All network traffic goes directly to Composer's API** (`api.composer.trade`). This app does not send data to any other server.
+- **All network traffic goes directly to Composer's API** (`api.composer.trade`) and optionally Finnhub (`finnhub.io`) for real-time quotes. This app does not send data to any other server.
 - **No telemetry or analytics.** Nothing is phoned home.
 - **All data is stored locally** in a SQLite database file (`backend/data/portfolio.db`). Nothing is uploaded anywhere.
 - **The code is fully auditable.** Every file is plain-text source code you can review before running.

@@ -1,12 +1,15 @@
-[
-  {
-    "name": "Primary",
-    "api_key_id": "your-api-key-id",
-    "api_secret": "your-api-secret"
-  },
-  {
-    "name": "Wife",
-    "api_key_id": "your-api-key-id",
-    "api_secret": "your-api-secret"
-  }
-]
+{
+  "finnhub_api_key": "your-finnhub-api-key",
+  "accounts": [
+    {
+      "name": "Primary",
+      "api_key_id": "your-api-key-id",
+      "api_secret": "your-api-secret"
+    },
+    {
+      "name": "Wife",
+      "api_key_id": "your-api-key-id",
+      "api_secret": "your-api-secret"
+    }
+  ]
+}

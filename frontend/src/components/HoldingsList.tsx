@@ -1,6 +1,7 @@
 "use client";
 
 import { HoldingsResponse } from "@/lib/api";
+import { QuoteData } from "@/hooks/useFinnhubQuotes";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const COLORS = [
@@ -10,9 +11,10 @@ const COLORS = [
 
 interface Props {
   holdings: HoldingsResponse | null;
+  quotes?: Record<string, QuoteData>;
 }
 
-export function HoldingsList({ holdings }: Props) {
+export function HoldingsList({ holdings, quotes }: Props) {
   if (!holdings || !holdings.holdings.length) return null;
 
   return (
@@ -31,7 +33,19 @@ export function HoldingsList({ holdings }: Props) {
             />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <span className="font-medium text-lg">{h.symbol}</span>
+                <span className="flex items-baseline gap-1.5">
+                  <span className="font-medium text-lg">{h.symbol}</span>
+                  {quotes?.[h.symbol] && quotes[h.symbol].change !== 0 && (
+                    <span
+                      className={`text-xs tabular-nums ${
+                        quotes[h.symbol].change >= 0 ? "text-emerald-400" : "text-red-400"
+                      }`}
+                    >
+                      {quotes[h.symbol].change >= 0 ? "+" : "-"}${Math.abs(quotes[h.symbol].change).toFixed(2)}{" "}
+                      ({quotes[h.symbol].changePct >= 0 ? "+" : ""}{quotes[h.symbol].changePct.toFixed(2)}%)
+                    </span>
+                  )}
+                </span>
                 <span className="text-base text-foreground/70">
                   {h.allocation_pct.toFixed(1)}%
                 </span>

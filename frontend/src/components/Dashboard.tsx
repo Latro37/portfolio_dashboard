@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo } from "@/lib/api";
+import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
 import { isMarketOpen, isAfterClose, todayET } from "@/lib/marketHours";
 import { PortfolioHeader } from "./PortfolioHeader";
 import { PerformanceChart } from "./PerformanceChart";
@@ -44,9 +45,14 @@ export default function Dashboard() {
     }
     return true;
   });
+  const [finnhubKey, setFinnhubKey] = useState<string | null>(null);
   const baseHoldingsRef = useRef<HoldingsResponse | null>(null);
   const basePerformanceRef = useRef<PerformancePoint[]>([]);
   const baseSummaryRef = useRef<Summary | null>(null);
+
+  // Finnhub real-time quotes for holdings
+  const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
+  const { quotes: finnhubQuotes } = useFinnhubQuotes(holdingSymbols, finnhubKey);
 
   // Resolve the account_id query param based on selection
   const resolvedAccountId = selectedCredential === "__all__"
@@ -55,8 +61,9 @@ export default function Dashboard() {
       ? `all:${selectedCredential}`
       : selectedSubAccount || undefined;
 
-  // Load accounts on mount
+  // Load accounts + config on mount
   useEffect(() => {
+    api.getConfig().then((cfg) => setFinnhubKey(cfg.finnhub_api_key)).catch(() => {});
     api.getAccounts().then((accts) => {
       setAccounts(accts);
       if (accts.length > 0) {
@@ -354,7 +361,7 @@ export default function Dashboard() {
             <HoldingsPie holdings={holdings} />
           </div>
           <div className="lg:col-span-3">
-            <HoldingsList holdings={holdings} />
+            <HoldingsList holdings={holdings} quotes={finnhubQuotes} />
           </div>
         </div>
 

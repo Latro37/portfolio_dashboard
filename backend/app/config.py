@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
@@ -53,11 +53,23 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def load_accounts() -> List[AccountCredentials]:
-    """Load Composer account credentials from accounts.json.
+# Module-level cache for parsed accounts.json data
+_accounts_json_cache: Optional[dict] = None
 
-    Raises FileNotFoundError with a helpful message if the file is missing.
+
+def _load_accounts_json() -> dict:
+    """Load and cache the raw accounts.json content.
+
+    Supports two formats:
+    - Legacy array: [{"name": ..., "api_key_id": ..., "api_secret": ...}, ...]
+    - New object:   {"finnhub_api_key": "...", "accounts": [...]}
+
+    Returns a normalized dict with keys 'accounts' (list) and optionally 'finnhub_api_key'.
     """
+    global _accounts_json_cache
+    if _accounts_json_cache is not None:
+        return _accounts_json_cache
+
     accounts_path = os.path.join(_PROJECT_ROOT, "accounts.json")
     if not os.path.exists(accounts_path):
         raise FileNotFoundError(
@@ -69,13 +81,45 @@ def load_accounts() -> List[AccountCredentials]:
             raw = json.load(f)
     except json.JSONDecodeError as e:
         raise ValueError(f"accounts.json is not valid JSON (line {e.lineno}). Check syntax.") from None
-    if not isinstance(raw, list) or len(raw) == 0:
-        raise ValueError("accounts.json must be a non-empty JSON array of account objects.")
+
+    if isinstance(raw, list):
+        # Legacy array format
+        _accounts_json_cache = {"accounts": raw}
+    elif isinstance(raw, dict) and "accounts" in raw:
+        # New object format
+        _accounts_json_cache = raw
+    else:
+        raise ValueError(
+            "accounts.json must be a JSON array of account objects or an object with an 'accounts' key."
+        )
+    return _accounts_json_cache
+
+
+def load_accounts() -> List[AccountCredentials]:
+    """Load Composer account credentials from accounts.json.
+
+    Supports both the legacy array format and the new object format.
+    Raises FileNotFoundError with a helpful message if the file is missing.
+    """
+    data = _load_accounts_json()
+    account_list = data["accounts"]
+    if not isinstance(account_list, list) or len(account_list) == 0:
+        raise ValueError("accounts.json must contain a non-empty 'accounts' array.")
     try:
-        accounts = [AccountCredentials(**entry) for entry in raw]
+        accounts = [AccountCredentials(**entry) for entry in account_list]
     except Exception:
         raise ValueError(
             "accounts.json entries must have 'name', 'api_key_id', and 'api_secret' fields."
         ) from None
     logger.info("Loaded %d Composer account(s) from accounts.json", len(accounts))
     return accounts
+
+
+def load_finnhub_key() -> Optional[str]:
+    """Return the Finnhub API key from accounts.json, or None if not configured."""
+    try:
+        data = _load_accounts_json()
+        key = data.get("finnhub_api_key", "")
+        return key if key else None
+    except Exception:
+        return None

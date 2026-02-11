@@ -21,7 +21,7 @@ from app.schemas import (
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.composer_client import ComposerClient
-from app.config import load_accounts
+from app.config import load_accounts, load_finnhub_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -823,3 +823,9 @@ def trigger_sync(
         raise HTTPException(500, f"Sync failed: {e}")
     finally:
         _syncing = False
+
+
+@router.get("/config")
+def get_app_config():
+    """Return client-safe configuration (e.g. Finnhub API key)."""
+    return {"finnhub_api_key": load_finnhub_key()}
