@@ -7,7 +7,7 @@
 | Backend | Python 3.10+, FastAPI, SQLAlchemy, Pydantic |
 | Database | SQLite (file-based, zero config) |
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, Recharts |
-| External API | Composer Trade REST API |
+| External API | Composer Trade REST API, Finnhub WebSocket + REST (optional) |
 | Deployment | Docker Compose (optional) |
 
 ## High-Level Overview
@@ -174,7 +174,8 @@ composer_portfolio_visualizer/
 │   │   │   ├── MetricsGuide.tsx   # METRICS.md viewer overlay
 │   │   │   └── InfoTooltip.tsx    # Reusable tooltip component
 │   │   ├── hooks/
-│   │   │   └── useAutoRefresh.ts  # Auto-refresh during market hours
+│   │   │   ├── useAutoRefresh.ts  # Auto-refresh during market hours
+│   │   │   └── useFinnhubQuotes.ts # Real-time ticker prices via Finnhub WebSocket
 │   │   └── lib/
 │   │       ├── api.ts             # Backend API client + TypeScript interfaces
 │   │       ├── marketHours.ts     # US market hours detection
@@ -198,6 +199,7 @@ composer_portfolio_visualizer/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | Health check |
+| GET | `/api/config` | Client-safe config (Finnhub API key) |
 | GET | `/api/metrics-guide` | Serve METRICS.md as plain text |
 | GET | `/api/accounts` | List discovered sub-accounts |
 | GET | `/api/summary` | Portfolio summary with all latest metrics (computed live) |
@@ -404,6 +406,28 @@ All portfolio endpoints support three modes via the `account_id` query parameter
 - **Global** — omit or pass `all` to aggregate everything
 
 Aggregation sums `portfolio_value` and `net_deposits` across accounts per day, then computes metrics on the combined series.
+
+### Data Sync & Update Strategy
+
+The application does **not** run a background scheduler or cron job. All syncs are triggered reactively:
+
+1. **Manual sync** — User clicks **Update** in the UI → `POST /api/sync` → runs `incremental_update()` (or `full_backfill()` on first run).
+2. **Automatic post-close sync** — The frontend runs a once-per-day check after market close (4:00 PM ET). On mount and every 60 seconds, it checks `isAfterClose()` and a `localStorage` flag (`last_post_close_update`). If the market has closed today and no sync has run yet, it auto-triggers `POST /api/sync` + data refresh. The flag prevents duplicate syncs if the page stays open.
+3. **Gap recovery** — If the app hasn't run for multiple days, `incremental_update()` fetches the full portfolio-history from the Composer API (which returns the complete daily series), so all missing days are backfilled automatically on the next sync.
+
+This design means the app works correctly whether it runs continuously or is only opened occasionally — no data is lost from downtime.
+
+### Real-Time Ticker Quotes
+
+Live price changes per holding are streamed via a Finnhub WebSocket connection:
+
+1. On mount, the frontend fetches the Finnhub API key from `GET /api/config` (key is stored in `accounts.json`).
+2. The `useFinnhubQuotes` hook fetches `previousClose` for each holding symbol via the Finnhub REST `/quote` endpoint.
+3. A WebSocket connection to `wss://ws.finnhub.io` subscribes to all holding symbols and streams trade updates.
+4. Each trade update computes `change = price - previousClose` and `changePct = change / previousClose * 100`.
+5. The `HoldingsList` component displays badges like `+$1.23 (+0.5%)` next to each ticker.
+
+The WebSocket stays connected on weekdays from 9:30 AM through midnight ET (regular + extended hours). It auto-reconnects with exponential backoff (max 30s). If no Finnhub key is configured, the feature is silently disabled.
 
 ### Schema Migrations
 

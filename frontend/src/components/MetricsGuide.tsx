@@ -36,7 +36,7 @@ export function MetricsGuide({ onClose }: Props) {
       const href = anchor.getAttribute("href");
       if (href?.startsWith("#")) {
         e.preventDefault();
-        const el = contentRef.current?.querySelector(href);
+        const el = contentRef.current?.querySelector(`[id="${CSS.escape(href.slice(1))}"]`);
         if (el) el.scrollIntoView({ behavior: "smooth" });
       }
     }
