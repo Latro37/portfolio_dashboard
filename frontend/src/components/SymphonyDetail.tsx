@@ -119,7 +119,7 @@ function backtestOverlayTooltip(
             <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
               {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
             </p>
-            {pDayD != null && (
+            {!showOverlay && pDayD != null && (
               <p key={`bpd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Δ to Prev. Day: {btFmtDelta(pDayD)}</p>
             )}
           </div>
@@ -129,7 +129,7 @@ function backtestOverlayTooltip(
             <p style={{ margin: 0, lineHeight: 1.6, color: "#f59e0b" }}>
               {oLabel} : {formatPctAxis(oVal)}
             </p>
-            {oDayD != null && (
+            {!showOverlay && oDayD != null && (
               <p key={`bod-${oDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: oDC }}>Δ to Prev. Day: {btFmtDelta(oDayD)}</p>
             )}
           </div>
@@ -226,14 +226,18 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   }, [s.id, s.account_id]);
 
   // Fetch backtest eagerly on mount
-  useEffect(() => {
+  const fetchBacktest = useCallback((forceRefresh = false) => {
     setLoadingBacktest(true);
     api
-      .getSymphonyBacktest(s.id, s.account_id)
+      .getSymphonyBacktest(s.id, s.account_id, forceRefresh)
       .then(setBacktest)
       .catch(() => setBacktest(null))
       .finally(() => setLoadingBacktest(false));
   }, [s.id, s.account_id]);
+
+  useEffect(() => {
+    fetchBacktest();
+  }, [fetchBacktest]);
 
   // Fetch live allocation history
   useEffect(() => {
@@ -508,7 +512,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
   // Live metrics: values from backend /summary, date lookups from client-side data
   const liveMetrics = useMemo(() => {
-    const empty = { sharpe: null as number | null, maxDrawdown: null as number | null, maxDrawdownDate: "", annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, bestDayDate: "", worstDayDate: "", cumReturn: null as number | null, twr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
+    const empty = { sharpe: null as number | null, sortino: null as number | null, maxDrawdown: null as number | null, maxDrawdownDate: "", annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, bestDayDate: "", worstDayDate: "", cumReturn: null as number | null, twr: null as number | null, mwr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
     if (!liveSummary) return empty;
 
     // Date lookups from client-side data (backend doesn't track which date has best/worst)
@@ -537,6 +541,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
     return {
       sharpe: liveSummary.sharpe_ratio,
+      sortino: liveSummary.sortino_ratio,
       maxDrawdown: liveSummary.max_drawdown,
       maxDrawdownDate,
       annualized: liveSummary.annualized_return_cum,
@@ -548,6 +553,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
       worstDayDate,
       cumReturn: liveSummary.cumulative_return_pct,
       twr: liveSummary.time_weighted_return,
+      mwr: liveSummary.money_weighted_return_period,
       totalReturn: liveSummary.total_return_dollars,
       startDate: liveSummary.start_date,
       endDate: liveSummary.end_date,
@@ -556,16 +562,16 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
   // Backtest metrics: use backend summary_metrics for ALL period, client-side for filtered
   const btMetrics = useMemo(() => {
-    const empty = { cumReturn: null as number | null, annualized: null as number | null, sharpe: null as number | null, sortino: null as number | null, calmar: null as number | null, maxDrawdown: null as number | null, winRate: null as number | null, stdDev: null as number | null, startDate: "", endDate: "" };
+    const empty = { cumReturn: null as number | null, annualized: null as number | null, sharpe: null as number | null, sortino: null as number | null, calmar: null as number | null, maxDrawdown: null as number | null, medianDrawdown: null as number | null, longestDrawdownDays: null as number | null, medianDrawdownDays: null as number | null, winRate: null as number | null, volatility: null as number | null, startDate: "", endDate: "" };
     if (filteredBacktestData.length < 2) return empty;
     const first = filteredBacktestData[0];
     const last = filteredBacktestData[filteredBacktestData.length - 1];
     const startDate = first.date;
     const endDate = last.date;
 
-    // Use pre-computed backend metrics for ALL period
+    // Use pre-computed backend metrics for ALL period (only if cache has the newer drawdown fields)
     const sm = backtest?.summary_metrics;
-    if (sm && period === "ALL" && !customStart && !customEnd) {
+    if (sm && sm.median_drawdown != null && period === "ALL" && !customStart && !customEnd) {
       return {
         cumReturn: sm.cumulative_return_pct / 100,
         annualized: (sm.annualized_return_cum ?? sm.annualized_return) / 100,
@@ -573,8 +579,11 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
         sortino: sm.sortino_ratio,
         calmar: sm.calmar_ratio,
         maxDrawdown: sm.max_drawdown / 100,
+        medianDrawdown: sm.median_drawdown / 100,
+        longestDrawdownDays: sm.longest_drawdown_days,
+        medianDrawdownDays: sm.median_drawdown_days,
         winRate: sm.win_rate / 100,
-        stdDev: sm.annualized_volatility / 100,
+        volatility: sm.annualized_volatility / 100,
         startDate,
         endDate,
       };
@@ -601,15 +610,37 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     const sortino = downsideDev > 0 ? (meanRet / downsideDev) * Math.sqrt(252) : null;
     let peak = first.value;
     let maxDd = 0;
+    const ddTroughs: number[] = [];
+    const ddLengths: number[] = [];
+    let curTrough = 0;
+    let curLen = 0;
     for (const pt of filteredBacktestData) {
-      if (pt.value > peak) peak = pt.value;
-      const dd = peak > 0 ? (pt.value - peak) / peak : 0;
-      if (dd < maxDd) maxDd = dd;
+      if (pt.value >= peak) {
+        if (curLen > 0) {
+          ddTroughs.push(curTrough);
+          ddLengths.push(curLen);
+          curTrough = 0;
+          curLen = 0;
+        }
+        peak = pt.value;
+      } else {
+        const dd = peak > 0 ? (pt.value - peak) / peak : 0;
+        curLen++;
+        if (dd < curTrough) curTrough = dd;
+        if (dd < maxDd) maxDd = dd;
+      }
     }
+    if (curLen > 0) {
+      ddTroughs.push(curTrough);
+      ddLengths.push(curLen);
+    }
+    const medianDrawdown = ddTroughs.length > 0 ? [...ddTroughs].sort((a, b) => a - b)[Math.floor(ddTroughs.length / 2)] : 0;
+    const longestLen = ddLengths.length > 0 ? Math.max(...ddLengths) : 0;
+    const medianDdLen = ddLengths.length > 0 ? [...ddLengths].sort((a, b) => a - b)[Math.floor(ddLengths.length / 2)] : 0;
     const calmar = maxDd < 0 ? annualized / Math.abs(maxDd) : null;
     const wins = dailyReturns.filter((r) => r > 0).length;
     const winRate = wins / n;
-    return { cumReturn, annualized, sharpe, sortino, calmar, maxDrawdown: maxDd, winRate, stdDev: stdDev / 100, startDate, endDate };
+    return { cumReturn, annualized, sharpe, sortino, calmar, maxDrawdown: maxDd, medianDrawdown, longestDrawdownDays: longestLen, medianDrawdownDays: medianDdLen, winRate, volatility: stdDev / 100, startDate, endDate };
   }, [filteredBacktestData, backtest, period, customStart, customEnd]);
 
   return (
@@ -655,26 +686,26 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
             </h3>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <Metric label="Current Value" value={fmtDollar(s.value)} />
-              <Metric label="Net Deposits" value={fmtDollar(s.net_deposits)} />
               <Metric
                 label="Today's Change"
                 value={fmtPct(s.last_percent_change)}
                 color={colorVal(s.last_percent_change)}
                 subValue={fmtSignedDollar(s.last_dollar_change)}
               />
-              <Metric label="Profit" value={liveMetrics.totalReturn != null ? fmtSignedDollar(liveMetrics.totalReturn) : "—"} color={colorVal(liveMetrics.totalReturn ?? 0)} />
-              <Metric label="Cum. Return" value={liveMetrics.cumReturn != null ? fmtPct(liveMetrics.cumReturn) : "—"} color={colorVal(liveMetrics.cumReturn ?? 0)} />
               <Metric
                 label="TWR"
                 value={liveMetrics.twr != null ? fmtPct(liveMetrics.twr) : "—"}
                 color={liveMetrics.twr != null ? colorVal(liveMetrics.twr) : "text-muted-foreground"}
                 tooltip={TWR_TOOLTIP_TEXT}
               />
-              <Metric label="Sharpe" value={liveMetrics.sharpe != null ? liveMetrics.sharpe.toFixed(2) : "—"} />
-              <Metric label="Max Drawdown" value={liveMetrics.maxDrawdown != null ? fmtPct(liveMetrics.maxDrawdown) : "—"} color="text-red-400" valueTooltip={liveMetrics.maxDrawdownDate ? new Date(liveMetrics.maxDrawdownDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined} />
               <Metric label="Annualized" value={liveMetrics.annualized != null ? fmtPct(liveMetrics.annualized) : "—"} color={colorVal(liveMetrics.annualized ?? 0)} />
-              <Metric label="Calmar" value={liveMetrics.calmar != null ? liveMetrics.calmar.toFixed(2) : "—"} />
+              <Metric label="Sortino" value={liveMetrics.sortino != null ? liveMetrics.sortino.toFixed(2) : "—"} />
+              <Metric label="Max Drawdown" value={liveMetrics.maxDrawdown != null ? fmtPct(liveMetrics.maxDrawdown) : "—"} color="text-red-400" valueTooltip={liveMetrics.maxDrawdownDate ? new Date(liveMetrics.maxDrawdownDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined} />
+              <Metric label="Profit" value={liveMetrics.totalReturn != null ? fmtSignedDollar(liveMetrics.totalReturn) : "—"} color={colorVal(liveMetrics.totalReturn ?? 0)} />
+              <Metric label="Cum. Return" value={liveMetrics.cumReturn != null ? fmtPct(liveMetrics.cumReturn) : "—"} color={colorVal(liveMetrics.cumReturn ?? 0)} />
+              <Metric label="MWR" value={liveMetrics.mwr != null ? fmtPct(liveMetrics.mwr) : "—"} color={colorVal(liveMetrics.mwr ?? 0)} tooltip="Money Weighted Return measures your actual return accounting for when and how much money you deposited or withdrew." />
               <Metric label="Win Rate" value={liveMetrics.winRate != null ? liveMetrics.winRate.toFixed(1) + "%" : "—"} />
+              <Metric label="Calmar" value={liveMetrics.calmar != null ? liveMetrics.calmar.toFixed(2) : "—"} />
               <Metric
                 label="Best / Worst Day"
                 value={liveMetrics.bestDay != null ? fmtPct(liveMetrics.bestDay) : "—"}
@@ -689,23 +720,35 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
           </div>
 
           {/* Tabs: Live / Backtest */}
-          <div className="flex rounded-lg bg-muted p-0.5 w-fit">
-            <button
-              onClick={() => setTab("live")}
-              className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                tab === "live" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Live Performance
-            </button>
-            <button
-              onClick={() => setTab("backtest")}
-              className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                tab === "backtest" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Backtest
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg bg-muted p-0.5 w-fit">
+              <button
+                onClick={() => setTab("live")}
+                className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                  tab === "live" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Live Performance
+              </button>
+              <button
+                onClick={() => setTab("backtest")}
+                className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                  tab === "backtest" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Backtest
+              </button>
+            </div>
+            {tab === "backtest" && (
+              <button
+                onClick={() => fetchBacktest(true)}
+                disabled={loadingBacktest}
+                className="cursor-pointer rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                title="Refresh backtest (force recompute)"
+              >
+                <RefreshCw className={`h-4 w-4 ${loadingBacktest ? "animate-spin" : ""}`} />
+              </button>
+            )}
           </div>
 
           {/* Chart area */}
@@ -928,16 +971,34 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                         <span className="ml-1 font-medium text-red-400">{(btMetrics.maxDrawdown * 100).toFixed(2)}%</span>
                       </div>
                     )}
+                    {btMetrics.medianDrawdown != null && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Median DD</span>
+                        <span className="ml-1 font-medium text-red-400">{(btMetrics.medianDrawdown * 100).toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {btMetrics.longestDrawdownDays != null && btMetrics.longestDrawdownDays > 0 && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Longest DD</span>
+                        <span className="ml-1 font-medium">{btMetrics.longestDrawdownDays}d</span>
+                      </div>
+                    )}
+                    {btMetrics.medianDrawdownDays != null && btMetrics.medianDrawdownDays > 0 && (
+                      <div className="rounded bg-muted/40 px-2 py-1.5">
+                        <span className="text-muted-foreground">Median DD Length</span>
+                        <span className="ml-1 font-medium">{btMetrics.medianDrawdownDays}d</span>
+                      </div>
+                    )}
                     {btMetrics.winRate != null && (
                       <div className="rounded bg-muted/40 px-2 py-1.5">
                         <span className="text-muted-foreground">Win Rate</span>
                         <span className="ml-1 font-medium">{(btMetrics.winRate * 100).toFixed(1)}%</span>
                       </div>
                     )}
-                    {btMetrics.stdDev != null && (
+                    {btMetrics.volatility != null && (
                       <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Std Dev</span>
-                        <span className="ml-1 font-medium">{(btMetrics.stdDev * 100).toFixed(2)}%</span>
+                        <span className="text-muted-foreground">Volatility</span>
+                        <span className="ml-1 font-medium">{(btMetrics.volatility * 100).toFixed(2)}%</span>
                       </div>
                     )}
                   </div>

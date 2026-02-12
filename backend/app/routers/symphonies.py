@@ -75,6 +75,9 @@ def _compute_backtest_summary(dvm_capital: Dict, first_day: int, last_market_day
         "best_day_pct": last.get("best_day_pct", 0),
         "worst_day_pct": last.get("worst_day_pct", 0),
         "profit_factor": last.get("profit_factor", 0),
+        "median_drawdown": last.get("median_drawdown", 0),
+        "longest_drawdown_days": last.get("longest_drawdown_days", 0),
+        "median_drawdown_days": last.get("median_drawdown_days", 0),
     }
 
 

@@ -476,6 +476,59 @@ max_dd, cur_dd = compute_drawdown(equity)
 
 **Stored as:** `max_drawdown` (percentage, negative), `current_drawdown` (percentage, negative)
 
+#### Median Drawdown
+
+**What it is:** The median of all drawdown episode troughs. A drawdown episode begins when the equity curve drops below its running peak and ends when it recovers to a new peak. Each episode's trough (deepest point) is recorded, and the median gives the "typical" drawdown depth.
+
+**Why it matters:** Max drawdown captures the single worst episode, but median drawdown gives a more representative picture of typical pain, without being skewed by outliers as an arithmetic mean would be. A strategy with a -30% max drawdown but -5% median drawdown had one bad event in an otherwise stable history. A strategy with -30% max and -20% median is consistently painful. Institutional risk managers (per CFA GIPS and hedge fund due diligence standards) often review median/average drawdown alongside max drawdown for a fuller risk profile.
+
+**Formula:**
+
+```
+For each drawdown episode (peak → trough → recovery):
+  trough_i = min(equity[j] / peak - 1)  over the episode
+
+median_drawdown = median(trough_1, trough_2, ..., trough_k)
+```
+
+**Implementation:** `compute_drawdown_stats(equity_series)` → `{"median_drawdown": float, "longest_drawdown_days": int, "median_drawdown_days": int}`
+
+**Stored as:** `median_drawdown` (percentage, negative)
+
+#### Longest Drawdown
+
+**What it is:** The longest drawdown episode measured in trading days — i.e., the maximum number of consecutive days the equity curve stayed below its prior peak before recovering.
+
+**Why it matters:** Duration matters as much as depth. A -10% drawdown that lasts 2 days is far less painful than a -10% drawdown that drags on for 6 months. Long drawdown durations test investor patience and can lead to capitulation. This metric is commonly used in quantitative strategy evaluation (e.g., QuantConnect, Quantopian) alongside max drawdown.
+
+**Formula:**
+
+```
+For each drawdown episode:
+  length_i = number of days from first drop below peak to recovery
+
+longest_drawdown_days = max(length_1, length_2, ..., length_k)
+```
+
+**Stored as:** `longest_drawdown_days` (integer, trading days)
+
+#### Median Drawdown Length
+
+**What it is:** The median duration (in trading days) across all drawdown episodes. While longest drawdown captures the worst-case recovery time, median drawdown length reflects the typical episode duration.
+
+**Why it matters:** A strategy with a long worst-case drawdown but short median drawdown recovers quickly most of the time. Conversely, a high median drawdown length indicates the strategy frequently stays underwater for extended periods, which is psychologically taxing.
+
+**Formula:**
+
+```
+For each drawdown episode:
+  length_i = number of days from first drop below peak to recovery
+
+median_drawdown_days = median(length_1, length_2, ..., length_k)
+```
+
+**Stored as:** `median_drawdown_days` (integer, trading days)
+
 ---
 
 ### 8. Annualized Volatility
@@ -862,7 +915,7 @@ Displayed as a 6-column grid of cards:
 
 | Row 1 | | | | | |
 |---|---|---|---|---|---|
-| **Total Return** ($) | **TWR** (%) | **Win Rate** (%) | **Sharpe** | **Volatility** (%) | **Best Day** (%) |
+| **Total Return** ($) | **TWR** (%) | **Win Rate** (%) | **Sortino** | **Volatility** (%) | **Best Day** (%) |
 
 | Row 2 | | | | | |
 |---|---|---|---|---|---|
@@ -882,7 +935,7 @@ Displayed above the chart as a 6-column grid of smaller metric tiles:
 | | | | | | |
 |---|---|---|---|---|---|
 | **Current Value** ($) | **Net Deposits** ($) | **Today's Change** (%/$) | **Profit** ($) | **Cum. Return** (%) | **TWR** (%) |
-| **Sharpe** | **Max Drawdown** (%) | **Annualized** (%) | **Calmar** | **Win Rate** (%) | **Best / Worst Day** (%) |
+| **Sortino** | **Max Drawdown** (%) | **Annualized** (%) | **Calmar** | **Win Rate** (%) | **Best / Worst Day** (%) |
 
 - **Today's Change** shows both percentage (large) and dollar amount (small)
 - **Best / Worst Day** shows both values stacked, green and red respectively
@@ -900,7 +953,7 @@ These metrics are **period-aware** — they update when the period filter change
 
 Displayed as a compact horizontal strip of small tags:
 
-| Cum. Return | Annualized | Sharpe | Sortino | Calmar | Max DD | Win Rate | Std Dev |
+| Cum. Return | Annualized | Sharpe | Sortino | Calmar | Max DD | Median DD | Longest Drawdown | Median DD Length | Win Rate | Volatility |
 
 All values in backtest metrics are stored as **decimals** (e.g., 0.12 = 12%) and displayed with `×100` formatting in the template.
 

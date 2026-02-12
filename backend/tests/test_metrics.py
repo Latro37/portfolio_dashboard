@@ -14,6 +14,7 @@ from app.services.metrics import (
     compute_annualized_return,
     compute_annualized_return_cumulative,
     compute_drawdown,
+    compute_drawdown_stats,
     compute_volatility,
     compute_sharpe,
     compute_sortino,
@@ -267,6 +268,57 @@ class TestComputeDrawdown:
 
 
 # =====================================================================
+# compute_drawdown_stats
+# =====================================================================
+
+class TestComputeDrawdownStats:
+    def test_known_drawdown_stats(self, drawdown_series):
+        """Series: 10k → 12k → 9.6k → 12.5k — one drawdown episode of 20%."""
+        stats = compute_drawdown_stats(drawdown_series["pv"])
+        # Single drawdown trough: -20%
+        assert stats["median_drawdown"] == pytest.approx(-0.20, abs=1e-2)
+        assert stats["longest_drawdown_days"] > 0
+        assert stats["median_drawdown_days"] > 0
+
+    def test_no_drawdown(self, simple_series):
+        """Monotonically rising series should have zero median drawdown and zero duration."""
+        stats = compute_drawdown_stats(simple_series["pv"])
+        assert stats["median_drawdown"] == 0.0
+        assert stats["longest_drawdown_days"] == 0
+        assert stats["median_drawdown_days"] == 0
+
+    def test_multiple_drawdowns(self):
+        """Two distinct drawdown episodes."""
+        pv = [100, 110, 105, 112, 100, 115]
+        stats = compute_drawdown_stats(pv)
+        # Episode 1: peak 110, trough 105 → -4.55% (1 day)
+        # Episode 2: peak 112, trough 100 → -10.71% (1 day)
+        # Median of [-4.55%, -10.71%] = one of them (2 elements)
+        assert stats["median_drawdown"] < 0
+        assert stats["longest_drawdown_days"] >= 1
+        assert stats["median_drawdown_days"] >= 1
+
+    def test_ongoing_drawdown(self):
+        """Series ending in a drawdown should still count it."""
+        pv = [100, 110, 95]
+        stats = compute_drawdown_stats(pv)
+        assert stats["median_drawdown"] == pytest.approx((95 / 110 - 1), abs=1e-6)
+        assert stats["longest_drawdown_days"] == 1
+        assert stats["median_drawdown_days"] == 1
+
+    def test_empty_and_short(self):
+        assert compute_drawdown_stats([])["median_drawdown"] == 0.0
+        assert compute_drawdown_stats([100])["longest_drawdown_days"] == 0
+        assert compute_drawdown_stats([100])["median_drawdown_days"] == 0
+
+    def test_flat_series(self, flat_series):
+        stats = compute_drawdown_stats(flat_series["pv"])
+        assert stats["median_drawdown"] == 0.0
+        assert stats["longest_drawdown_days"] == 0
+        assert stats["median_drawdown_days"] == 0
+
+
+# =====================================================================
 # compute_volatility
 # =====================================================================
 
@@ -455,7 +507,7 @@ class TestComputeAllMetrics:
             "time_weighted_return", "cagr", "annualized_return", "annualized_return_cum",
             "money_weighted_return", "money_weighted_return_period",
             "win_rate", "num_wins", "num_losses", "avg_win_pct", "avg_loss_pct",
-            "max_drawdown", "current_drawdown",
+            "max_drawdown", "current_drawdown", "median_drawdown", "longest_drawdown_days", "median_drawdown_days",
             "annualized_volatility", "sharpe_ratio", "sortino_ratio", "calmar_ratio",
             "best_day_pct", "worst_day_pct", "profit_factor",
         }

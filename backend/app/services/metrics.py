@@ -183,6 +183,55 @@ def compute_drawdown(pv_series: List[float]) -> Tuple[float, float]:
     return max_dd, current_dd
 
 
+def compute_drawdown_stats(pv_series: List[float]) -> Dict:
+    """Compute drawdown episode statistics from an equity curve.
+
+    A drawdown episode starts when the series drops below its running peak
+    and ends when the series recovers to a new peak.
+
+    Returns dict with:
+      median_drawdown       – median of all drawdown troughs (decimal, negative)
+      longest_drawdown_days – longest episode in trading days
+      median_drawdown_days  – median episode length in trading days
+    """
+    if len(pv_series) < 2:
+        return {"median_drawdown": 0.0, "longest_drawdown_days": 0, "median_drawdown_days": 0}
+
+    peak = pv_series[0]
+    dd_troughs: List[float] = []
+    dd_lengths: List[int] = []
+    current_trough = 0.0
+    current_length = 0
+
+    for v in pv_series:
+        if v >= peak:
+            # Recovery or new peak
+            if current_length > 0:
+                dd_troughs.append(current_trough)
+                dd_lengths.append(current_length)
+                current_trough = 0.0
+                current_length = 0
+            peak = v
+        else:
+            dd = (v / peak - 1) if peak > 0 else 0.0
+            current_length += 1
+            if dd < current_trough:
+                current_trough = dd
+
+    # Handle ongoing drawdown at end of series
+    if current_length > 0:
+        dd_troughs.append(current_trough)
+        dd_lengths.append(current_length)
+
+    median_dd = float(np.median(dd_troughs)) if dd_troughs else 0.0
+    longest = max(dd_lengths) if dd_lengths else 0
+    median_len = int(np.median(dd_lengths)) if dd_lengths else 0
+    # Guard against NaN propagation from edge-case equity curves
+    if math.isnan(median_dd):
+        median_dd = 0.0
+    return {"median_drawdown": median_dd, "longest_drawdown_days": longest, "median_drawdown_days": median_len}
+
+
 def compute_volatility(daily_returns: List[float]) -> float:
     """Annualized volatility as a decimal.
 
@@ -350,6 +399,10 @@ def _compute_row(
     max_dd, cur_dd = compute_drawdown(equity)
     row["max_drawdown"] = round(max_dd * 100, 4)
     row["current_drawdown"] = round(cur_dd * 100, 4)
+    dd_stats = compute_drawdown_stats(equity)
+    row["median_drawdown"] = round(dd_stats["median_drawdown"] * 100, 4)
+    row["longest_drawdown_days"] = dd_stats["longest_drawdown_days"]
+    row["median_drawdown_days"] = dd_stats["median_drawdown_days"]
 
     # --- Volatility ---
     row["annualized_volatility"] = round(compute_volatility(rets_window) * 100, 4)

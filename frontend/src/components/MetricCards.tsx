@@ -42,7 +42,7 @@ export function MetricCards({ summary }: Props) {
       <Metric label="Annualized Return" value={fmtPct(s.annualized_return_cum)} color={colorPct(s.annualized_return_cum)} tooltip="Your cumulative return annualized using compound growth. Reflects your real-world investment growth rate." />
       <Metric label="TWR" value={fmtPct(s.time_weighted_return)} color={colorPct(s.time_weighted_return)} tooltip="Time Weighted Return measures portfolio growth independent of cash flows such as deposits. Each day's gain/loss is compounded together to show how the strategy itself performed, ignoring how well you timed the entry or exit." />
       <Metric label="Win Rate" value={s.win_rate.toFixed(1) + "%"} />
-      <Metric label="Sharpe" value={s.sharpe_ratio.toFixed(2)} />
+      <Metric label="Sortino" value={s.sortino_ratio.toFixed(2)} />
       <Metric label="Volatility" value={s.annualized_volatility.toFixed(1) + "%"} />
       <Metric label="Best Day" value={fmtPct(s.best_day_pct)} color="text-emerald-400" tooltip={s.best_day_date ?? undefined} />
       <Metric label="Cumulative Return" value={fmtPct(s.cumulative_return_pct)} color={colorPct(s.cumulative_return_pct)} />

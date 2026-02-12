@@ -1,53 +1,6 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
-// ---------------------------------------------------------------------------
-// localStorage cache (5-minute TTL, invalidated on sync)
-// ---------------------------------------------------------------------------
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const CACHE_PREFIX = "cpv_cache:";
-
-function cacheGet<T>(key: string): T | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(CACHE_PREFIX + key);
-    if (!raw) return null;
-    const { ts, data } = JSON.parse(raw);
-    if (Date.now() - ts > CACHE_TTL_MS) {
-      localStorage.removeItem(CACHE_PREFIX + key);
-      return null;
-    }
-    return data as T;
-  } catch {
-    return null;
-  }
-}
-
-function cacheSet(key: string, data: unknown): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ ts: Date.now(), data }));
-  } catch {
-    // quota exceeded — silently ignore
-  }
-}
-
-/** Invalidate all cached API responses (call after sync). */
-export function invalidateApiCache(): void {
-  if (typeof window === "undefined") return;
-  const toRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k?.startsWith(CACHE_PREFIX)) toRemove.push(k);
-  }
-  toRemove.forEach((k) => localStorage.removeItem(k));
-}
-
-async function fetchJSON<T>(path: string, skipCache = false): Promise<T> {
-  if (!skipCache) {
-    const cached = cacheGet<T>(path);
-    if (cached !== null) return cached;
-  }
-
+async function fetchJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
   if (res.status === 429) {
     const body = await res.text().catch(() => "");
@@ -57,9 +10,7 @@ async function fetchJSON<T>(path: string, skipCache = false): Promise<T> {
     throw new Error(`Rate limited on ${path}. Try again later.`);
   }
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  const data: T = await res.json();
-  cacheSet(path, data);
-  return data;
+  return res.json();
 }
 
 export interface Summary {
@@ -233,6 +184,9 @@ export interface BacktestSummaryMetrics {
   best_day_pct: number;
   worst_day_pct: number;
   profit_factor: number;
+  median_drawdown: number;
+  longest_drawdown_days: number;
+  median_drawdown_days: number;
 }
 
 export interface SymphonyBacktest {
@@ -360,7 +314,7 @@ export const api = {
     fetchJSON<SyncStatus>(`/sync/status${_qs(accountId)}`),
   triggerSync: (accountId?: string) =>
     fetch(`${API_BASE}/sync${_qs(accountId)}`, { method: "POST" })
-      .then((r) => { invalidateApiCache(); return r.json(); }),
+      .then((r) => r.json()),
   addManualCashFlow: (body: {
     account_id: string;
     date: string;
@@ -374,7 +328,7 @@ export const api = {
       body: JSON.stringify(body),
     }).then((r) => r.json()),
   getSymphonies: (accountId?: string) =>
-    fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`, true),
+    fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`),
   getSymphonyPerformance: (symphonyId: string, accountId: string) =>
     fetchJSON<PerformancePoint[]>(
       `/symphonies/${symphonyId}/performance?account_id=${encodeURIComponent(accountId)}`
@@ -392,7 +346,7 @@ export const api = {
       `/symphonies/${symphonyId}/allocations?account_id=${encodeURIComponent(accountId)}`
     ),
   getTradePreview: (accountId?: string) =>
-    fetchJSON<TradePreviewItem[]>(`/trade-preview${_qs(accountId)}`, true),
+    fetchJSON<TradePreviewItem[]>(`/trade-preview${_qs(accountId)}`),
   getSymphonyTradePreview: (symphonyId: string, accountId: string) =>
     fetchJSON<SymphonyTradePreview>(
       `/symphonies/${symphonyId}/trade-preview?account_id=${encodeURIComponent(accountId)}`
