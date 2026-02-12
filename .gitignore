@@ -19,6 +19,7 @@ backend/data/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+node_modules/
 
 # IDE
 .vscode/
