@@ -96,6 +96,7 @@ function backtestOverlayTooltip(
   chartData: any[],
   benchKey?: string,
   benchTicker?: string | null,
+  benchLabel?: string | null,
 ) {
   return ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
@@ -143,7 +144,7 @@ function backtestOverlayTooltip(
         )}
         {benchTicker && bVal != null && (
           <p style={{ margin: 0, lineHeight: 1.6, color: "#f97316" }}>
-            {benchTicker} : {formatPctAxis(bVal)}
+            {benchLabel || benchTicker} : {formatPctAxis(bVal)}
           </p>
         )}
         {benchTicker && pVal != null && bVal != null && (
@@ -220,6 +221,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [showLiveOverlay, setShowLiveOverlay] = useState(false);
   const [benchmarkTicker, setBenchmarkTicker] = useState<string | null>(null);
   const [benchmarkData, setBenchmarkData] = useState<BenchmarkPoint[]>([]);
+  const [benchmarkLabel, setBenchmarkLabel] = useState<string | null>(null);
   const [btCustomInput, setBtCustomInput] = useState(false);
   const [btCustomTickerInput, setBtCustomTickerInput] = useState("");
 
@@ -233,10 +235,22 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
   // Fetch benchmark data when ticker changes
   useEffect(() => {
-    if (!benchmarkTicker) { setBenchmarkData([]); return; }
-    api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, s.account_id)
-      .then((res) => setBenchmarkData(res.data))
-      .catch(() => { setBenchmarkData([]); });
+    if (!benchmarkTicker) { setBenchmarkData([]); setBenchmarkLabel(null); return; }
+    if (benchmarkTicker.startsWith("symphony:")) {
+      const symId = benchmarkTicker.slice(9);
+      api.getSymphonyBenchmark(symId)
+        .then((res) => {
+          setBenchmarkData(res.data);
+          const name = res.name || symId;
+          setBenchmarkLabel(name.length > 21 ? name.slice(0, 19) + "\u2026" : name);
+        })
+        .catch(() => { setBenchmarkData([]); setBenchmarkLabel(symId.length > 21 ? symId.slice(0, 19) + "\u2026" : symId); });
+    } else {
+      setBenchmarkLabel(null);
+      api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, s.account_id)
+        .then((res) => setBenchmarkData(res.data))
+        .catch(() => { setBenchmarkData([]); });
+    }
   }, [benchmarkTicker, s.account_id]);
 
   // Fetch live performance on mount
@@ -527,9 +541,14 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
     // Merge benchmark data into backtest chart
     const benchMap = benchmarkData.length ? new Map(benchmarkData.map((b) => [b.date, b])) : null;
-    const firstBtDate = filteredBacktestData[0]?.date;
-    const firstBench = benchMap && firstBtDate ? benchMap.get(firstBtDate) : null;
-    const benchBaseGrowth = firstBench ? 1 + firstBench.return_pct / 100 : 1;
+    // Find first benchmark match in the backtest window (not just exact first date)
+    let benchBaseGrowth: number = 1;
+    if (benchMap) {
+      for (const pt of filteredBacktestData) {
+        const b = benchMap.get(pt.date);
+        if (b != null) { benchBaseGrowth = 1 + b.return_pct / 100; break; }
+      }
+    }
     let benchPeak = 1;
     let lastBenchReturn: number | undefined;
     let lastBenchDd: number | undefined;
@@ -821,6 +840,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 drawdownOverlayKey="backtestDrawdown"
                 benchmarkData={benchmarkData}
                 benchmarkTicker={benchmarkTicker}
+                benchmarkLabel={benchmarkLabel}
                 onBenchmarkChange={setBenchmarkTicker}
               />
             )
@@ -906,7 +926,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "benchmarkReturn", benchmarkTicker)} />
+                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "benchmarkReturn", benchmarkTicker, benchmarkLabel)} />
                       <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveTwr" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
@@ -946,7 +966,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "benchmarkDrawdown", benchmarkTicker)} />
+                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "benchmarkDrawdown", benchmarkTicker, benchmarkLabel)} />
                       <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveDrawdown" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
@@ -1003,20 +1023,24 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       className="flex items-center gap-1"
                       onSubmit={(e) => {
                         e.preventDefault();
-                        const t = btCustomTickerInput.trim().toUpperCase();
-                        if (t) {
-                          setBenchmarkTicker(t);
-                          setBtCustomTickerInput("");
-                          setBtCustomInput(false);
+                        const raw = btCustomTickerInput.trim();
+                        if (!raw) return;
+                        const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
+                        if (symMatch) {
+                          setBenchmarkTicker(`symphony:${symMatch[1]}`);
+                        } else {
+                          setBenchmarkTicker(raw.toUpperCase());
                         }
+                        setBtCustomTickerInput("");
+                        setBtCustomInput(false);
                       }}
                     >
                       <input
                         autoFocus
                         value={btCustomTickerInput}
                         onChange={(e) => setBtCustomTickerInput(e.target.value)}
-                        placeholder="TICKER"
-                        className="w-20 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
+                        placeholder="TICKER or Symphony URL"
+                        className="w-48 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
                         onBlur={() => { if (!btCustomTickerInput.trim()) setBtCustomInput(false); }}
                       />
                       <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
@@ -1027,7 +1051,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       onClick={() => setBenchmarkTicker(null)}
                       className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40"
                     >
-                      {benchmarkTicker} ✕
+                      {benchmarkLabel || benchmarkTicker} ✕
                     </button>
                   )}
                 </div>

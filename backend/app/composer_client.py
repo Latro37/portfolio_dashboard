@@ -331,6 +331,14 @@ class ComposerClient:
         """Run backtest for an existing symphony.
 
         Returns the full backtest response with dvm_capital, stats, benchmarks, etc.
+
+        Slippage & spread parameters:
+          - slippage_percent: 0.0005 (5 bps)  — Composer default is 1 bps (0.0001)
+          - spread_markup:    0.001  (10 bps)  — Composer default is 0
+          Our more conservative friction (5 bps/trade vs Composer's 1 bps) better
+          approximates real-world execution costs.  This means backtest results from
+          this app will be slightly lower than Composer's UI for the same period
+          (typically 3-5 pp over several months for active strategies).
         """
         url = f"{self.base_url}/api/v0.1/symphonies/{symphony_id}/backtest"
         resp = requests.post(url, headers=self.headers, json={

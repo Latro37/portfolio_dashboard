@@ -22,6 +22,8 @@ from app.services.symphony_export import export_single_symphony
 from app.market_hours import is_within_trading_session
 import time
 
+import math
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["symphonies"])
 
@@ -770,3 +772,122 @@ def get_symphony_allocations(
         result[ds][r.ticker] = r.allocation_pct
 
     return result
+
+
+# ------------------------------------------------------------------
+# Symphony benchmark (backtest as benchmark overlay)
+# ------------------------------------------------------------------
+
+_symphony_bench_cache: Dict[str, tuple] = {}  # symphony_id -> (timestamp, response_dict)
+_SYMPHONY_BENCH_TTL = 3600  # 1 hour
+
+
+def _epoch_day_to_date(day_num: int) -> date:
+    """Convert epoch day number to a date object."""
+    return date.fromordinal(date(1970, 1, 1).toordinal() + day_num)
+
+
+@router.get("/symphony-benchmark/{symphony_id}")
+def get_symphony_benchmark(
+    symphony_id: str,
+    account_id: Optional[str] = Query(None, description="Account ID (used to find credentials)"),
+    db: Session = Depends(get_db),
+):
+    """Fetch a symphony backtest and return it in BenchmarkPoint format.
+
+    Tries each set of credentials until the backtest succeeds (handles private symphonies).
+    """
+    symphony_id = symphony_id.strip()
+    if not symphony_id:
+        raise HTTPException(400, "Symphony ID is required")
+
+    # Check cache
+    if symphony_id in _symphony_bench_cache:
+        ts, cached = _symphony_bench_cache[symphony_id]
+        if time.time() - ts < _SYMPHONY_BENCH_TTL:
+            return cached
+
+    # Gather unique clients to try (deduplicated by credential name)
+    all_accounts = db.query(Account).all()
+    if not all_accounts:
+        raise HTTPException(404, "No accounts discovered")
+
+    accounts_creds = load_accounts()
+    cred_map: Dict[str, ComposerClient] = {}
+    for acct in all_accounts:
+        if acct.credential_name not in cred_map:
+            for creds in accounts_creds:
+                if creds.name == acct.credential_name:
+                    cred_map[acct.credential_name] = ComposerClient.from_credentials(creds)
+                    break
+
+    # Try each credential set
+    backtest_data = None
+    last_error = ""
+    for cred_name, client in cred_map.items():
+        try:
+            backtest_data = client.get_symphony_backtest(symphony_id)
+            break
+        except Exception as e:
+            last_error = str(e)
+            logger.debug("Backtest for %s failed with credentials '%s': %s", symphony_id, cred_name, e)
+            continue
+
+    if backtest_data is None:
+        raise HTTPException(404, f"Symphony '{symphony_id}' not found or backtest failed: {last_error}")
+
+    # Extract symphony name — try stats, then top-level, then score endpoint
+    stats = backtest_data.get("stats", {})
+    symphony_name = stats.get("name", "") or backtest_data.get("name", "")
+    if not symphony_name:
+        try:
+            score = client.get_symphony_score(symphony_id)
+            symphony_name = score.get("name", "") or symphony_id
+        except Exception:
+            symphony_name = symphony_id
+
+    # Extract dvm_capital series
+    dvm_capital = backtest_data.get("dvm_capital", {})
+    if not dvm_capital:
+        raise HTTPException(400, "No backtest data available for this symphony")
+
+    # dvm_capital is {symphony_id: {day_offset: value}} — extract inner series
+    first_key = next(iter(dvm_capital))
+    series = dvm_capital[first_key] if isinstance(dvm_capital[first_key], dict) else dvm_capital
+
+    sorted_keys = sorted(series.keys(), key=lambda k: int(k))
+    if len(sorted_keys) < 2:
+        raise HTTPException(400, "Insufficient backtest data")
+
+    # Build closes list (date, value)
+    closes = []
+    for k in sorted_keys:
+        day_num = int(k)
+        d = _epoch_day_to_date(day_num)
+        val = float(series[k])
+        if not math.isnan(val) and val > 0:
+            closes.append((d, val))
+
+    if not closes:
+        raise HTTPException(400, "No valid backtest data")
+
+    # Compute TWR (cumulative return from first date)
+    first_val = closes[0][1]
+    result_data = []
+    peak = first_val
+    for d, val in closes:
+        return_pct = round(((val / first_val) - 1) * 100, 4)
+        if val > peak:
+            peak = val
+        drawdown_pct = round(((val / peak) - 1) * 100, 4) if peak > 0 else 0.0
+        result_data.append({
+            "date": str(d),
+            "close": round(val, 2),
+            "return_pct": return_pct,
+            "drawdown_pct": drawdown_pct,
+            "mwr_pct": 0.0,
+        })
+
+    response = {"name": symphony_name, "ticker": symphony_name, "data": result_data}
+    _symphony_bench_cache[symphony_id] = (time.time(), response)
+    return response

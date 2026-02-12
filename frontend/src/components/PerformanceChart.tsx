@@ -39,6 +39,7 @@ interface Props {
   drawdownOverlayKey?: string;
   benchmarkData?: BenchmarkPoint[];
   benchmarkTicker?: string | null;
+  benchmarkLabel?: string | null;
   onBenchmarkChange?: (ticker: string | null) => void;
 }
 
@@ -65,6 +66,7 @@ export function PerformanceChart({
   drawdownOverlayKey,
   benchmarkData,
   benchmarkTicker,
+  benchmarkLabel,
   onBenchmarkChange,
 }: Props) {
   const [internalMode, setInternalMode] = useState<ChartMode>("portfolio");
@@ -87,10 +89,17 @@ export function PerformanceChart({
   const tradingData = useMemo(() => {
     if (!benchmarkData || !benchmarkTicker) return rawTradingData;
     const benchMap = new Map(benchmarkData.map((b) => [b.date, b]));
-    // Rebase benchmark return to start at 0 from the chart's first visible date
-    const firstDate = rawTradingData[0]?.date;
-    const firstBench = firstDate ? benchMap.get(firstDate) : null;
-    const baseGrowth = firstBench ? 1 + firstBench.return_pct / 100 : 1;
+    // Find the first benchmark data point that falls within the chart window
+    // (handles cases where the exact first portfolio date has no benchmark match)
+    let baseGrowth: number | null = null;
+    for (const pt of rawTradingData) {
+      const b = benchMap.get(pt.date);
+      if (b != null) {
+        baseGrowth = 1 + b.return_pct / 100;
+        break;
+      }
+    }
+    if (baseGrowth === null) baseGrowth = 1;
     // Recompute drawdown from rebased benchmark equity curve
     let benchPeak = 1;
     let lastReturn: number | undefined;
@@ -109,9 +118,9 @@ export function PerformanceChart({
       // Carry forward last known benchmark values for trailing dates
       return {
         ...pt,
-        benchmark_return: b != null ? lastReturn : lastReturn,
-        benchmark_drawdown: b != null ? lastDd : lastDd,
-        benchmark_mwr: b != null ? lastMwr : lastMwr,
+        benchmark_return: lastReturn,
+        benchmark_drawdown: lastDd,
+        benchmark_mwr: lastMwr,
       };
     });
   }, [rawTradingData, benchmarkData, benchmarkTicker]);
@@ -206,7 +215,7 @@ export function PerformanceChart({
           {hasBenchmark && bVal != null && (
             <div>
               <p style={{ margin: 0, lineHeight: 1.6, color: BENCH_COLOR }}>
-                {benchmarkTicker} : {formatPct(bVal)}
+                {benchmarkLabel || benchmarkTicker} : {formatPct(bVal)}
               </p>
             </div>
           )}
@@ -275,7 +284,7 @@ export function PerformanceChart({
         )}
         {hasBenchmark && bVal != null && (
           <p style={{ margin: 0, lineHeight: 1.6, color: BENCH_COLOR }}>
-            {benchmarkTicker} : {formatPct(bVal)}
+            {benchmarkLabel || benchmarkTicker} : {formatPct(bVal)}
           </p>
         )}
         {hasBenchmark && val != null && bVal != null && (
@@ -684,20 +693,25 @@ export function PerformanceChart({
                 className="flex items-center gap-1"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const t = customTickerInput.trim().toUpperCase();
-                  if (t) {
-                    onBenchmarkChange(t);
-                    setCustomTickerInput("");
-                    setShowCustomInput(false);
+                  const raw = customTickerInput.trim();
+                  if (!raw) return;
+                  // Detect symphony links: composer.trade/symphony/{id}
+                  const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
+                  if (symMatch) {
+                    onBenchmarkChange(`symphony:${symMatch[1]}`);
+                  } else {
+                    onBenchmarkChange(raw.toUpperCase());
                   }
+                  setCustomTickerInput("");
+                  setShowCustomInput(false);
                 }}
               >
                 <input
                   autoFocus
                   value={customTickerInput}
                   onChange={(e) => setCustomTickerInput(e.target.value)}
-                  placeholder="TICKER"
-                  className="w-20 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
+                  placeholder="TICKER or Symphony URL/ID"
+                  className="w-48 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
                   onBlur={() => { if (!customTickerInput.trim()) setShowCustomInput(false); }}
                 />
                 <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
@@ -708,7 +722,7 @@ export function PerformanceChart({
                 onClick={() => onBenchmarkChange(null)}
                 className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40"
               >
-                {benchmarkTicker} ✕
+                {benchmarkLabel || benchmarkTicker} ✕
               </button>
             )}
           </div>

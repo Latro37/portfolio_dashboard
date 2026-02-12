@@ -260,6 +260,12 @@ export interface BenchmarkHistory {
   data: BenchmarkPoint[];
 }
 
+export interface SymphonyBenchmarkHistory {
+  name: string;
+  ticker: string;
+  data: BenchmarkPoint[];
+}
+
 export interface SymphonyExportStatus {
   local_path: string;
 }
@@ -396,6 +402,9 @@ export const api = {
     if (endDate) params.set("end_date", endDate);
     if (accountId) params.set("account_id", accountId);
     return fetchJSON<BenchmarkHistory>(`/benchmark-history?${params.toString()}`);
+  },
+  getSymphonyBenchmark: (symphonyId: string) => {
+    return fetchJSON<SymphonyBenchmarkHistory>(`/symphony-benchmark/${encodeURIComponent(symphonyId)}`);
   },
   getSymphonyLiveSummary: (symphonyId: string, accountId: string, livePv: number, liveNd: number, period?: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();

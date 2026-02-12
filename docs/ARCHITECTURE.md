@@ -235,8 +235,16 @@ All portfolio endpoints accept an optional `account_id` query parameter:
 | GET | `/api/symphonies/{id}/summary/live` | Summary with live intraday value overlay |
 | GET | `/api/symphonies/{id}/backtest` | Backtest results (cached, version-check invalidation) |
 | GET | `/api/symphonies/{id}/allocations` | Historical allocation snapshots |
+| GET | `/api/symphony-benchmark/{id}` | Backtest a symphony and return BenchmarkPoint[] for chart overlay |
 | GET | `/api/trade-preview` | Pending rebalance trades across all symphonies |
 | GET | `/api/symphonies/{id}/trade-preview` | Pending trades for one symphony |
+
+### Benchmark Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/benchmark-history` | Ticker benchmark (yfinance): TWR, drawdown, MWR series |
+| GET | `/api/symphony-benchmark/{id}` | Symphony benchmark: backtest → BenchmarkPoint[] format |
 
 ## Database Schema
 
@@ -394,6 +402,28 @@ Two annualized return calculations are maintained:
 - **`annualized_return_cum`** — cumulative-return-based (simple, intuitive)
 
 The dashboard displays the cumulative-based variant as "Annualized Return" since it's more intuitive for end users. TWR is shown separately. The Calmar ratio uses the cumulative-based variant.
+
+### Benchmark Overlay
+
+All chart views (Dashboard, SymphonyDetail live + backtest) support a benchmark overlay:
+
+- **Predefined tickers**: SPY, QQQ, TQQQ via yfinance historical data (`/api/benchmark-history`)
+- **Custom tickers**: Any valid ticker symbol via the `+` input
+- **Symphony backtests**: Paste a Composer symphony URL (e.g. `https://app.composer.trade/symphony/{id}/details`) or raw ID. The frontend detects `composer.trade/symphony/` URLs and routes to `/api/symphony-benchmark/{id}`.
+
+Symphony benchmark fetching loops through all credential sets to find private symphonies across accounts. The symphony name (clamped to 21 characters) is displayed as the label. Benchmark return data is rebased to start at 0% from the chart's first visible date using growth-factor division.
+
+### Backtest Slippage & Spread
+
+Our backtest parameters use more conservative friction than Composer's defaults:
+
+| Parameter | This App | Composer Default |
+|-----------|----------|------------------|
+| `slippage_percent` | 0.0005 (5 bps) | 0.0001 (1 bps) |
+| `spread_markup` | 0.001 (10 bps) | 0 |
+| **Total per-trade friction** | **15 bps** | **1 bps** |
+
+This means backtest results from this app will be **slightly lower** than Composer's UI for the same period (typically 3–5 percentage points over several months for active strategies). The higher friction better approximates real-world execution costs including bid-ask spreads and market impact.
 
 ### Backtest Cache Strategy
 

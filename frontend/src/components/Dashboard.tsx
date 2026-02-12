@@ -61,6 +61,7 @@ export default function Dashboard() {
   const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } } | null>(null);
   const [benchmarkTicker, setBenchmarkTicker] = useState<string | null>(null);
   const [benchmarkData, setBenchmarkData] = useState<BenchmarkPoint[]>([]);
+  const [benchmarkLabel, setBenchmarkLabel] = useState<string | null>(null);
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
@@ -75,10 +76,23 @@ export default function Dashboard() {
 
   // Fetch benchmark data when ticker changes
   useEffect(() => {
-    if (!benchmarkTicker) { setBenchmarkData([]); return; }
-    api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, resolvedAccountId)
-      .then((res) => setBenchmarkData(res.data))
-      .catch(() => { setBenchmarkData([]); });
+    if (!benchmarkTicker) { setBenchmarkData([]); setBenchmarkLabel(null); return; }
+    if (benchmarkTicker.startsWith("symphony:")) {
+      const symId = benchmarkTicker.slice(9);
+      api.getSymphonyBenchmark(symId)
+        .then((res) => {
+          setBenchmarkData(res.data);
+          // Shorten name: max 20 chars + ellipsis
+          const name = res.name || symId;
+          setBenchmarkLabel(name.length > 21 ? name.slice(0, 19) + "\u2026" : name);
+        })
+        .catch(() => { setBenchmarkData([]); setBenchmarkLabel(symId.length > 21 ? symId.slice(0, 19) + "\u2026" : symId); });
+    } else {
+      setBenchmarkLabel(null);
+      api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, resolvedAccountId)
+        .then((res) => setBenchmarkData(res.data))
+        .catch(() => { setBenchmarkData([]); });
+    }
   }, [benchmarkTicker, resolvedAccountId]);
 
   // Load accounts + config on mount
@@ -463,6 +477,7 @@ export default function Dashboard() {
           onEndDateChange={setCustomEnd}
           benchmarkData={benchmarkData}
           benchmarkTicker={benchmarkTicker}
+          benchmarkLabel={benchmarkLabel}
           onBenchmarkChange={setBenchmarkTicker}
         />
 
