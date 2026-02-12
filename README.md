@@ -123,6 +123,7 @@ npm run dev
 
 ## Documentation
 
+- **[User Guide](docs/USER_GUIDE.md)** — features, setup, dashboard walkthrough, troubleshooting
 - **[Architecture](docs/ARCHITECTURE.md)** — project structure, data flow, API reference, database schema
 - **[Metrics](docs/METRICS.md)** — detailed metric formulas and calculations
 
