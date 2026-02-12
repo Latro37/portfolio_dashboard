@@ -266,6 +266,13 @@ export interface SymphonyBenchmarkHistory {
   data: BenchmarkPoint[];
 }
 
+export interface BenchmarkEntry {
+  ticker: string;
+  label: string;
+  data: BenchmarkPoint[];
+  color: string;
+}
+
 export interface SymphonyExportStatus {
   local_path: string;
 }

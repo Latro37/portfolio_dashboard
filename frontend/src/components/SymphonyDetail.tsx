@@ -10,6 +10,7 @@ import {
   SymphonySummary,
   SymphonyTradePreview,
   BenchmarkPoint,
+  BenchmarkEntry,
 } from "@/lib/api";
 import { isMarketOpen, isWithinTradingSession } from "@/lib/marketHours";
 import {
@@ -94,9 +95,9 @@ function backtestOverlayTooltip(
   showOverlay: boolean,
   fmtDate: (d: string) => string,
   chartData: any[],
-  benchKey?: string,
-  benchTicker?: string | null,
-  benchLabel?: string | null,
+  benchSuffix: string,
+  activeBenchmarks: BenchmarkEntry[],
+  benchColors: string[],
 ) {
   return ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
@@ -104,19 +105,16 @@ function backtestOverlayTooltip(
     const prev: any = idx > 0 ? chartData[idx - 1] : null;
     const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
     const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
-    const benchEntry = benchKey ? payload.find((p: any) => p.dataKey === benchKey) : null;
     const pVal = primaryEntry?.value as number | undefined;
     const oVal = overlayEntry?.value as number | undefined;
-    const bVal = benchEntry?.value as number | undefined;
     const hasBoth = pVal != null && oVal != null;
     const delta = hasBoth ? pVal - oVal : null;
     const pPrev = prev ? prev[primaryKey] : null;
     const pDayD = pVal != null && pPrev != null ? Number(pVal) - Number(pPrev) : null;
-    const oPrev = prev ? prev[oKey] : null;
-    const oDayD = oVal != null && oPrev != null ? Number(oVal) - Number(oPrev) : null;
     const pDC = pDayD != null ? btDCol(pDayD) : "#71717a";
-    const oDC = oDayD != null ? btDCol(oDayD) : "#71717a";
     const dDC = delta != null ? btDCol(delta) : "#71717a";
+    const hasBench = activeBenchmarks.length > 0;
+    const singleBench = activeBenchmarks.length === 1;
     return (
       <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
         <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{fmtDate(String(label))}</p>
@@ -125,7 +123,7 @@ function backtestOverlayTooltip(
             <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
               {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
             </p>
-            {!showOverlay && !benchTicker && pDayD != null && (
+            {!showOverlay && !hasBench && pDayD != null && (
               <p key={`bpd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Δ to Prev. Day: {btFmtDelta(pDayD)}</p>
             )}
           </div>
@@ -142,16 +140,23 @@ function backtestOverlayTooltip(
             Δ : {btFmtDelta(delta)}
           </p>
         )}
-        {benchTicker && bVal != null && (
-          <p style={{ margin: 0, lineHeight: 1.6, color: "#f97316" }}>
-            {benchLabel || benchTicker} : {formatPctAxis(bVal)}
-          </p>
-        )}
-        {benchTicker && pVal != null && bVal != null && (
-          <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
-            Δ : {btFmtDelta(pVal - bVal)}
-          </p>
-        )}
+        {activeBenchmarks.map((bench, i) => {
+          const bEntry = payload.find((p: any) => p.dataKey === `bench_${i}_${benchSuffix}`);
+          const bVal = bEntry?.value as number | undefined;
+          if (bVal == null) return null;
+          return (
+            <div key={bench.ticker}>
+              <p style={{ margin: 0, lineHeight: 1.6, color: bench.color }}>
+                {bench.label} : {formatPctAxis(bVal)}
+              </p>
+              {singleBench && pVal != null && (
+                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
+                  Δ : {btFmtDelta(pVal - bVal)}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -219,11 +224,17 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const baseLiveDataRef = useRef<PerformancePoint[]>([]);
   const [showBacktestOverlay, setShowBacktestOverlay] = useState(false);
   const [showLiveOverlay, setShowLiveOverlay] = useState(false);
-  const [benchmarkTicker, setBenchmarkTicker] = useState<string | null>(null);
-  const [benchmarkData, setBenchmarkData] = useState<BenchmarkPoint[]>([]);
-  const [benchmarkLabel, setBenchmarkLabel] = useState<string | null>(null);
+  const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
   const [btCustomInput, setBtCustomInput] = useState(false);
   const [btCustomTickerInput, setBtCustomTickerInput] = useState("");
+  const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
+  const MAX_BENCHMARKS = 3;
+  const isLightColor = (c: string) => c === "#e4e4e7";
+  const benchBtnStyle = (color: string) => ({
+    backgroundColor: isLightColor(color) ? `${color}40` : `${color}20`,
+    color,
+    boxShadow: isLightColor(color) ? `0 0 0 2px ${color}88` : `0 0 0 1px ${color}66`,
+  });
 
   const s = symphony;
 
@@ -233,25 +244,32 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     return () => { document.body.style.overflow = ""; };
   }, []);
 
-  // Fetch benchmark data when ticker changes
-  useEffect(() => {
-    if (!benchmarkTicker) { setBenchmarkData([]); setBenchmarkLabel(null); return; }
-    if (benchmarkTicker.startsWith("symphony:")) {
-      const symId = benchmarkTicker.slice(9);
+  const clampLabel = (str: string) => str.length > 21 ? str.slice(0, 19) + "\u2026" : str;
+  const pickColor = (current: BenchmarkEntry[]) => BENCH_COLORS.find((c) => !current.some((b) => b.color === c)) || BENCH_COLORS[0];
+
+  const handleBenchmarkAdd = useCallback((ticker: string) => {
+    if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
+    const color = pickColor(benchmarks);
+    const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
+    setBenchmarks((prev) => [...prev, placeholder]);
+    if (ticker.startsWith("symphony:")) {
+      const symId = ticker.slice(9);
       api.getSymphonyBenchmark(symId)
         .then((res) => {
-          setBenchmarkData(res.data);
-          const name = res.name || symId;
-          setBenchmarkLabel(name.length > 21 ? name.slice(0, 19) + "\u2026" : name);
+          const label = clampLabel(res.name || symId);
+          setBenchmarks((prev) => prev.map((b) => b.ticker === ticker ? { ...b, label, data: res.data } : b));
         })
-        .catch(() => { setBenchmarkData([]); setBenchmarkLabel(symId.length > 21 ? symId.slice(0, 19) + "\u2026" : symId); });
+        .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
     } else {
-      setBenchmarkLabel(null);
-      api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, s.account_id)
-        .then((res) => setBenchmarkData(res.data))
-        .catch(() => { setBenchmarkData([]); });
+      api.getBenchmarkHistory(ticker, undefined, undefined, s.account_id)
+        .then((res) => setBenchmarks((prev) => prev.map((b) => b.ticker === ticker ? { ...b, data: res.data } : b)))
+        .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
     }
-  }, [benchmarkTicker, s.account_id]);
+  }, [benchmarks, s.account_id]);
+
+  const handleBenchmarkRemove = useCallback((ticker: string) => {
+    setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker));
+  }, []);
 
   // Fetch live performance on mount
   useEffect(() => {
@@ -539,39 +557,39 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
       }
     }
 
-    // Merge benchmark data into backtest chart
-    const benchMap = benchmarkData.length ? new Map(benchmarkData.map((b) => [b.date, b])) : null;
-    // Find first benchmark match in the backtest window (not just exact first date)
-    let benchBaseGrowth: number = 1;
-    if (benchMap) {
+    // Merge benchmark data into backtest chart (supports multiple benchmarks)
+    const benchStates = benchmarks.filter((b) => b.data.length > 0).map((bench) => {
+      const map = new Map(bench.data.map((bp: BenchmarkPoint) => [bp.date, bp]));
+      let baseGrowth: number | null = null;
       for (const pt of filteredBacktestData) {
-        const b = benchMap.get(pt.date);
-        if (b != null) { benchBaseGrowth = 1 + b.return_pct / 100; break; }
+        const bp = map.get(pt.date);
+        if (bp != null) { baseGrowth = 1 + bp.return_pct / 100; break; }
       }
-    }
-    let benchPeak = 1;
-    let lastBenchReturn: number | undefined;
-    let lastBenchDd: number | undefined;
+      return { map, baseGrowth: baseGrowth ?? 1, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined };
+    });
 
     return filteredBacktestData.map((pt) => {
-      const bPt = benchMap?.get(pt.date);
-      if (bPt != null && benchBaseGrowth !== 0) {
-        lastBenchReturn = ((1 + bPt.return_pct / 100) / benchBaseGrowth - 1) * 100;
-        const growth = 1 + lastBenchReturn / 100;
-        benchPeak = Math.max(benchPeak, growth);
-        lastBenchDd = benchPeak > 0 ? (growth / benchPeak - 1) * 100 : 0;
-      }
-      return {
+      const merged: any = {
         ...pt,
         liveTwr: liveByDate[pt.date] != null && baseFactor != null && baseFactor !== 0
           ? ((1 + liveByDate[pt.date] / 100) / baseFactor - 1) * 100
           : null,
         liveDrawdown: liveDdByDate[pt.date] ?? null,
-        benchmarkReturn: lastBenchReturn,
-        benchmarkDrawdown: lastBenchDd,
       };
+      benchStates.forEach((bs, i) => {
+        const bPt = bs.map.get(pt.date);
+        if (bPt != null && bs.baseGrowth !== 0) {
+          bs.lastReturn = ((1 + bPt.return_pct / 100) / bs.baseGrowth - 1) * 100;
+          const growth = 1 + bs.lastReturn / 100;
+          bs.peak = Math.max(bs.peak, growth);
+          bs.lastDd = bs.peak > 0 ? (growth / bs.peak - 1) * 100 : 0;
+        }
+        merged[`bench_${i}_return`] = bs.lastReturn;
+        merged[`bench_${i}_drawdown`] = bs.lastDd;
+      });
+      return merged;
     });
-  }, [filteredBacktestData, filteredLiveData, benchmarkData]);
+  }, [filteredBacktestData, filteredLiveData, benchmarks]);
 
   // Live metrics: values from backend /summary, date lookups from client-side data
   const liveMetrics = useMemo(() => {
@@ -838,10 +856,9 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 showOverlay={showBacktestOverlay}
                 onOverlayToggle={setShowBacktestOverlay}
                 drawdownOverlayKey="backtestDrawdown"
-                benchmarkData={benchmarkData}
-                benchmarkTicker={benchmarkTicker}
-                benchmarkLabel={benchmarkLabel}
-                onBenchmarkChange={setBenchmarkTicker}
+                benchmarks={benchmarks}
+                onBenchmarkAdd={handleBenchmarkAdd}
+                onBenchmarkRemove={handleBenchmarkRemove}
               />
             )
           ) : (
@@ -926,14 +943,14 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "benchmarkReturn", benchmarkTicker, benchmarkLabel)} />
+                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "return", benchmarks, BENCH_COLORS)} />
                       <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveTwr" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
                       )}
-                      {benchmarkTicker && benchmarkData.length > 0 && (
-                        <Line type="monotone" dataKey="benchmarkReturn" stroke="#f97316" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-                      )}
+                      {benchmarks.map((bench, i) => (
+                        <Line key={`bt-bench-twr-${i}`} type="monotone" dataKey={`bench_${i}_return`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+                      ))}
                     </AreaChart>
                   </ResponsiveContainer>
                   <div className="mt-3 flex items-center justify-center gap-4">
@@ -966,14 +983,14 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "benchmarkDrawdown", benchmarkTicker, benchmarkLabel)} />
+                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "drawdown", benchmarks, BENCH_COLORS)} />
                       <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveDrawdown" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
                       )}
-                      {benchmarkTicker && benchmarkData.length > 0 && (
-                        <Line type="monotone" dataKey="benchmarkDrawdown" stroke="#f97316" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-                      )}
+                      {benchmarks.map((bench, i) => (
+                        <Line key={`bt-bench-dd-${i}`} type="monotone" dataKey={`bench_${i}_drawdown`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+                      ))}
                     </AreaChart>
                   </ResponsiveContainer>
                   <div className="mt-3 flex items-center justify-center gap-4">
@@ -996,25 +1013,41 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
               {/* Benchmark toggle row for backtest tab */}
               {filteredBacktestData.length > 0 && (
-                <div className="mt-2 flex items-center justify-center gap-2">
+                <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
                   <span className="text-[11px] text-muted-foreground mr-1">Benchmark:</span>
-                  {["SPY", "QQQ", "TQQQ"].map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setBenchmarkTicker(benchmarkTicker === t ? null : t)}
-                      className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                        benchmarkTicker === t
-                          ? "bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40"
-                          : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
+                  {["SPY", "QQQ", "TQQQ"].map((t) => {
+                    const entry = benchmarks.find((b) => b.ticker === t);
+                    const isActive = !!entry;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          if (isActive) { handleBenchmarkRemove(t); }
+                          else if (benchmarks.length < MAX_BENCHMARKS) { handleBenchmarkAdd(t); }
+                        }}
+                        className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                          isActive
+                            ? ""
+                            : benchmarks.length >= MAX_BENCHMARKS
+                              ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
+                              : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
+                        }`}
+                        style={isActive ? benchBtnStyle(entry.color) : undefined}
+                        disabled={!isActive && benchmarks.length >= MAX_BENCHMARKS}
+                      >
+                        {t}
+                      </button>
+                    );
+                  })}
                   {!btCustomInput ? (
                     <button
                       onClick={() => setBtCustomInput(true)}
-                      className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
+                      disabled={benchmarks.length >= MAX_BENCHMARKS}
+                      className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${
+                        benchmarks.length >= MAX_BENCHMARKS
+                          ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
+                          : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
+                      }`}
                     >
                       +
                     </button>
@@ -1024,12 +1057,12 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       onSubmit={(e) => {
                         e.preventDefault();
                         const raw = btCustomTickerInput.trim();
-                        if (!raw) return;
+                        if (!raw || benchmarks.length >= MAX_BENCHMARKS) return;
                         const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
                         if (symMatch) {
-                          setBenchmarkTicker(`symphony:${symMatch[1]}`);
+                          handleBenchmarkAdd(`symphony:${symMatch[1]}`);
                         } else {
-                          setBenchmarkTicker(raw.toUpperCase());
+                          handleBenchmarkAdd(raw.toUpperCase());
                         }
                         setBtCustomTickerInput("");
                         setBtCustomInput(false);
@@ -1046,14 +1079,16 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
                     </form>
                   )}
-                  {benchmarkTicker && !["SPY", "QQQ", "TQQQ"].includes(benchmarkTicker) && (
+                  {benchmarks.filter((b) => !["SPY", "QQQ", "TQQQ"].includes(b.ticker)).map((b) => (
                     <button
-                      onClick={() => setBenchmarkTicker(null)}
-                      className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40"
+                      key={b.ticker}
+                      onClick={() => handleBenchmarkRemove(b.ticker)}
+                      className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium"
+                      style={benchBtnStyle(b.color)}
                     >
-                      {benchmarkLabel || benchmarkTicker} ✕
+                      {b.label} ✕
                     </button>
-                  )}
+                  ))}
                 </div>
               )}
 

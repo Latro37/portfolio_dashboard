@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { PerformancePoint, BenchmarkPoint } from "@/lib/api";
+import { PerformancePoint, BenchmarkPoint, BenchmarkEntry } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   AreaChart,
@@ -37,10 +37,9 @@ interface Props {
   showOverlay?: boolean;
   onOverlayToggle?: (v: boolean) => void;
   drawdownOverlayKey?: string;
-  benchmarkData?: BenchmarkPoint[];
-  benchmarkTicker?: string | null;
-  benchmarkLabel?: string | null;
-  onBenchmarkChange?: (ticker: string | null) => void;
+  benchmarks?: BenchmarkEntry[];
+  onBenchmarkAdd?: (ticker: string) => void;
+  onBenchmarkRemove?: (ticker: string) => void;
 }
 
 const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
@@ -64,10 +63,9 @@ export function PerformanceChart({
   showOverlay = false,
   onOverlayToggle,
   drawdownOverlayKey,
-  benchmarkData,
-  benchmarkTicker,
-  benchmarkLabel,
-  onBenchmarkChange,
+  benchmarks = [],
+  onBenchmarkAdd,
+  onBenchmarkRemove,
 }: Props) {
   const [internalMode, setInternalMode] = useState<ChartMode>("portfolio");
   const mode = controlledMode ?? internalMode;
@@ -77,7 +75,14 @@ export function PerformanceChart({
   const [customTickerInput, setCustomTickerInput] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
 
-  const BENCH_COLOR = "#f97316";
+  const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
+  const MAX_BENCHMARKS = 3;
+  const isLightColor = (c: string) => c === "#e4e4e7";
+  const benchBtnStyle = (color: string) => ({
+    backgroundColor: isLightColor(color) ? `${color}40` : `${color}20`,
+    color,
+    boxShadow: isLightColor(color) ? `0 0 0 2px ${color}88` : `0 0 0 1px ${color}66`,
+  });
 
   // Filter out non-trading days (weekends) to avoid flat gaps in charts
   const rawTradingData = data.filter((pt) => {
@@ -85,47 +90,40 @@ export function PerformanceChart({
     return day !== 0 && day !== 6;
   });
 
-  // Merge benchmark data into trading data by date
+  // Merge benchmark data into trading data by date (supports up to 3 benchmarks)
   const tradingData = useMemo(() => {
-    if (!benchmarkData || !benchmarkTicker) return rawTradingData;
-    const benchMap = new Map(benchmarkData.map((b) => [b.date, b]));
-    // Find the first benchmark data point that falls within the chart window
-    // (handles cases where the exact first portfolio date has no benchmark match)
-    let baseGrowth: number | null = null;
-    for (const pt of rawTradingData) {
-      const b = benchMap.get(pt.date);
-      if (b != null) {
-        baseGrowth = 1 + b.return_pct / 100;
-        break;
+    if (!benchmarks.length) return rawTradingData;
+    const benchStates = benchmarks.map((bench) => {
+      const map = new Map(bench.data.map((b: BenchmarkPoint) => [b.date, b]));
+      let baseGrowth: number | null = null;
+      for (const pt of rawTradingData) {
+        const bp = map.get(pt.date);
+        if (bp != null) { baseGrowth = 1 + bp.return_pct / 100; break; }
       }
-    }
-    if (baseGrowth === null) baseGrowth = 1;
-    // Recompute drawdown from rebased benchmark equity curve
-    let benchPeak = 1;
-    let lastReturn: number | undefined;
-    let lastDd: number | undefined;
-    let lastMwr: number | undefined;
-    return rawTradingData.map((pt) => {
-      const b = benchMap.get(pt.date);
-      if (b != null) {
-        const rebasedReturn = baseGrowth !== 0 ? ((1 + b.return_pct / 100) / baseGrowth - 1) * 100 : 0;
-        const growth = 1 + rebasedReturn / 100;
-        benchPeak = Math.max(benchPeak, growth);
-        lastReturn = rebasedReturn;
-        lastDd = benchPeak > 0 ? (growth / benchPeak - 1) * 100 : 0;
-        lastMwr = b.mwr_pct;
-      }
-      // Carry forward last known benchmark values for trailing dates
-      return {
-        ...pt,
-        benchmark_return: lastReturn,
-        benchmark_drawdown: lastDd,
-        benchmark_mwr: lastMwr,
-      };
+      return { map, baseGrowth: baseGrowth ?? 1, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined, lastMwr: undefined as number | undefined };
     });
-  }, [rawTradingData, benchmarkData, benchmarkTicker]);
+    return rawTradingData.map((pt) => {
+      const merged: any = { ...pt };
+      benchStates.forEach((bs, i) => {
+        const b = bs.map.get(pt.date);
+        if (b != null) {
+          const rebasedReturn = bs.baseGrowth !== 0 ? ((1 + b.return_pct / 100) / bs.baseGrowth - 1) * 100 : 0;
+          const growth = 1 + rebasedReturn / 100;
+          bs.peak = Math.max(bs.peak, growth);
+          bs.lastReturn = rebasedReturn;
+          bs.lastDd = bs.peak > 0 ? (growth / bs.peak - 1) * 100 : 0;
+          bs.lastMwr = b.mwr_pct !== 0 ? b.mwr_pct : rebasedReturn;
+        }
+        merged[`bench_${i}_return`] = bs.lastReturn;
+        merged[`bench_${i}_drawdown`] = bs.lastDd;
+        merged[`bench_${i}_mwr`] = bs.lastMwr;
+      });
+      return merged;
+    });
+  }, [rawTradingData, benchmarks]);
 
-  const hasBenchmark = !!benchmarkTicker && !!benchmarkData?.length;
+  const hasBenchmark = benchmarks.length > 0;
+  const singleBenchmark = benchmarks.length === 1;
 
   const hasData = tradingData.length > 0;
 
@@ -166,7 +164,7 @@ export function PerformanceChart({
   const dCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
 
   // Custom tooltip for TWR/Drawdown modes with overlay delta + prev day delta
-  const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string, benchKey?: string) => {
+  const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string, benchSuffix: string) => {
     const multiLine = (showOverlay && !!oKey) || hasBenchmark;
     return ({ active, payload, label }: any) => {
       if (!active || !payload?.length) return null;
@@ -174,18 +172,13 @@ export function PerformanceChart({
       const prev: any = idx > 0 ? tradingData[idx - 1] : null;
       const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
       const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
-      const benchEntry = benchKey ? payload.find((p: any) => p.dataKey === benchKey) : null;
       const pVal = primaryEntry?.value as number | undefined;
       const oVal = overlayEntry?.value as number | undefined;
-      const bVal = benchEntry?.value as number | undefined;
       const hasBoth = pVal != null && oVal != null;
       const delta = hasBoth ? pVal - oVal : null;
       const pPrev = prev ? prev[primaryKey] : null;
       const pDayD = pVal != null && pPrev != null ? Number(pVal) - Number(pPrev) : null;
-      const oPrev = prev && oKey ? prev[oKey] : null;
-      const oDayD = oVal != null && oPrev != null ? Number(oVal) - Number(oPrev) : null;
       const pDC = pDayD != null ? dCol(pDayD) : "#71717a";
-      const oDC = oDayD != null ? dCol(oDayD) : "#71717a";
       const dDC = delta != null ? dCol(delta) : "#71717a";
       return (
         <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
@@ -212,18 +205,23 @@ export function PerformanceChart({
               Δ : {fmtDelta(delta)}
             </p>
           )}
-          {hasBenchmark && bVal != null && (
-            <div>
-              <p style={{ margin: 0, lineHeight: 1.6, color: BENCH_COLOR }}>
-                {benchmarkLabel || benchmarkTicker} : {formatPct(bVal)}
-              </p>
-            </div>
-          )}
-          {hasBenchmark && pVal != null && bVal != null && (
-            <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
-              Δ : {fmtDelta(pVal - bVal)}
-            </p>
-          )}
+          {benchmarks.map((bench, i) => {
+            const bEntry = payload.find((p: any) => p.dataKey === `bench_${i}_${benchSuffix}`);
+            const bVal = bEntry?.value as number | undefined;
+            if (bVal == null) return null;
+            return (
+              <div key={bench.ticker}>
+                <p style={{ margin: 0, lineHeight: 1.6, color: bench.color }}>
+                  {bench.label} : {formatPct(bVal)}
+                </p>
+                {singleBenchmark && pVal != null && (
+                  <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
+                    Δ : {fmtDelta(pVal - bVal)}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       );
     };
@@ -265,9 +263,7 @@ export function PerformanceChart({
     const idx = tradingData.findIndex((d) => d.date === label);
     const prev = idx > 0 ? tradingData[idx - 1] : null;
     const entry = payload.find((p: any) => p.dataKey === "money_weighted_return");
-    const benchEntry = payload.find((p: any) => p.dataKey === "benchmark_mwr");
     const val = entry ? Number(entry.value) : null;
-    const bVal = benchEntry?.value as number | undefined;
     const prevVal = prev ? (prev as any).money_weighted_return : null;
     const dayD = val != null && prevVal != null ? val - Number(prevVal) : null;
     const dc = dayD != null ? dCol(dayD) : "#71717a";
@@ -282,16 +278,23 @@ export function PerformanceChart({
             )}
           </>
         )}
-        {hasBenchmark && bVal != null && (
-          <p style={{ margin: 0, lineHeight: 1.6, color: BENCH_COLOR }}>
-            {benchmarkLabel || benchmarkTicker} : {formatPct(bVal)}
-          </p>
-        )}
-        {hasBenchmark && val != null && bVal != null && (
-          <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (val - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
-            Δ : {fmtDelta(val - bVal)}
-          </p>
-        )}
+        {benchmarks.map((bench, i) => {
+          const bEntry = payload.find((p: any) => p.dataKey === `bench_${i}_mwr`);
+          const bVal = bEntry?.value as number | undefined;
+          if (bVal == null) return null;
+          return (
+            <div key={bench.ticker}>
+              <p style={{ margin: 0, lineHeight: 1.6, color: bench.color }}>
+                {bench.label} : {formatPct(bVal)}
+              </p>
+              {singleBenchmark && val != null && (
+                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (val - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
+                  Δ : {fmtDelta(val - bVal)}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -496,7 +499,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip content={renderOverlayTooltip("time_weighted_return", "TWR", overlayKey, overlayLabel || "Backtest", "benchmark_return")} />
+              <Tooltip content={renderOverlayTooltip("time_weighted_return", "TWR", overlayKey, overlayLabel || "Backtest", "return")} />
               <Area
                 type="monotone"
                 dataKey="time_weighted_return"
@@ -516,9 +519,9 @@ export function PerformanceChart({
                   connectNulls
                 />
               )}
-              {hasBenchmark && (
-                <Line type="monotone" dataKey="benchmark_return" stroke={BENCH_COLOR} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-              )}
+              {benchmarks.map((bench, i) => (
+                <Line key={`bench-twr-${i}`} type="monotone" dataKey={`bench_${i}_return`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+              ))}
             </AreaChart>
           </ResponsiveContainer>
         ) : mode === "mwr" ? (
@@ -561,9 +564,9 @@ export function PerformanceChart({
                 fill="url(#mwrGradSplit)"
                 dot={false}
               />
-              {hasBenchmark && (
-                <Line type="monotone" dataKey="benchmark_mwr" stroke={BENCH_COLOR} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-              )}
+              {benchmarks.map((bench, i) => (
+                <Line key={`bench-mwr-${i}`} type="monotone" dataKey={`bench_${i}_mwr`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+              ))}
             </AreaChart>
           </ResponsiveContainer>
         ) : (
@@ -591,7 +594,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip content={renderOverlayTooltip("current_drawdown", "Drawdown", drawdownOverlayKey, overlayLabel || "Backtest", "benchmark_drawdown")} />
+              <Tooltip content={renderOverlayTooltip("current_drawdown", "Drawdown", drawdownOverlayKey, overlayLabel || "Backtest", "drawdown")} />
               <Area
                 type="monotone"
                 dataKey="current_drawdown"
@@ -612,9 +615,9 @@ export function PerformanceChart({
                   connectNulls
                 />
               )}
-              {hasBenchmark && (
-                <Line type="monotone" dataKey="benchmark_drawdown" stroke={BENCH_COLOR} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-              )}
+              {benchmarks.map((bench, i) => (
+                <Line key={`bench-dd-${i}`} type="monotone" dataKey={`bench_${i}_drawdown`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
+              ))}
             </AreaChart>
           </ResponsiveContainer>
         )}
@@ -665,26 +668,42 @@ export function PerformanceChart({
         )}
 
         {/* Benchmark toggle row — hidden in Portfolio mode */}
-        {mode !== "portfolio" && hasData && onBenchmarkChange && (
-          <div className="mt-2 flex items-center justify-center gap-2">
+        {mode !== "portfolio" && hasData && onBenchmarkAdd && (
+          <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
             <span className="text-[11px] text-muted-foreground mr-1">Benchmark:</span>
-            {["SPY", "QQQ", "TQQQ"].map((t) => (
-              <button
-                key={t}
-                onClick={() => onBenchmarkChange(benchmarkTicker === t ? null : t)}
-                className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                  benchmarkTicker === t
-                    ? "bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40"
-                    : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+            {["SPY", "QQQ", "TQQQ"].map((t) => {
+              const entry = benchmarks.find((b) => b.ticker === t);
+              const isActive = !!entry;
+              return (
+                <button
+                  key={t}
+                  onClick={() => {
+                    if (isActive) { onBenchmarkRemove?.(t); }
+                    else if (benchmarks.length < MAX_BENCHMARKS) { onBenchmarkAdd(t); }
+                  }}
+                  className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    isActive
+                      ? ""
+                      : benchmarks.length >= MAX_BENCHMARKS
+                        ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
+                        : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
+                  }`}
+                  style={isActive ? benchBtnStyle(entry.color) : undefined}
+                  disabled={!isActive && benchmarks.length >= MAX_BENCHMARKS}
+                >
+                  {t}
+                </button>
+              );
+            })}
             {!showCustomInput ? (
               <button
                 onClick={() => setShowCustomInput(true)}
-                className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
+                disabled={benchmarks.length >= MAX_BENCHMARKS}
+                className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${
+                  benchmarks.length >= MAX_BENCHMARKS
+                    ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
+                    : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
+                }`}
               >
                 +
               </button>
@@ -694,13 +713,12 @@ export function PerformanceChart({
                 onSubmit={(e) => {
                   e.preventDefault();
                   const raw = customTickerInput.trim();
-                  if (!raw) return;
-                  // Detect symphony links: composer.trade/symphony/{id}
+                  if (!raw || benchmarks.length >= MAX_BENCHMARKS) return;
                   const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
                   if (symMatch) {
-                    onBenchmarkChange(`symphony:${symMatch[1]}`);
+                    onBenchmarkAdd(`symphony:${symMatch[1]}`);
                   } else {
-                    onBenchmarkChange(raw.toUpperCase());
+                    onBenchmarkAdd(raw.toUpperCase());
                   }
                   setCustomTickerInput("");
                   setShowCustomInput(false);
@@ -710,21 +728,23 @@ export function PerformanceChart({
                   autoFocus
                   value={customTickerInput}
                   onChange={(e) => setCustomTickerInput(e.target.value)}
-                  placeholder="TICKER or Symphony URL/ID"
+                  placeholder="TICKER or Symphony URL"
                   className="w-48 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
                   onBlur={() => { if (!customTickerInput.trim()) setShowCustomInput(false); }}
                 />
                 <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
               </form>
             )}
-            {benchmarkTicker && !["SPY", "QQQ", "TQQQ"].includes(benchmarkTicker) && (
+            {benchmarks.filter((b) => !["SPY", "QQQ", "TQQQ"].includes(b.ticker)).map((b) => (
               <button
-                onClick={() => onBenchmarkChange(null)}
-                className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40"
+                key={b.ticker}
+                onClick={() => onBenchmarkRemove?.(b.ticker)}
+                className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium"
+                style={benchBtnStyle(b.color)}
               >
-                {benchmarkLabel || benchmarkTicker} ✕
+                {b.label} ✕
               </button>
-            )}
+            ))}
           </div>
         )}
       </CardContent>

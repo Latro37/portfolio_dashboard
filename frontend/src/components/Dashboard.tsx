@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig, BenchmarkPoint } from "@/lib/api";
+import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig, BenchmarkEntry } from "@/lib/api";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
 import { isMarketOpen, isAfterClose, todayET } from "@/lib/marketHours";
 import { PortfolioHeader } from "./PortfolioHeader";
@@ -59,9 +59,7 @@ export default function Dashboard() {
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const snapshotRef = useRef<HTMLDivElement>(null);
   const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } } | null>(null);
-  const [benchmarkTicker, setBenchmarkTicker] = useState<string | null>(null);
-  const [benchmarkData, setBenchmarkData] = useState<BenchmarkPoint[]>([]);
-  const [benchmarkLabel, setBenchmarkLabel] = useState<string | null>(null);
+  const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
@@ -74,26 +72,33 @@ export default function Dashboard() {
       ? `all:${selectedCredential}`
       : selectedSubAccount || undefined;
 
-  // Fetch benchmark data when ticker changes
-  useEffect(() => {
-    if (!benchmarkTicker) { setBenchmarkData([]); setBenchmarkLabel(null); return; }
-    if (benchmarkTicker.startsWith("symphony:")) {
-      const symId = benchmarkTicker.slice(9);
+  const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
+  const clampLabel = (s: string) => s.length > 21 ? s.slice(0, 19) + "\u2026" : s;
+  const pickColor = (current: BenchmarkEntry[]) => BENCH_COLORS.find((c) => !current.some((b) => b.color === c)) || BENCH_COLORS[0];
+
+  const handleBenchmarkAdd = useCallback((ticker: string) => {
+    if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
+    const color = pickColor(benchmarks);
+    const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
+    setBenchmarks((prev) => [...prev, placeholder]);
+    if (ticker.startsWith("symphony:")) {
+      const symId = ticker.slice(9);
       api.getSymphonyBenchmark(symId)
         .then((res) => {
-          setBenchmarkData(res.data);
-          // Shorten name: max 20 chars + ellipsis
-          const name = res.name || symId;
-          setBenchmarkLabel(name.length > 21 ? name.slice(0, 19) + "\u2026" : name);
+          const label = clampLabel(res.name || symId);
+          setBenchmarks((prev) => prev.map((b) => b.ticker === ticker ? { ...b, label, data: res.data } : b));
         })
-        .catch(() => { setBenchmarkData([]); setBenchmarkLabel(symId.length > 21 ? symId.slice(0, 19) + "\u2026" : symId); });
+        .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
     } else {
-      setBenchmarkLabel(null);
-      api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, resolvedAccountId)
-        .then((res) => setBenchmarkData(res.data))
-        .catch(() => { setBenchmarkData([]); });
+      api.getBenchmarkHistory(ticker, undefined, undefined, resolvedAccountId)
+        .then((res) => setBenchmarks((prev) => prev.map((b) => b.ticker === ticker ? { ...b, data: res.data } : b)))
+        .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
     }
-  }, [benchmarkTicker, resolvedAccountId]);
+  }, [benchmarks, resolvedAccountId]);
+
+  const handleBenchmarkRemove = useCallback((ticker: string) => {
+    setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker));
+  }, []);
 
   // Load accounts + config on mount
   useEffect(() => {
@@ -475,10 +480,9 @@ export default function Dashboard() {
           endDate={customEnd}
           onStartDateChange={setCustomStart}
           onEndDateChange={setCustomEnd}
-          benchmarkData={benchmarkData}
-          benchmarkTicker={benchmarkTicker}
-          benchmarkLabel={benchmarkLabel}
-          onBenchmarkChange={setBenchmarkTicker}
+          benchmarks={benchmarks}
+          onBenchmarkAdd={handleBenchmarkAdd}
+          onBenchmarkRemove={handleBenchmarkRemove}
         />
 
         {/* Metric cards row */}
