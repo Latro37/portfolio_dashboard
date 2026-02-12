@@ -273,6 +273,12 @@ export interface BenchmarkEntry {
   color: string;
 }
 
+export interface SymphonyCatalogItem {
+  symphony_id: string;
+  name: string;
+  source: string;
+}
+
 export interface SymphonyExportStatus {
   local_path: string;
 }
@@ -410,6 +416,8 @@ export const api = {
     if (accountId) params.set("account_id", accountId);
     return fetchJSON<BenchmarkHistory>(`/benchmark-history?${params.toString()}`);
   },
+  getSymphonyCatalog: (refresh = false) =>
+    fetchJSON<SymphonyCatalogItem[]>(`/symphony-catalog${refresh ? "?refresh=true" : ""}`),
   getSymphonyBenchmark: (symphonyId: string) => {
     return fetchJSON<SymphonyBenchmarkHistory>(`/symphony-benchmark/${encodeURIComponent(symphonyId)}`);
   },

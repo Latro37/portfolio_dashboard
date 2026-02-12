@@ -236,6 +236,7 @@ All portfolio endpoints accept an optional `account_id` query parameter:
 | GET | `/api/symphonies/{id}/backtest` | Backtest results (cached, version-check invalidation) |
 | GET | `/api/symphonies/{id}/allocations` | Historical allocation snapshots |
 | GET | `/api/symphony-benchmark/{id}` | Backtest a symphony and return BenchmarkPoint[] for chart overlay |
+| GET | `/api/symphony-catalog` | Cached symphony name catalog for search (`?refresh=true` to force) |
 | GET | `/api/trade-preview` | Pending rebalance trades across all symphonies |
 | GET | `/api/symphonies/{id}/trade-preview` | Pending trades for one symphony |
 
@@ -354,6 +355,14 @@ erDiagram
     accounts ||--o{ cash_flows : has
     accounts ||--o{ daily_portfolio : has
     accounts ||--o{ daily_metrics : has
+    symphony_catalog {
+        text symphony_id PK
+        text name
+        text source "invested / watchlist / draft"
+        text credential_name
+        datetime updated_at
+    }
+
     accounts ||--o{ symphony_daily_portfolio : has
     accounts ||--o{ symphony_allocation_history : has
     accounts ||--o{ sync_state : has
@@ -409,6 +418,7 @@ All chart views (Dashboard, SymphonyDetail live + backtest) support a benchmark 
 
 - **Predefined tickers**: SPY, QQQ, TQQQ via yfinance historical data (`/api/benchmark-history`)
 - **Custom tickers**: Any valid ticker symbol via the `+` input
+- **Symphony name search**: Type 2+ characters to search the symphony catalog by name. The catalog is cached in `symphony_catalog` (SQLite) and auto-refreshes every hour or on sync. Currently populated from invested symphonies (`symphony-stats-meta`). Watchlist/draft endpoints (`backtest-api.composer.trade`) require web session auth and are not accessible via API keys.
 - **Symphony backtests**: Paste a Composer symphony URL (e.g. `https://app.composer.trade/symphony/{id}/details`) or raw ID. The frontend detects `composer.trade/symphony/` URLs and routes to `/api/symphony-benchmark/{id}`.
 
 Symphony benchmark fetching loops through all credential sets to find private symphonies across accounts. The symphony name (clamped to 21 characters) is displayed as the label. Benchmark return data is rebased to start at 0% from the chart's first visible date using growth-factor division.

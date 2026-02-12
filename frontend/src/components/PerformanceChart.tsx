@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { PerformancePoint, BenchmarkPoint, BenchmarkEntry } from "@/lib/api";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { PerformancePoint, BenchmarkPoint, BenchmarkEntry, SymphonyCatalogItem, api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   AreaChart,
@@ -74,15 +74,40 @@ export function PerformanceChart({
   const [showDeposits, setShowDeposits] = useState(true);
   const [customTickerInput, setCustomTickerInput] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [symphonyCatalog, setSymphonyCatalog] = useState<SymphonyCatalogItem[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fetch symphony catalog on first open of the custom input
+  useEffect(() => {
+    if (showCustomInput && !catalogLoaded) {
+      api.getSymphonyCatalog().then((items) => { setSymphonyCatalog(items); setCatalogLoaded(true); }).catch(() => setCatalogLoaded(true));
+    }
+  }, [showCustomInput, catalogLoaded]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!catalogDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setCatalogDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [catalogDropdownOpen]);
+
+  const catalogMatches = useMemo(() => {
+    const q = customTickerInput.trim().toLowerCase();
+    if (!q || q.length < 2) return [];
+    return symphonyCatalog.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 8);
+  }, [customTickerInput, symphonyCatalog]);
 
   const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
   const MAX_BENCHMARKS = 3;
   const isLightColor = (c: string) => c === "#e4e4e7";
-  const benchBtnStyle = (color: string) => ({
-    backgroundColor: isLightColor(color) ? `${color}40` : `${color}20`,
-    color,
-    boxShadow: isLightColor(color) ? `0 0 0 2px ${color}88` : `0 0 0 1px ${color}66`,
-  });
+  const benchBtnStyle = (color: string) => isLightColor(color)
+    ? { backgroundColor: color, color: "#1a1a1a", fontWeight: 700, boxShadow: `0 0 0 1px ${color}` }
+    : { backgroundColor: `${color}20`, color, boxShadow: `0 0 0 1px ${color}66` };
 
   // Filter out non-trading days (weekends) to avoid flat gaps in charts
   const rawTradingData = data.filter((pt) => {
@@ -683,12 +708,12 @@ export function PerformanceChart({
                   }}
                   className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                     isActive
-                      ? ""
+                      ? (isLightColor(entry.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : "")
                       : benchmarks.length >= MAX_BENCHMARKS
                         ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
                         : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
                   }`}
-                  style={isActive ? benchBtnStyle(entry.color) : undefined}
+                  style={isActive && !isLightColor(entry.color) ? benchBtnStyle(entry.color) : undefined}
                   disabled={!isActive && benchmarks.length >= MAX_BENCHMARKS}
                 >
                   {t}
@@ -708,39 +733,76 @@ export function PerformanceChart({
                 +
               </button>
             ) : (
-              <form
-                className="flex items-center gap-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const raw = customTickerInput.trim();
-                  if (!raw || benchmarks.length >= MAX_BENCHMARKS) return;
-                  const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
-                  if (symMatch) {
-                    onBenchmarkAdd(`symphony:${symMatch[1]}`);
-                  } else {
-                    onBenchmarkAdd(raw.toUpperCase());
-                  }
-                  setCustomTickerInput("");
-                  setShowCustomInput(false);
-                }}
-              >
-                <input
-                  autoFocus
-                  value={customTickerInput}
-                  onChange={(e) => setCustomTickerInput(e.target.value)}
-                  placeholder="TICKER or Symphony URL"
-                  className="w-48 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
-                  onBlur={() => { if (!customTickerInput.trim()) setShowCustomInput(false); }}
-                />
-                <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
-              </form>
+              <div className="relative" ref={dropdownRef}>
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const raw = customTickerInput.trim();
+                    if (!raw || benchmarks.length >= MAX_BENCHMARKS) return;
+                    const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
+                    if (symMatch) {
+                      onBenchmarkAdd?.(`symphony:${symMatch[1]}`);
+                    } else {
+                      onBenchmarkAdd?.(raw.toUpperCase());
+                    }
+                    setCustomTickerInput("");
+                    setShowCustomInput(false);
+                    setCatalogDropdownOpen(false);
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={customTickerInput}
+                    onChange={(e) => { setCustomTickerInput(e.target.value); setCatalogDropdownOpen(true); }}
+                    placeholder="Symphony name/link or Ticker"
+                    className="w-56 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
+                    onFocus={() => setCatalogDropdownOpen(true)}
+                    onBlur={() => { setTimeout(() => { if (!customTickerInput.trim()) { setShowCustomInput(false); setCatalogDropdownOpen(false); } }, 200); }}
+                  />
+                  <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
+                  <button
+                    type="button"
+                    onClick={() => { setCatalogLoaded(false); api.getSymphonyCatalog(true).then((items) => { setSymphonyCatalog(items); setCatalogLoaded(true); }).catch(() => setCatalogLoaded(true)); }}
+                    className="cursor-pointer rounded-md bg-muted/50 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+                    title="Refresh symphony list"
+                  >
+                    ↻
+                  </button>
+                </form>
+                {catalogDropdownOpen && catalogMatches.length > 0 && (
+                  <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-md border border-border/50 bg-card shadow-lg max-h-48 overflow-y-auto">
+                    {catalogMatches.map((item) => (
+                      <button
+                        key={item.symphony_id}
+                        type="button"
+                        className="w-full cursor-pointer px-3 py-1.5 text-left text-xs hover:bg-muted/60 flex items-center justify-between gap-2"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          onBenchmarkAdd?.(`symphony:${item.symphony_id}`);
+                          setCustomTickerInput("");
+                          setShowCustomInput(false);
+                          setCatalogDropdownOpen(false);
+                        }}
+                      >
+                        <span className="truncate text-foreground">{item.name}</span>
+                        <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-medium ${
+                          item.source === "invested" ? "bg-emerald-500/20 text-emerald-400" :
+                          item.source === "watchlist" ? "bg-blue-500/20 text-blue-400" :
+                          "bg-amber-500/20 text-amber-400"
+                        }`}>{item.source}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
             {benchmarks.filter((b) => !["SPY", "QQQ", "TQQQ"].includes(b.ticker)).map((b) => (
               <button
                 key={b.ticker}
                 onClick={() => onBenchmarkRemove?.(b.ticker)}
-                className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium"
-                style={benchBtnStyle(b.color)}
+                className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${isLightColor(b.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : ""}`}
+                style={!isLightColor(b.color) ? benchBtnStyle(b.color) : undefined}
               >
                 {b.label} ✕
               </button>

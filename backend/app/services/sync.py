@@ -77,6 +77,12 @@ def _safe_step(label: str, fn, *args, **kwargs):
         logger.warning("Sync step '%s' failed (continuing): %s", label, e)
 
 
+def _refresh_symphony_catalog_safe(db: Session):
+    """Wrapper to refresh the symphony catalog during sync (lazy import to avoid circular deps)."""
+    from app.routers.symphonies import _refresh_symphony_catalog
+    _refresh_symphony_catalog(db)
+
+
 def full_backfill(db: Session, client: ComposerClient, account_id: str):
     """One-time full backfill of all historical data for a sub-account."""
     logger.info("Starting full backfill for account %s...", account_id)
@@ -109,6 +115,9 @@ def full_backfill(db: Session, client: ComposerClient, account_id: str):
     # 9. Export symphony structures (local + optional Google Drive)
     _safe_step("symphony_export", export_all_symphonies, db, client, account_id)
 
+    # 10. Refresh symphony catalog (for name search)
+    _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
+
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Full backfill complete for account %s", account_id)
@@ -140,6 +149,9 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
 
     # Export symphony structures (local + optional Google Drive)
     _safe_step("symphony_export", export_all_symphonies, db, client, account_id)
+
+    # Refresh symphony catalog (for name search)
+    _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
 
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Incremental update complete for %s", account_id)

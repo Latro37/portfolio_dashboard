@@ -411,6 +411,55 @@ class ComposerClient:
         return data
 
     # ------------------------------------------------------------------
+    # Watchlist & Drafts (backtest-api subdomain)
+    # NOTE: These endpoints require Composer's web session auth (API
+    #       Gateway), not API-key auth.  They will return 404 when
+    #       called with API keys.  Kept as stubs for future use if
+    #       Composer adds API-key support.
+    # ------------------------------------------------------------------
+
+    @property
+    def _backtest_api_base(self) -> str:
+        """Derive the backtest-api base URL from the main base URL."""
+        return self.base_url.replace("://api.", "://backtest-api.")
+
+    def get_watchlist(self) -> List[Dict]:
+        """Fetch the user's watchlisted symphonies from backtest-api.
+
+        Returns list of dicts with at least 'id' and 'name' keys.
+        Silently returns [] if the endpoint is unavailable (common — requires web session auth).
+        """
+        url = f"{self._backtest_api_base}/api/v1/watchlist"
+        try:
+            resp = requests.get(url, headers=self.headers)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
+            logger.info("Watchlist: %d symphonies", len(items))
+            return items
+        except Exception as e:
+            logger.debug("Watchlist unavailable (expected with API-key auth): %s", e)
+            return []
+
+    def get_drafts(self) -> List[Dict]:
+        """Fetch the user's draft symphonies from backtest-api.
+
+        Returns list of dicts with at least 'id' and 'name' keys.
+        Silently returns [] if the endpoint is unavailable (common — requires web session auth).
+        """
+        url = f"{self._backtest_api_base}/api/v1/user/symphonies/drafts"
+        try:
+            resp = requests.get(url, headers=self.headers)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
+            logger.info("Drafts: %d symphonies", len(items))
+            return items
+        except Exception as e:
+            logger.debug("Drafts unavailable (expected with API-key auth): %s", e)
+            return []
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

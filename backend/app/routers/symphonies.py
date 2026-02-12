@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     Account, SymphonyBacktestCache, SymphonyAllocationHistory,
-    SymphonyDailyPortfolio, SymphonyDailyMetrics,
+    SymphonyDailyPortfolio, SymphonyDailyMetrics, SymphonyCatalogEntry,
 )
 import requests
 
@@ -197,6 +197,103 @@ def list_symphonies(
             logger.warning("Failed to fetch symphonies for account %s: %s", aid, e)
 
     return result
+
+
+# ------------------------------------------------------------------
+# Symphony catalog (name search for benchmarks)
+# ------------------------------------------------------------------
+
+_CATALOG_TTL_SECONDS = 3600  # auto-refresh if older than 1 hour
+
+
+def _refresh_symphony_catalog(db: Session):
+    """Fetch invested, watchlist, and draft symphonies across all credentials and upsert into catalog."""
+    accounts_creds = load_accounts()
+    now = datetime.utcnow()
+
+    # Collect all entries: (symphony_id, name, source, credential_name)
+    entries: Dict[str, tuple] = {}  # keyed by symphony_id to deduplicate
+
+    for creds in accounts_creds:
+        client = ComposerClient.from_credentials(creds)
+
+        # --- Invested symphonies (from all sub-accounts for this credential) ---
+        db_accounts = db.query(Account).filter_by(credential_name=creds.name).all()
+        for acct in db_accounts:
+            try:
+                symphonies = client.get_symphony_stats(acct.id)
+                for s in symphonies:
+                    sid = s.get("id", "")
+                    name = s.get("name", "")
+                    if sid and name:
+                        entries[sid] = (sid, name, "invested", creds.name)
+            except Exception as e:
+                logger.warning("Catalog: failed invested fetch for %s/%s: %s", creds.name, acct.id, e)
+
+        # --- Watchlist ---
+        try:
+            watchlist = client.get_watchlist()
+            for s in watchlist:
+                sid = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
+                name = s.get("name", "")
+                if sid and name and sid not in entries:
+                    entries[sid] = (sid, name, "watchlist", creds.name)
+        except Exception as e:
+            logger.warning("Catalog: failed watchlist fetch for %s: %s", creds.name, e)
+
+        # --- Drafts ---
+        try:
+            drafts = client.get_drafts()
+            for s in drafts:
+                sid = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
+                name = s.get("name", "")
+                if sid and name and sid not in entries:
+                    entries[sid] = (sid, name, "draft", creds.name)
+        except Exception as e:
+            logger.warning("Catalog: failed drafts fetch for %s: %s", creds.name, e)
+
+    # Upsert into DB
+    for sid, name, source, cred_name in entries.values():
+        existing = db.query(SymphonyCatalogEntry).filter_by(symphony_id=sid).first()
+        if existing:
+            existing.name = name
+            existing.source = source
+            existing.credential_name = cred_name
+            existing.updated_at = now
+        else:
+            db.add(SymphonyCatalogEntry(
+                symphony_id=sid, name=name, source=source,
+                credential_name=cred_name, updated_at=now,
+            ))
+
+    db.commit()
+    logger.info("Symphony catalog refreshed: %d entries", len(entries))
+
+
+@router.get("/symphony-catalog")
+def get_symphony_catalog(
+    refresh: bool = Query(False, description="Force refresh from Composer API"),
+    db: Session = Depends(get_db),
+):
+    """Return cached symphony catalog for name search. Auto-refreshes if stale."""
+    # Check staleness
+    from sqlalchemy import func
+    latest = db.query(func.max(SymphonyCatalogEntry.updated_at)).scalar()
+    is_stale = latest is None or (datetime.utcnow() - latest).total_seconds() > _CATALOG_TTL_SECONDS
+
+    if refresh or is_stale:
+        try:
+            _refresh_symphony_catalog(db)
+        except Exception as e:
+            logger.warning("Catalog refresh failed: %s", e)
+            if latest is None:
+                return []
+
+    rows = db.query(SymphonyCatalogEntry).order_by(SymphonyCatalogEntry.name).all()
+    return [
+        {"symphony_id": r.symphony_id, "name": r.name, "source": r.source}
+        for r in rows
+    ]
 
 
 # ------------------------------------------------------------------

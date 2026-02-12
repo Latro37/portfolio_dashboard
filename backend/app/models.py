@@ -182,6 +182,17 @@ class SymphonyAllocationHistory(Base):
     )
 
 
+class SymphonyCatalogEntry(Base):
+    """Cached catalog of user symphonies (invested, watchlist, drafts) for name search."""
+    __tablename__ = "symphony_catalog"
+
+    symphony_id = Column(Text, primary_key=True)
+    name = Column(Text, nullable=False)
+    source = Column(Text, nullable=False, default="invested")  # invested / watchlist / draft
+    credential_name = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
 

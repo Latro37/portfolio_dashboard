@@ -9,6 +9,7 @@ A portfolio tracker and analytics dashboard for [Composer](https://www.composer.
 - **Incremental updates** — only fetches new data after initial sync
 - **20+ metrics** — Sharpe, Sortino, Calmar, TWR, MWR, drawdown, win rate, volatility, and more
 - **Symphony analytics** — per-symphony live metrics, backtest charts, allocation history
+- **Symphony name search** — search invested symphonies by name when adding benchmark overlays; catalog cached in DB and auto-refreshed
 - **Backtest caching** — cached with version-check invalidation (detects symphony edits in Composer)
 - **Symphony structure export** — auto-saves symphony JSON definitions locally
 - **Daily snapshot** — configurable screenshot captured after market close or manually via camera button
