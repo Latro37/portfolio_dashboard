@@ -531,16 +531,16 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     const firstBench = benchMap && firstBtDate ? benchMap.get(firstBtDate) : null;
     const benchBaseGrowth = firstBench ? 1 + firstBench.return_pct / 100 : 1;
     let benchPeak = 1;
+    let lastBenchReturn: number | undefined;
+    let lastBenchDd: number | undefined;
 
     return filteredBacktestData.map((pt) => {
       const bPt = benchMap?.get(pt.date);
-      let benchReturn: number | undefined;
-      let benchDrawdown: number | undefined;
       if (bPt != null && benchBaseGrowth !== 0) {
-        benchReturn = ((1 + bPt.return_pct / 100) / benchBaseGrowth - 1) * 100;
-        const growth = 1 + benchReturn / 100;
+        lastBenchReturn = ((1 + bPt.return_pct / 100) / benchBaseGrowth - 1) * 100;
+        const growth = 1 + lastBenchReturn / 100;
         benchPeak = Math.max(benchPeak, growth);
-        benchDrawdown = benchPeak > 0 ? (growth / benchPeak - 1) * 100 : 0;
+        lastBenchDd = benchPeak > 0 ? (growth / benchPeak - 1) * 100 : 0;
       }
       return {
         ...pt,
@@ -548,8 +548,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
           ? ((1 + liveByDate[pt.date] / 100) / baseFactor - 1) * 100
           : null,
         liveDrawdown: liveDdByDate[pt.date] ?? null,
-        benchmarkReturn: benchReturn,
-        benchmarkDrawdown: benchDrawdown,
+        benchmarkReturn: lastBenchReturn,
+        benchmarkDrawdown: lastBenchDd,
       };
     });
   }, [filteredBacktestData, filteredLiveData, benchmarkData]);

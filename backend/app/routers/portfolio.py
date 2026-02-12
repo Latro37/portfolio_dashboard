@@ -958,6 +958,20 @@ def get_benchmark_history(
 
     closes.sort(key=lambda x: x[0])
 
+    # Fill today's price if missing (handles pre-market / after-hours gap)
+    today = date.today()
+    if closes[-1][0] < today:
+        try:
+            t = yf.Ticker(ticker)
+            live_price = t.fast_info.get("lastPrice") or t.fast_info.get("last_price")
+            if live_price and not math.isnan(live_price):
+                closes.append((today, float(live_price)))
+            else:
+                # Carry forward last close
+                closes.append((today, closes[-1][1]))
+        except Exception:
+            closes.append((today, closes[-1][1]))
+
     # Compute TWR (cumulative return from first date)
     first_close = closes[0][1]
     twr_series: List[float] = []

@@ -93,18 +93,25 @@ export function PerformanceChart({
     const baseGrowth = firstBench ? 1 + firstBench.return_pct / 100 : 1;
     // Recompute drawdown from rebased benchmark equity curve
     let benchPeak = 1;
+    let lastReturn: number | undefined;
+    let lastDd: number | undefined;
+    let lastMwr: number | undefined;
     return rawTradingData.map((pt) => {
       const b = benchMap.get(pt.date);
-      if (b == null) return { ...pt, benchmark_return: undefined, benchmark_drawdown: undefined, benchmark_mwr: undefined };
-      const rebasedReturn = baseGrowth !== 0 ? ((1 + b.return_pct / 100) / baseGrowth - 1) * 100 : 0;
-      const growth = 1 + rebasedReturn / 100;
-      benchPeak = Math.max(benchPeak, growth);
-      const rebasedDd = benchPeak > 0 ? (growth / benchPeak - 1) * 100 : 0;
+      if (b != null) {
+        const rebasedReturn = baseGrowth !== 0 ? ((1 + b.return_pct / 100) / baseGrowth - 1) * 100 : 0;
+        const growth = 1 + rebasedReturn / 100;
+        benchPeak = Math.max(benchPeak, growth);
+        lastReturn = rebasedReturn;
+        lastDd = benchPeak > 0 ? (growth / benchPeak - 1) * 100 : 0;
+        lastMwr = b.mwr_pct;
+      }
+      // Carry forward last known benchmark values for trailing dates
       return {
         ...pt,
-        benchmark_return: rebasedReturn,
-        benchmark_drawdown: rebasedDd,
-        benchmark_mwr: b.mwr_pct,
+        benchmark_return: b != null ? lastReturn : lastReturn,
+        benchmark_drawdown: b != null ? lastDd : lastDd,
+        benchmark_mwr: b != null ? lastMwr : lastMwr,
       };
     });
   }, [rawTradingData, benchmarkData, benchmarkTicker]);
