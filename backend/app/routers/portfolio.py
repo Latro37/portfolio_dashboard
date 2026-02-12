@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import date, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -895,3 +895,131 @@ async def upload_screenshot(request: Request):
 
     logger.info("Screenshot saved to %s (%d bytes)", filepath, len(contents))
     return {"ok": True, "path": filepath}
+
+
+# ---------------------------------------------------------------------------
+# Benchmark history
+# ---------------------------------------------------------------------------
+
+import math
+from datetime import datetime as _datetime
+
+_benchmark_cache: Dict[Tuple[str, str, str], Tuple[float, list]] = {}  # key -> (timestamp, data)
+_BENCHMARK_TTL = 3600  # 1 hour
+
+
+@router.get("/benchmark-history")
+def get_benchmark_history(
+    ticker: str = Query(..., description="Ticker symbol, e.g. SPY"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Fetch benchmark price history and compute TWR, drawdown, and MWR series."""
+    import yfinance as yf
+    from app.services.metrics import compute_mwr
+
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(400, "Ticker is required")
+
+    s_date = start_date or "2020-01-01"
+    # yfinance 'end' param is exclusive, so add 1 day to include today
+    e_date = end_date or str(date.today() + timedelta(days=1))
+    cache_key = (ticker, s_date, account_id or "")
+
+    # Check cache
+    if cache_key in _benchmark_cache:
+        ts, cached_data = _benchmark_cache[cache_key]
+        if time.time() - ts < _BENCHMARK_TTL:
+            return {"ticker": ticker, "data": cached_data}
+
+    # Download from yfinance
+    try:
+        df = yf.download(ticker, start=s_date, end=e_date, progress=False)
+        if df.empty:
+            raise HTTPException(400, f"No data found for ticker '{ticker}'")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to fetch data for '{ticker}': {e}")
+
+    # Extract daily closes
+    closes: List[Tuple[date, float]] = []
+    for idx, row in df.iterrows():
+        d = idx.date() if hasattr(idx, "date") else idx
+        close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
+        if not math.isnan(close_val):
+            closes.append((d, close_val))
+
+    if not closes:
+        raise HTTPException(400, f"No valid price data for '{ticker}'")
+
+    closes.sort(key=lambda x: x[0])
+
+    # Compute TWR (cumulative return from first date)
+    first_close = closes[0][1]
+    twr_series: List[float] = []
+    for _, c in closes:
+        twr_series.append(round(((c / first_close) - 1) * 100, 4))
+
+    # Compute drawdown series
+    peak = first_close
+    dd_series: List[float] = []
+    for _, c in closes:
+        if c > peak:
+            peak = c
+        dd = ((c / peak) - 1) * 100 if peak > 0 else 0.0
+        dd_series.append(round(dd, 4))
+
+    # Compute MWR series (simulate user's cash flows into the benchmark)
+    mwr_series: List[float] = [0.0] * len(closes)
+    if account_id:
+        # Load external cash flows for this account
+        cf_query = db.query(CashFlow).filter(
+            CashFlow.account_id == account_id,
+            CashFlow.type.in_(["DEPOSIT", "WITHDRAWAL"]),
+        ).order_by(CashFlow.date).all()
+
+        ext_flows: Dict[date, float] = {}
+        for cf in cf_query:
+            d = cf.date if isinstance(cf.date, date) else date.fromisoformat(str(cf.date))
+            ext_flows[d] = ext_flows.get(d, 0) + cf.amount
+
+        if ext_flows:
+            # Pre-compute cumulative shares and hypothetical PV at each date
+            shares_acc = 0.0
+            hypo_pv_list: List[float] = []
+            bench_date_list: List[date] = []
+
+            for bd, bc in closes:
+                if bd in ext_flows and bc > 0:
+                    shares_acc += ext_flows[bd] / bc
+                hypo_pv_list.append(shares_acc * bc if shares_acc > 0 else 0.0)
+                bench_date_list.append(bd)
+
+            # Compute rolling MWR using pre-computed PV series
+            for i in range(1, len(closes)):
+                if hypo_pv_list[i] > 0:
+                    try:
+                        _, mwr_period = compute_mwr(
+                            bench_date_list[: i + 1], hypo_pv_list[: i + 1], ext_flows
+                        )
+                        mwr_series[i] = round(mwr_period * 100, 4)
+                    except Exception:
+                        pass
+
+    # Build response
+    result = []
+    for i, (d, c) in enumerate(closes):
+        result.append({
+            "date": str(d),
+            "close": round(c, 2),
+            "return_pct": twr_series[i],
+            "drawdown_pct": dd_series[i],
+            "mwr_pct": mwr_series[i],
+        })
+
+    _benchmark_cache[cache_key] = (time.time(), result)
+    return {"ticker": ticker, "data": result}

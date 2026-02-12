@@ -247,6 +247,19 @@ function _qs(accountId?: string, extra?: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
+export interface BenchmarkPoint {
+  date: string;
+  close: number;
+  return_pct: number;
+  drawdown_pct: number;
+  mwr_pct: number;
+}
+
+export interface BenchmarkHistory {
+  ticker: string;
+  data: BenchmarkPoint[];
+}
+
 export interface SymphonyExportStatus {
   local_path: string;
 }
@@ -376,6 +389,13 @@ export const api = {
     form.append("date", dateStr);
     return fetch(`${API_BASE}/screenshot`, { method: "POST", body: form })
       .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); });
+  },
+  getBenchmarkHistory: (ticker: string, startDate?: string, endDate?: string, accountId?: string) => {
+    const params = new URLSearchParams({ ticker });
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+    if (accountId) params.set("account_id", accountId);
+    return fetchJSON<BenchmarkHistory>(`/benchmark-history?${params.toString()}`);
   },
   getSymphonyLiveSummary: (symphonyId: string, accountId: string, livePv: number, liveNd: number, period?: string, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig } from "@/lib/api";
+import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig, BenchmarkPoint } from "@/lib/api";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
 import { isMarketOpen, isAfterClose, todayET } from "@/lib/marketHours";
 import { PortfolioHeader } from "./PortfolioHeader";
@@ -59,6 +59,8 @@ export default function Dashboard() {
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const snapshotRef = useRef<HTMLDivElement>(null);
   const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } } | null>(null);
+  const [benchmarkTicker, setBenchmarkTicker] = useState<string | null>(null);
+  const [benchmarkData, setBenchmarkData] = useState<BenchmarkPoint[]>([]);
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
@@ -70,6 +72,14 @@ export default function Dashboard() {
     : selectedSubAccount === "all" && selectedCredential
       ? `all:${selectedCredential}`
       : selectedSubAccount || undefined;
+
+  // Fetch benchmark data when ticker changes
+  useEffect(() => {
+    if (!benchmarkTicker) { setBenchmarkData([]); return; }
+    api.getBenchmarkHistory(benchmarkTicker, undefined, undefined, resolvedAccountId)
+      .then((res) => setBenchmarkData(res.data))
+      .catch(() => { setBenchmarkData([]); });
+  }, [benchmarkTicker, resolvedAccountId]);
 
   // Load accounts + config on mount
   useEffect(() => {
@@ -451,6 +461,9 @@ export default function Dashboard() {
           endDate={customEnd}
           onStartDateChange={setCustomStart}
           onEndDateChange={setCustomEnd}
+          benchmarkData={benchmarkData}
+          benchmarkTicker={benchmarkTicker}
+          onBenchmarkChange={setBenchmarkTicker}
         />
 
         {/* Metric cards row */}
