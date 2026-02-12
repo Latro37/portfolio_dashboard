@@ -30,7 +30,7 @@ A practical guide to using the Composer Portfolio Visualizer — a local dashboa
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
 - **Backtest caching** — Symphony backtests are cached locally and automatically re-fetched when you edit the symphony in Composer.
 - **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change.
-- **Daily snapshot** — Captures a clean portfolio summary image after market close (or manually via the camera button). Configurable chart type, metrics, and date range.
+- **Daily snapshot** — Captures a clean portfolio summary image after market close (or manually via the camera button). Configurable chart type, metrics, date range, and benchmark overlays.
 - **Trade preview** — See what trades are pending before the next rebalance.
 - **Live intraday data** — During market hours, your portfolio value updates in real time.
 - **Real-time ticker quotes** — Live price change badges next to each holding (requires free Finnhub API key).
@@ -369,6 +369,7 @@ Configure an automatic portfolio screenshot captured after market close each day
 | **Chart type** | TWR, Portfolio Value, MWR, or Drawdown |
 | **Time period** | 1W, 1M, 3M, YTD, 1Y, All, or custom start date |
 | **Hide portfolio value** | Omit the dollar amount from the snapshot (for sharing) |
+| **Benchmark overlays** | Up to 3 ticker symbols (e.g. SPY, QQQ) shown as dashed lines on the chart. Only applies to TWR, MWR, and Drawdown modes. |
 | **Metrics** | Choose which metric cards appear in the snapshot |
 
 Snapshots are saved as `Snapshot_YYYY-MM-DD.png` (1200×900 resolution).

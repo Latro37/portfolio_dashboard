@@ -1,10 +1,11 @@
 "use client";
 
 import { forwardRef } from "react";
-import { Summary, PerformancePoint } from "@/lib/api";
+import { Summary, PerformancePoint, BenchmarkPoint } from "@/lib/api";
 import {
   AreaChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   ResponsiveContainer,
@@ -29,6 +30,8 @@ export const METRIC_OPTIONS: { key: string; label: string }[] = [
   { key: "calmar", label: "Calmar" },
   { key: "volatility", label: "Volatility" },
   { key: "max_drawdown", label: "Max Drawdown" },
+  { key: "median_drawdown", label: "Median Drawdown" },
+  { key: "longest_drawdown", label: "Longest Drawdown" },
   { key: "best_day", label: "Best Day" },
   { key: "worst_day", label: "Worst Day" },
 ];
@@ -37,6 +40,12 @@ export const DEFAULT_METRICS = [
   "twr", "sharpe", "max_drawdown", "volatility",
   "cumulative_return_pct", "calmar", "win_rate", "best_day",
 ];
+
+export interface SnapshotBenchmark {
+  ticker: string;
+  data: BenchmarkPoint[];
+  color: string;
+}
 
 interface Props {
   data: PerformancePoint[];
@@ -47,6 +56,7 @@ interface Props {
   todayDollarChange?: number;
   todayPctChange?: number;
   periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number };
+  benchmarks?: SnapshotBenchmark[];
 }
 
 function fmtPct(v: number) {
@@ -81,6 +91,8 @@ function getMetricValue(key: string, s: Summary, extra?: { todayDollar?: number;
     case "calmar": return s.calmar_ratio.toFixed(2);
     case "volatility": return s.annualized_volatility.toFixed(1) + "%";
     case "max_drawdown": return fmtPct(s.max_drawdown);
+    case "median_drawdown": return s.median_drawdown != null ? fmtPct(s.median_drawdown) : "—";
+    case "longest_drawdown": return s.longest_drawdown_days != null ? s.longest_drawdown_days + "d" : "—";
     case "best_day": return fmtPct(s.best_day_pct);
     case "worst_day": return fmtPct(s.worst_day_pct);
     default: return "—";
@@ -99,6 +111,8 @@ function getMetricColor(key: string, s: Summary, extra?: { todayDollar?: number;
     case "cumulative_return_pct": return colorPct(s.cumulative_return_pct);
     case "mwr": return colorPct(s.money_weighted_return_period);
     case "max_drawdown": return "#ef4444";
+    case "median_drawdown": return "#ef4444";
+    case "longest_drawdown": return "#e4e4e7";
     case "best_day": return "#10b981";
     case "worst_day": return "#ef4444";
     default: return "#e4e4e7";
@@ -111,13 +125,44 @@ function getMetricLabel(key: string): string {
 
 export const SnapshotView = forwardRef<HTMLDivElement, Props>(
   function SnapshotView(
-    { data, summary, chartMode, selectedMetrics, hidePortfolioValue, todayDollarChange, todayPctChange, periodReturns },
+    { data, summary, chartMode, selectedMetrics, hidePortfolioValue, todayDollarChange, todayPctChange, periodReturns, benchmarks = [] },
     ref,
   ) {
-    const tradingData = data.filter((pt) => {
+    const rawTradingData = data.filter((pt) => {
       const day = new Date(pt.date + "T00:00").getDay();
       return day !== 0 && day !== 6;
     });
+
+    // Merge benchmark data into trading data by date (mirrors PerformanceChart logic)
+    const tradingData = (() => {
+      if (!benchmarks.length || !rawTradingData.length) return rawTradingData;
+      const benchStates = benchmarks.map((b) => {
+        const map = new Map<string, BenchmarkPoint>(b.data.map((pt) => [pt.date, pt]));
+        // Find baseGrowth from the first matching trading date (not just the first date)
+        let baseGrowth: number | null = null;
+        for (const pt of rawTradingData) {
+          const bp = map.get(pt.date);
+          if (bp != null) { baseGrowth = 1 + bp.return_pct / 100; break; }
+        }
+        return { map, baseGrowth: baseGrowth ?? 1, ticker: b.ticker, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined };
+      });
+      return rawTradingData.map((pt) => {
+        const merged: Record<string, unknown> = { ...pt };
+        benchStates.forEach((bs) => {
+          const bpt = bs.map.get(pt.date);
+          if (bpt != null) {
+            const rebasedReturn = bs.baseGrowth !== 0 ? ((1 + bpt.return_pct / 100) / bs.baseGrowth - 1) * 100 : 0;
+            const growth = 1 + rebasedReturn / 100;
+            bs.peak = Math.max(bs.peak, growth);
+            bs.lastReturn = rebasedReturn;
+            bs.lastDd = bs.peak > 0 ? (growth / bs.peak - 1) * 100 : 0;
+          }
+          merged[`bench_${bs.ticker}`] = bs.lastReturn;
+          merged[`bench_${bs.ticker}_dd`] = bs.lastDd;
+        });
+        return merged as PerformancePoint & Record<string, number>;
+      });
+    })();
 
     const hasData = tradingData.length > 0;
     const todayStr = new Date().toLocaleDateString("en-US", {
@@ -298,6 +343,9 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
                 <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                 <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
                 <Area type="monotone" dataKey="time_weighted_return" stroke="url(#snap-twrStroke)" strokeWidth={2} fill="url(#snap-twrGrad)" dot={false} isAnimationActive={false} />
+                {benchmarks.map((b) => (
+                  <Line key={b.ticker} type="monotone" dataKey={`bench_${b.ticker}`} stroke={b.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} isAnimationActive={false} connectNulls />
+                ))}
               </AreaChart>
             </ResponsiveContainer>
           ) : chartMode === "mwr" ? (
@@ -319,6 +367,9 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
                 <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                 <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
                 <Area type="monotone" dataKey="money_weighted_return" stroke="url(#snap-mwrStroke)" strokeWidth={2} fill="url(#snap-mwrGrad)" dot={false} isAnimationActive={false} />
+                {benchmarks.map((b) => (
+                  <Line key={b.ticker} type="monotone" dataKey={`bench_${b.ticker}`} stroke={b.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} isAnimationActive={false} connectNulls />
+                ))}
               </AreaChart>
             </ResponsiveContainer>
           ) : (
@@ -334,10 +385,37 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
                 <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                 <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
                 <Area type="monotone" dataKey="current_drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#snap-ddGrad)" baseValue={0} dot={false} isAnimationActive={false} />
+                {benchmarks.map((b) => (
+                  <Line key={b.ticker} type="monotone" dataKey={`bench_${b.ticker}_dd`} stroke={b.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} isAnimationActive={false} connectNulls />
+                ))}
               </AreaChart>
             </ResponsiveContainer>
           )}
         </div>
+
+        {/* Benchmark legend below chart */}
+        {benchmarks.length > 0 && chartMode !== "portfolio" && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
+            <span style={{ fontSize: 12, color: "#71717a" }}>Benchmark{benchmarks.length > 1 ? "s" : ""}:</span>
+            {benchmarks.map((b) => (
+              <span
+                key={b.ticker}
+                style={{
+                  display: "inline-block",
+                  backgroundColor: `${b.color}20`,
+                  color: b.color,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "3px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${b.color}66`,
+                }}
+              >
+                {b.ticker}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Metric Cards */}
         {metricCards.length > 0 && (

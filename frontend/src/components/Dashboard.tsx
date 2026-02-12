@@ -58,7 +58,7 @@ export default function Dashboard() {
   const [screenshotConfig, setScreenshotConfig] = useState<ScreenshotConfig | null>(null);
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const snapshotRef = useRef<HTMLDivElement>(null);
-  const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } } | null>(null);
+  const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number }; benchmarks?: import("./SnapshotView").SnapshotBenchmark[] } | null>(null);
   const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
 
   // Finnhub real-time quotes for holdings
@@ -210,7 +210,23 @@ export default function Dashboard() {
         if (periodSums[1]) ssPeriodReturns["1M"] = (periodSums[1] as Summary).time_weighted_return;
         if (periodSums[2]) ssPeriodReturns["YTD"] = (periodSums[2] as Summary).time_weighted_return;
       }
-      setSnapshotData({ perf: ssPerf, sum: ssSum, periodReturns: ssPeriodReturns });
+
+      // Fetch benchmark data for snapshot if configured
+      const SNAP_BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
+      const ssBenchTickers: string[] = (cfg.benchmarks || []).slice(0, 3);
+      const ssBenchmarks: import("./SnapshotView").SnapshotBenchmark[] = [];
+      if (ssBenchTickers.length > 0 && cfg.chart_mode !== "portfolio") {
+        const benchResults = await Promise.all(
+          ssBenchTickers.map((t) => api.getBenchmarkHistory(t, undefined, undefined, ssAccountId).catch(() => null))
+        );
+        benchResults.forEach((res, i) => {
+          if (res && res.data.length > 0) {
+            ssBenchmarks.push({ ticker: ssBenchTickers[i], data: res.data, color: SNAP_BENCH_COLORS[i % SNAP_BENCH_COLORS.length] });
+          }
+        });
+      }
+
+      setSnapshotData({ perf: ssPerf, sum: ssSum, periodReturns: ssPeriodReturns, benchmarks: ssBenchmarks });
       setSnapshotVisible(true);
 
       // Wait for SnapshotView to render (poll for ref up to 3s)
@@ -577,6 +593,7 @@ export default function Dashboard() {
             todayDollarChange={symphonies.length ? symphonies.reduce((s, x) => s + x.last_dollar_change, 0) : undefined}
             todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
             periodReturns={snapshotData.periodReturns}
+            benchmarks={snapshotData.benchmarks}
           />
         </div>
       )}

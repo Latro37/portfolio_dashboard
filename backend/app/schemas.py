@@ -96,6 +96,9 @@ class PortfolioSummary(BaseModel):
     worst_day_pct: float
     worst_day_date: Optional[str] = None
     profit_factor: float
+    median_drawdown: float = 0.0
+    longest_drawdown_days: int = 0
+    median_drawdown_days: int = 0
     total_fees: float
     total_dividends: float
     last_updated: Optional[str] = None

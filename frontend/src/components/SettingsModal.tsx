@@ -35,6 +35,7 @@ const defaultScreenshot: ScreenshotConfig = {
   custom_start: "",
   hide_portfolio_value: false,
   metrics: [...DEFAULT_METRICS],
+  benchmarks: [],
 };
 
 export function SettingsModal({ onClose }: Props) {
@@ -315,6 +316,52 @@ export function SettingsModal({ onClose }: Props) {
               />
               <span className="text-sm text-foreground/80">Hide portfolio value</span>
             </label>
+
+            {/* Benchmark tickers */}
+            <div className="space-y-2 mb-2">
+              <label className="text-sm text-foreground/80">
+                Benchmark Overlays{" "}
+                <span className="text-muted-foreground text-xs">(up to 3 tickers, e.g. SPY)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {(ss.benchmarks || []).map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-foreground/80"
+                  >
+                    {t}
+                    <button
+                      type="button"
+                      onClick={() => { setSs((p) => ({ ...p, benchmarks: (p.benchmarks || []).filter((b) => b !== t) })); setSsSaved(false); }}
+                      className="cursor-pointer text-muted-foreground hover:text-foreground ml-0.5"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+                {(ss.benchmarks || []).length < 3 && (
+                  <input
+                    type="text"
+                    placeholder="+ Add ticker"
+                    className="w-28 rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                        if (val && !(ss.benchmarks || []).includes(val)) {
+                          setSs((p) => ({ ...p, benchmarks: [...(p.benchmarks || []), val] }));
+                          setSsSaved(false);
+                          (e.target as HTMLInputElement).value = "";
+                        }
+                      }
+                    }}
+                  />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground/60">
+                Benchmark lines are shown on TWR, MWR, and Drawdown chart modes (not Portfolio Value).
+              </p>
+            </div>
 
             {/* Metrics to show */}
             <div className="space-y-2">

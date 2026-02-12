@@ -42,6 +42,9 @@ export interface Summary {
   worst_day_pct: number;
   worst_day_date: string | null;
   profit_factor: number;
+  median_drawdown: number;
+  longest_drawdown_days: number;
+  median_drawdown_days: number;
   total_fees: number;
   total_dividends: number;
   last_updated: string | null;
@@ -292,6 +295,7 @@ export interface ScreenshotConfig {
   custom_start: string;
   hide_portfolio_value: boolean;
   metrics: string[];
+  benchmarks: string[];
 }
 
 export interface AppConfig {
