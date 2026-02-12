@@ -58,7 +58,7 @@ export default function Dashboard() {
   const [screenshotConfig, setScreenshotConfig] = useState<ScreenshotConfig | null>(null);
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const snapshotRef = useRef<HTMLDivElement>(null);
-  const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary } | null>(null);
+  const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } } | null>(null);
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
@@ -164,11 +164,24 @@ export default function Dashboard() {
     const ssStart = cfg.period === "custom" ? cfg.custom_start : undefined;
 
     try {
-      const [ssSum, ssPerf] = await Promise.all([
+      // Fetch main summary + perf, plus period returns for 1W/1M/YTD if any are selected
+      const needsPeriodReturns = cfg.metrics?.some((m: string) => ["return_1w", "return_1m", "return_ytd"].includes(m));
+      const [ssSum, ssPerf, ...periodSums] = await Promise.all([
         api.getSummary(ssAccountId, ssPeriod, ssStart, undefined),
         api.getPerformance(ssAccountId, ssPeriod, ssStart, undefined),
+        ...(needsPeriodReturns ? [
+          api.getSummary(ssAccountId, "1W").catch(() => null),
+          api.getSummary(ssAccountId, "1M").catch(() => null),
+          api.getSummary(ssAccountId, "YTD").catch(() => null),
+        ] : []),
       ]);
-      setSnapshotData({ perf: ssPerf, sum: ssSum });
+      const ssPeriodReturns: { "1W"?: number; "1M"?: number; "YTD"?: number } = {};
+      if (needsPeriodReturns) {
+        if (periodSums[0]) ssPeriodReturns["1W"] = (periodSums[0] as Summary).time_weighted_return;
+        if (periodSums[1]) ssPeriodReturns["1M"] = (periodSums[1] as Summary).time_weighted_return;
+        if (periodSums[2]) ssPeriodReturns["YTD"] = (periodSums[2] as Summary).time_weighted_return;
+      }
+      setSnapshotData({ perf: ssPerf, sum: ssSum, periodReturns: ssPeriodReturns });
       setSnapshotVisible(true);
 
       // Wait for SnapshotView to render (poll for ref up to 3s)
@@ -531,6 +544,7 @@ export default function Dashboard() {
             hidePortfolioValue={screenshotConfig.hide_portfolio_value ?? false}
             todayDollarChange={symphonies.length ? symphonies.reduce((s, x) => s + x.last_dollar_change, 0) : undefined}
             todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
+            periodReturns={snapshotData.periodReturns}
           />
         </div>
       )}

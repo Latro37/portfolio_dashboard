@@ -14,9 +14,14 @@ import {
 type ChartMode = "portfolio" | "twr" | "mwr" | "drawdown";
 
 export const METRIC_OPTIONS: { key: string; label: string }[] = [
+  { key: "today_dollar", label: "Today ($)" },
+  { key: "today_pct", label: "Today (%)" },
+  { key: "return_1w", label: "1W Return" },
+  { key: "return_1m", label: "1M Return" },
+  { key: "return_ytd", label: "YTD Return" },
   { key: "annualized_return_cum", label: "Annualized Return" },
-  { key: "twr", label: "TWR" },
   { key: "cumulative_return_pct", label: "Cumulative Return" },
+  { key: "twr", label: "TWR" },
   { key: "mwr", label: "MWR" },
   { key: "win_rate", label: "Win Rate" },
   { key: "wl", label: "W / L" },
@@ -41,6 +46,7 @@ interface Props {
   hidePortfolioValue: boolean;
   todayDollarChange?: number;
   todayPctChange?: number;
+  periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number };
 }
 
 function fmtPct(v: number) {
@@ -58,8 +64,13 @@ function colorPct(v: number) {
   return v >= 0 ? "#10b981" : "#ef4444";
 }
 
-function getMetricValue(key: string, s: Summary): string {
+function getMetricValue(key: string, s: Summary, extra?: { todayDollar?: number; todayPct?: number; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } }): string {
   switch (key) {
+    case "today_dollar": return extra?.todayDollar != null ? fmtDollar(extra.todayDollar) : "—";
+    case "today_pct": return extra?.todayPct != null ? fmtPct(extra.todayPct) : "—";
+    case "return_1w": return extra?.periodReturns?.["1W"] != null ? fmtPct(extra.periodReturns["1W"]) : "—";
+    case "return_1m": return extra?.periodReturns?.["1M"] != null ? fmtPct(extra.periodReturns["1M"]) : "—";
+    case "return_ytd": return extra?.periodReturns?.YTD != null ? fmtPct(extra.periodReturns.YTD) : "—";
     case "annualized_return_cum": return fmtPct(s.annualized_return_cum);
     case "twr": return fmtPct(s.time_weighted_return);
     case "cumulative_return_pct": return fmtPct(s.cumulative_return_pct);
@@ -76,8 +87,13 @@ function getMetricValue(key: string, s: Summary): string {
   }
 }
 
-function getMetricColor(key: string, s: Summary): string {
+function getMetricColor(key: string, s: Summary, extra?: { todayDollar?: number; todayPct?: number; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number } }): string {
   switch (key) {
+    case "today_dollar": return extra?.todayDollar != null ? colorPct(extra.todayDollar) : "#e4e4e7";
+    case "today_pct": return extra?.todayPct != null ? colorPct(extra.todayPct) : "#e4e4e7";
+    case "return_1w": return extra?.periodReturns?.["1W"] != null ? colorPct(extra.periodReturns["1W"]) : "#e4e4e7";
+    case "return_1m": return extra?.periodReturns?.["1M"] != null ? colorPct(extra.periodReturns["1M"]) : "#e4e4e7";
+    case "return_ytd": return extra?.periodReturns?.YTD != null ? colorPct(extra.periodReturns.YTD) : "#e4e4e7";
     case "annualized_return_cum": return colorPct(s.annualized_return_cum);
     case "twr": return colorPct(s.time_weighted_return);
     case "cumulative_return_pct": return colorPct(s.cumulative_return_pct);
@@ -95,7 +111,7 @@ function getMetricLabel(key: string): string {
 
 export const SnapshotView = forwardRef<HTMLDivElement, Props>(
   function SnapshotView(
-    { data, summary, chartMode, selectedMetrics, hidePortfolioValue, todayDollarChange, todayPctChange },
+    { data, summary, chartMode, selectedMetrics, hidePortfolioValue, todayDollarChange, todayPctChange, periodReturns },
     ref,
   ) {
     const tradingData = data.filter((pt) => {
@@ -112,6 +128,8 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
 
     const dayPct = todayPctChange ?? summary.daily_return_pct;
     const dayDollar = todayDollarChange ?? 0;
+    const hasTodayMetric = selectedMetrics.includes("today_dollar") || selectedMetrics.includes("today_pct");
+    const extra = { todayDollar: dayDollar, todayPct: dayPct, periodReturns };
 
     const multiYear =
       hasData &&
@@ -148,7 +166,7 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
     // Build metric cards
     const metricCards: { label: string; value: string; color: string }[] = [];
 
-    if (hidePortfolioValue) {
+    if (hidePortfolioValue && !hasTodayMetric) {
       metricCards.push({
         label: "Today",
         value: fmtPct(dayPct),
@@ -159,8 +177,8 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
     for (const key of selectedMetrics) {
       metricCards.push({
         label: getMetricLabel(key),
-        value: getMetricValue(key, summary),
-        color: getMetricColor(key, summary),
+        value: getMetricValue(key, summary, extra),
+        color: getMetricColor(key, summary, extra),
       });
     }
 
@@ -196,6 +214,7 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
                 <div style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1 }}>
                   ${summary.portfolio_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
+                {!hasTodayMetric && (
                 <div
                   style={{
                     fontSize: 14,
@@ -205,6 +224,7 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
                 >
                   Today: {fmtDollar(dayDollar)} ({fmtPct(dayPct)})
                 </div>
+              )}
               </>
             )}
           </div>
@@ -324,7 +344,7 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
+              gridTemplateColumns: "repeat(6, 1fr)",
               gap: 12,
               marginTop: 20,
             }}

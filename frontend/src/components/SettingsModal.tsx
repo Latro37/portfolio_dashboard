@@ -318,7 +318,20 @@ export function SettingsModal({ onClose }: Props) {
 
             {/* Metrics to show */}
             <div className="space-y-2">
-              <label className="text-sm text-foreground/80">Metrics to Show</label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm text-foreground/80">Metrics to Show <span className="text-muted-foreground text-xs">(Rendered in order selected)</span></label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelected = METRIC_OPTIONS.every((m) => ss.metrics.includes(m.key));
+                    setSs((p) => ({ ...p, metrics: allSelected ? [] : METRIC_OPTIONS.map((m) => m.key) }));
+                    setSsSaved(false);
+                  }}
+                  className="cursor-pointer text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  {METRIC_OPTIONS.every((m) => ss.metrics.includes(m.key)) ? "None" : "All"}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {METRIC_OPTIONS.map((m) => (
                   <label key={m.key} className="flex items-center gap-2 cursor-pointer rounded px-2 py-1 hover:bg-muted/50">
