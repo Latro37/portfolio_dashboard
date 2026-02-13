@@ -27,6 +27,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Incremental updates** — After the initial sync, only new data is fetched. If the app hasn't run for days, it automatically fills in the gaps.
 - **20+ portfolio metrics** — Sharpe ratio, Sortino ratio, Calmar ratio, TWR, MWR, max drawdown, win rate, volatility, annualized return, and more. All computed live from your data.
 - **Performance chart** — Interactive chart with TWR, MWR, Portfolio Value, and Drawdown views. Adjustable time periods (1D–All) and custom date ranges.
+- **Live vs Backtest overlays** — Compare your live symphony results directly against the Composer backtest, charted side by side. Easily see any discrepancies.
 - **Benchmark overlays** — Compare your performance against SPY, QQQ, TQQQ, any ticker symbol, or other Composer symphonies. Up to 3 benchmarks at once.
 - **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. No need to look up IDs or URLs.
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
@@ -395,9 +396,6 @@ Backtests are cached for up to 24 hours. If you edited the symphony recently, th
 
 ### Real-time price badges aren't showing
 You need a Finnhub API key configured in `config.json`. See [Optional: Real-Time Ticker Quotes](#optional-real-time-ticker-quotes). The free tier is sufficient.
-
-### Chart shows flat lines on weekends
-This is expected — the portfolio value doesn't change on non-trading days. The chart includes all calendar days in the data, so weekends appear as flat segments between Friday's close and Monday's close.
 
 ### I was away for a week — is my data missing?
 Portfolio-level data (values, transactions, cash flows, holdings) is fully backfilled on the next sync — the Composer API returns your complete history. Per-symphony daily values, however, are only captured for the current day during incremental syncs, so the symphony-level performance charts may show gaps for days the app wasn't running. This does not affect the main portfolio chart or metrics.
