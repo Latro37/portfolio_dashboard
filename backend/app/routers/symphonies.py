@@ -659,6 +659,7 @@ def get_symphony_backtest(
             "first_day": cached.first_day,
             "last_market_day": cached.last_market_day,
             "cached_at": cached.cached_at.isoformat(),
+            "last_semantic_update_at": cached.last_semantic_update_at or "",
         }
 
     # Fetch fresh backtest
@@ -715,6 +716,7 @@ def get_symphony_backtest(
         "first_day": first_day,
         "last_market_day": last_market_day,
         "cached_at": now.isoformat(),
+        "last_semantic_update_at": semantic_ts or "",
     }
 
 

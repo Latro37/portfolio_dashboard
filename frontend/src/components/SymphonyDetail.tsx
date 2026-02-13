@@ -185,7 +185,7 @@ function Metric({ label, value, color, subValue, tooltip, valueTooltip, subValue
   );
 }
 
-type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
+type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL" | "OOS";
 const PERIODS: Period[] = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"];
 
 function isWeekday(dateStr: string): boolean {
@@ -203,6 +203,7 @@ function periodStartDate(period: Period): string {
     case "YTD": return `${now.getFullYear()}-01-01`;
     case "1Y": { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10); }
     case "ALL": return "";
+    case "OOS": return ""; // handled separately via oosDate
   }
 }
 
@@ -223,6 +224,14 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [customEnd, setCustomEnd] = useState("");
   const [liveSummary, setLiveSummary] = useState<SymphonySummary | null>(null);
   const baseLiveDataRef = useRef<PerformancePoint[]>([]);
+  // OOS (Out of Sample) date: extract YYYY-MM-DD from last_semantic_update_at timestamp
+  const oosDate = useMemo(() => {
+    const ts = backtest?.last_semantic_update_at;
+    if (!ts) return "";
+    // Timestamp format: "2026-02-11T08:41:07.039361-05:00[America/New_York]"
+    return ts.slice(0, 10);
+  }, [backtest]);
+
   const [showBacktestOverlay, setShowBacktestOverlay] = useState(false);
   const [showLiveOverlay, setShowLiveOverlay] = useState(false);
   const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
@@ -354,11 +363,13 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     // (live symphony ND may differ from stored ND due to timing/aggregation)
     const base = baseLiveDataRef.current;
     const storedND = base.length > 0 ? base[base.length - 1].net_deposits : s.net_deposits;
-    const p = (customStart || customEnd) ? undefined : (period === "ALL" ? undefined : period);
+    const isOOS = period === "OOS" && oosDate;
+    const p = (customStart || customEnd || isOOS) ? undefined : (period === "ALL" ? undefined : period);
+    const effectiveStart = customStart || (isOOS ? oosDate : undefined);
     api
       .getSymphonyLiveSummary(
         s.id, s.account_id, livePv, storedND, p,
-        customStart || undefined, customEnd || undefined,
+        effectiveStart || undefined, customEnd || undefined,
       )
       .then(setLiveSummary)
       .catch(() => { /* keep existing liveSummary */ });
@@ -392,7 +403,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
         setLiveData([...base, todayPt]);
       }
     }
-  }, [s.id, s.account_id, s.value, s.net_deposits, period, customStart, customEnd]);
+  }, [s.id, s.account_id, s.value, s.net_deposits, period, customStart, customEnd, oosDate]);
 
   // Auto-refresh trade preview + live metrics every 60s (only during trading session)
   useEffect(() => {
@@ -413,10 +424,12 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
   // Fetch live summary metrics from backend (period-aware or custom date range)
   useEffect(() => {
-    if (customStart || customEnd) {
-      // Custom date range — pass explicit start/end dates
+    const isOOS = period === "OOS" && oosDate;
+    if (customStart || customEnd || isOOS) {
+      // Custom date range or OOS — pass explicit start/end dates
+      const effectiveStart = customStart || (isOOS ? oosDate : undefined);
       api
-        .getSymphonySummary(s.id, s.account_id, undefined, customStart || undefined, customEnd || undefined)
+        .getSymphonySummary(s.id, s.account_id, undefined, effectiveStart || undefined, customEnd || undefined)
         .then(setLiveSummary)
         .catch(() => setLiveSummary(null));
     } else {
@@ -427,12 +440,12 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
         .then(setLiveSummary)
         .catch(() => setLiveSummary(null));
     }
-  }, [s.id, s.account_id, period, customStart, customEnd]);
+  }, [s.id, s.account_id, period, customStart, customEnd, oosDate]);
 
   // Filter live data by period/custom dates (client-side, data already fetched as ALL)
   const filteredLiveData = useMemo(() => {
     if (!liveData.length) return [];
-    const start = customStart || periodStartDate(period);
+    const start = customStart || (period === "OOS" ? oosDate : periodStartDate(period));
     const end = customEnd || "";
     if (!start && !end) return liveData.filter((pt) => isWeekday(pt.date));
     return liveData.filter((pt) => {
@@ -441,7 +454,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
       if (end && pt.date > end) return false;
       return true;
     });
-  }, [liveData, period, customStart, customEnd]);
+  }, [liveData, period, customStart, customEnd, oosDate]);
 
   // Compute backtest chart data
   const backtestChartData = useMemo(() => {
@@ -487,7 +500,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   // Filter backtest data by period/custom dates (client-side)
   const filteredBacktestData = useMemo(() => {
     if (!backtestChartData.length) return [];
-    const start = customStart || periodStartDate(period);
+    const start = customStart || (period === "OOS" ? oosDate : periodStartDate(period));
     const end = customEnd || "";
     if (!start && !end) return backtestChartData.filter((pt) => isWeekday(pt.date));
     const filtered = backtestChartData.filter((pt) => {
@@ -513,7 +526,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
         drawdown: peak > 0 ? ((pt.value - peak) / peak) * 100 : 0,
       };
     });
-  }, [backtestChartData, period, customStart, customEnd]);
+  }, [backtestChartData, period, customStart, customEnd, oosDate]);
 
   const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
   const btFormatDate = makeDateFormatter(filteredBacktestData);
@@ -926,6 +939,19 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       {p}
                     </button>
                   ))}
+                  {oosDate && (
+                    <button
+                      onClick={() => { setPeriod("OOS"); setCustomStart(""); setCustomEnd(""); }}
+                      className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                        period === "OOS" && !customStart && !customEnd
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title={`Out of Sample — from ${oosDate} (last edited)`}
+                    >
+                      OOS
+                    </button>
+                  )}
                 </div>
 
                 <div className="h-5 w-px bg-border/50" />
