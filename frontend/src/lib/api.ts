@@ -201,6 +201,7 @@ export interface SymphonyBacktest {
   first_day: number;
   last_market_day: number;
   cached_at: string;
+  last_semantic_update_at: string;
 }
 
 export interface TradePreviewItem {
