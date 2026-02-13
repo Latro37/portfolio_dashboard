@@ -188,6 +188,7 @@ composer_portfolio_visualizer/
 │   └── METRICS.md                 # Detailed metric formulas
 ├── config.json.example            # Configuration template (credentials + settings)
 ├── start.py                       # One-command launcher
+├── stop.py                        # Graceful shutdown + zombie process cleanup
 └── README.md
 ```
 

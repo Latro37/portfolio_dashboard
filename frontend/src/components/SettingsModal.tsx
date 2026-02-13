@@ -51,6 +51,7 @@ export function SettingsModal({ onClose }: Props) {
   const [ssSaving, setSsSaving] = useState(false);
   const [ssSaved, setSsSaved] = useState(false);
   const [ssError, setSsError] = useState("");
+  const [todayDollarAutoDisabled, setTodayDollarAutoDisabled] = useState(false);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -107,6 +108,9 @@ export function SettingsModal({ onClose }: Props) {
   };
 
   const toggleMetric = (key: string) => {
+    if (key === "today_dollar" && todayDollarAutoDisabled) {
+      setTodayDollarAutoDisabled(false);
+    }
     setSs((prev) => {
       const has = prev.metrics.includes(key);
       return {
@@ -311,7 +315,16 @@ export function SettingsModal({ onClose }: Props) {
               <input
                 type="checkbox"
                 checked={ss.hide_portfolio_value}
-                onChange={(e) => { setSs((p) => ({ ...p, hide_portfolio_value: e.target.checked })); setSsSaved(false); }}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setSs((p) => ({
+                    ...p,
+                    hide_portfolio_value: checked,
+                    ...(checked ? { metrics: p.metrics.filter((m) => m !== "today_dollar") } : {}),
+                  }));
+                  if (checked) setTodayDollarAutoDisabled(true);
+                  setSsSaved(false);
+                }}
                 className="rounded border-border accent-emerald-600"
               />
               <span className="text-sm text-foreground/80">Hide portfolio value</span>
@@ -376,21 +389,29 @@ export function SettingsModal({ onClose }: Props) {
                   }}
                   className="cursor-pointer text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
                 >
-                  {METRIC_OPTIONS.every((m) => ss.metrics.includes(m.key)) ? "None" : "All"}
+                  {METRIC_OPTIONS.every((m) => ss.metrics.includes(m.key)) ? "Uncheck All" : "Check All"}
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                {METRIC_OPTIONS.map((m) => (
-                  <label key={m.key} className="flex items-center gap-2 cursor-pointer rounded px-2 py-1 hover:bg-muted/50">
-                    <input
-                      type="checkbox"
-                      checked={ss.metrics.includes(m.key)}
-                      onChange={() => toggleMetric(m.key)}
-                      className="rounded border-border accent-emerald-600"
-                    />
-                    <span className="text-xs text-foreground/80">{m.label}</span>
-                  </label>
-                ))}
+                {METRIC_OPTIONS.map((m) => {
+                  const isAutoDisabled = m.key === "today_dollar" && todayDollarAutoDisabled;
+                  return (
+                    <label key={m.key} className={`flex items-center gap-2 cursor-pointer rounded px-2 py-1 hover:bg-muted/50 ${isAutoDisabled ? "opacity-60" : ""}`}>
+                      <span className="relative inline-flex">
+                        <input
+                          type="checkbox"
+                          checked={ss.metrics.includes(m.key)}
+                          onChange={() => toggleMetric(m.key)}
+                          className="rounded border-border accent-emerald-600"
+                        />
+                        {isAutoDisabled && (
+                          <span className="absolute inset-0 flex items-center justify-center text-red-500 text-[10px] font-bold pointer-events-none">✕</span>
+                        )}
+                      </span>
+                      <span className={`text-xs ${isAutoDisabled ? "text-red-400/70" : "text-foreground/80"}`}>{m.label}</span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
