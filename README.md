@@ -210,6 +210,18 @@ npm run dev
 ```
 Then open **http://localhost:3000** in your browser.
 
+### Stopping the App
+
+```bash
+python stop.py
+```
+
+This cleanly shuts down both the backend and frontend and kills any zombie processes (orphan `uvicorn` or `next dev` processes that survived a crash or forced close). Use this when:
+
+- **Ctrl+C didn't fully stop everything** — child processes can linger after a terminal close or crash.
+- **Port 8000 or 3000 is "already in use"** when you try to restart.
+- **You want a clean slate** before restarting with `python start.py`.
+
 ### Verifying It Works
 
 1. The browser should open to a dark-themed dashboard.
@@ -390,6 +402,9 @@ Click the **Update** button in the top-right corner. The app doesn't fetch data 
 
 ### The sync seems stuck or is taking a long time
 The first sync can take 30–60 seconds. If it takes longer than 2 minutes, check the terminal window running the backend for error messages.
+
+### Port 8000 or 3000 is already in use
+A previous session may not have shut down cleanly. Run `python stop.py` to kill any lingering processes, then start the app again.
 
 ### Symphony backtest shows old data
 Backtests are cached for up to 24 hours. If you edited the symphony recently, the app checks for edits and re-fetches automatically. You can also close and reopen the symphony detail to trigger a fresh check.

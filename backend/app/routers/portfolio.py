@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     Account, DailyPortfolio, DailyMetrics, HoldingsHistory,
-    Transaction, CashFlow, SyncState,
+    Transaction, CashFlow, SyncState, BenchmarkData,
 )
 from app.schemas import (
     AccountInfo, PortfolioSummary, DailyPortfolioRow,
@@ -966,22 +966,30 @@ def get_benchmark_history(
             return {"ticker": ticker, "data": cached_data}
 
     # Download from yfinance
+    closes: List[Tuple[date, float]] = []
     try:
         df = yf.download(ticker, start=s_date, end=e_date, progress=False)
-        if df.empty:
-            raise HTTPException(400, f"No data found for ticker '{ticker}'")
-    except HTTPException:
-        raise
+        if not df.empty:
+            for idx, row in df.iterrows():
+                d = idx.date() if hasattr(idx, "date") else idx
+                close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
+                if not math.isnan(close_val):
+                    closes.append((d, close_val))
     except Exception as e:
-        raise HTTPException(400, f"Failed to fetch data for '{ticker}': {e}")
+        logger.warning("yfinance download failed for %s: %s", ticker, e)
 
-    # Extract daily closes
-    closes: List[Tuple[date, float]] = []
-    for idx, row in df.iterrows():
-        d = idx.date() if hasattr(idx, "date") else idx
-        close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
-        if not math.isnan(close_val):
-            closes.append((d, close_val))
+    # Fallback to DB benchmark_data if yfinance returned nothing
+    if not closes:
+        s_dt = date.fromisoformat(s_date) if start_date else date(2020, 1, 1)
+        db_rows = (
+            db.query(BenchmarkData)
+            .filter(BenchmarkData.symbol == ticker, BenchmarkData.date >= s_dt)
+            .order_by(BenchmarkData.date)
+            .all()
+        )
+        if db_rows:
+            closes = [(r.date, float(r.close)) for r in db_rows]
+            logger.info("Benchmark %s: using %d rows from DB fallback", ticker, len(closes))
 
     if not closes:
         raise HTTPException(400, f"No valid price data for '{ticker}'")
