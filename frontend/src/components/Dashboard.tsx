@@ -13,7 +13,7 @@ import { DetailTabs } from "./DetailTabs";
 import { SymphonyList } from "./SymphonyList";
 import { SymphonyDetail } from "./SymphonyDetail";
 import { TradePreview } from "./TradePreview";
-import { MetricsGuide } from "./MetricsGuide";
+import { HelpModal } from "./HelpModal";
 import { SettingsModal } from "./SettingsModal";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { SnapshotView, DEFAULT_METRICS } from "./SnapshotView";
@@ -41,7 +41,7 @@ export default function Dashboard() {
   const [symphonies, setSymphonies] = useState<SymphonyInfo[]>([]);
   const [selectedSymphony, setSelectedSymphony] = useState<SymphonyInfo | null>(null);
   const [symphonyScrollTo, setSymphonyScrollTo] = useState<"trade-preview" | undefined>(undefined);
-  const [showMetricsGuide, setShowMetricsGuide] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [symphoniesRefreshing, setSymphoniesRefreshing] = useState(false);
   const [liveEnabled, setLiveEnabled] = useState(() => {
@@ -51,7 +51,7 @@ export default function Dashboard() {
     }
     return true;
   });
-  const [finnhubKey, setFinnhubKey] = useState<string | null>(null);
+  const [finnhubConfigured, setFinnhubConfigured] = useState(false);
   const baseHoldingsRef = useRef<HoldingsResponse | null>(null);
   const basePerformanceRef = useRef<PerformancePoint[]>([]);
   const baseSummaryRef = useRef<Summary | null>(null);
@@ -63,7 +63,7 @@ export default function Dashboard() {
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
-  const { quotes: finnhubQuotes } = useFinnhubQuotes(holdingSymbols, finnhubKey);
+  const { quotes: finnhubQuotes } = useFinnhubQuotes(holdingSymbols, finnhubConfigured);
 
   // Resolve the account_id query param based on selection
   const resolvedAccountId = selectedCredential === "__all__"
@@ -103,7 +103,7 @@ export default function Dashboard() {
   // Load accounts + config on mount
   useEffect(() => {
     api.getConfig().then((cfg) => {
-      setFinnhubKey(cfg.finnhub_api_key);
+      setFinnhubConfigured(cfg.finnhub_configured ?? !!cfg.finnhub_api_key);
       if (cfg.screenshot) setScreenshotConfig(cfg.screenshot);
     }).catch(() => {});
     api.getAccounts().then((accts) => {
@@ -462,6 +462,7 @@ export default function Dashboard() {
           syncing={syncing}
           onSettings={() => setShowSettings(true)}
           onSnapshot={() => triggerSnapshot(false)}
+          onHelp={() => setShowHelp(true)}
           todayDollarChange={symphonies.length ? symphonies.reduce((sum, s) => sum + s.last_dollar_change, 0) : undefined}
           todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
           liveToggle={
@@ -537,7 +538,7 @@ export default function Dashboard() {
           accountId={resolvedAccountId}
           portfolioValue={symphonies.length ? symphonies.reduce((s, x) => s + x.value, 0) : summary?.portfolio_value}
           autoRefreshEnabled={liveEnabled}
-          finnhubKey={finnhubKey}
+          finnhubConfigured={finnhubConfigured}
           onSymphonyClick={(symphonyId) => {
             const match = symphonies.find((s) => s.id === symphonyId);
             if (match) {
@@ -550,15 +551,6 @@ export default function Dashboard() {
         {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
         <DetailTabs accountId={resolvedAccountId} summary={summary ?? undefined} onDataChange={fetchData} />
 
-        {/* Metrics Guide link */}
-        <div className="pt-2 pb-4 text-center">
-          <button
-            onClick={() => setShowMetricsGuide(true)}
-            className="cursor-pointer text-xs text-muted-foreground/60 hover:text-foreground transition-colors"
-          >
-            Metrics Guide
-          </button>
-        </div>
       </div>
 
       {/* Symphony detail overlay */}
@@ -570,9 +562,9 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Metrics Guide overlay */}
-      {showMetricsGuide && (
-        <MetricsGuide onClose={() => setShowMetricsGuide(false)} />
+      {/* Help modal */}
+      {showHelp && (
+        <HelpModal onClose={() => setShowHelp(false)} />
       )}
 
       {/* Settings modal */}

@@ -16,7 +16,7 @@ interface Props {
   portfolioValue?: number;
   onSymphonyClick?: (symphonyId: string) => void;
   autoRefreshEnabled?: boolean;
-  finnhubKey?: string | null;
+  finnhubConfigured?: boolean;
 }
 
 interface SymphonyBreakdown {
@@ -41,7 +41,9 @@ function fmtDollar(v: number): string {
   return "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoRefreshEnabled = true, finnhubKey }: Props) {
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+
+export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoRefreshEnabled = true, finnhubConfigured }: Props) {
   const [trades, setTrades] = useState<TradePreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,25 +53,23 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
   const [priceQuotes, setPriceQuotes] = useState<Record<string, PriceQuote>>({});
 
   const fetchPrices = async (tickers: string[]) => {
-    if (!finnhubKey || tickers.length === 0) return;
+    if (!finnhubConfigured || tickers.length === 0) return;
     const results: Record<string, PriceQuote> = {};
-    await Promise.all(
-      tickers.map(async (sym) => {
-        try {
-          const res = await fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${finnhubKey}`,
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data.c && data.c > 0) {
-              const change = data.pc > 0 ? data.c - data.pc : 0;
-              const changePct = data.pc > 0 ? (change / data.pc) * 100 : 0;
-              results[sym] = { price: data.c, change, changePct };
-            }
+    try {
+      const res = await fetch(
+        `${API_BASE}/finnhub/quote?symbols=${encodeURIComponent(tickers.join(","))}`,
+      );
+      if (res.ok) {
+        const data: Record<string, { c?: number; pc?: number }> = await res.json();
+        for (const [sym, q] of Object.entries(data)) {
+          if (q.c && q.c > 0) {
+            const change = q.pc && q.pc > 0 ? q.c - q.pc : 0;
+            const changePct = q.pc && q.pc > 0 ? (change / q.pc) * 100 : 0;
+            results[sym] = { price: q.c, change, changePct };
           }
-        } catch { /* skip */ }
-      }),
-    );
+        }
+      }
+    } catch { /* skip */ }
     setPriceQuotes((prev) => ({ ...prev, ...results }));
   };
 

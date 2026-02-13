@@ -1,7 +1,5 @@
-# Environment
-.env
-*.env.local
-accounts.json
+# Config (contains API credentials)
+config.json
 
 # Python
 __pycache__/
@@ -19,7 +17,6 @@ backend/data/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
-node_modules/
 
 # IDE
 .vscode/

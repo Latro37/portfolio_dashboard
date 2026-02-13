@@ -9,7 +9,7 @@ class Account(Base):
     __tablename__ = "accounts"
 
     id = Column(Text, primary_key=True)  # Composer account_uuid
-    credential_name = Column(Text, nullable=False)  # user label from accounts.json
+    credential_name = Column(Text, nullable=False)  # user label from config.json
     account_type = Column(Text, nullable=False)  # raw: INDIVIDUAL, IRA_ROTH, etc.
     display_name = Column(Text, nullable=False)  # friendly: "Primary — Stocks"
     status = Column(Text, nullable=False, default="UNKNOWN")

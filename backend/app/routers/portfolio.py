@@ -73,7 +73,7 @@ def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
     if account_id == "all":
         accts = db.query(Account).all()
         if not accts:
-            raise HTTPException(404, "No accounts discovered. Check accounts.json and restart.")
+            raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
         return [a.id for a in accts]
     if account_id and account_id.startswith("all:"):
         cred_name = account_id[4:]
@@ -86,7 +86,7 @@ def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
     # Default: first discovered account
     first = db.query(Account).first()
     if not first:
-        raise HTTPException(404, "No accounts discovered. Check accounts.json and restart.")
+        raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
     return [first.id]
 
 
@@ -808,7 +808,7 @@ def trigger_sync(
             # Sync all discovered accounts
             all_accts = db.query(Account).all()
             if not all_accts:
-                raise HTTPException(404, "No accounts discovered. Check accounts.json and restart.")
+                raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
             ids = [a.id for a in all_accts]
 
         for aid in ids:
@@ -843,7 +843,8 @@ def get_app_config():
         }
     screenshot_cfg = load_screenshot_config()
     return {
-        "finnhub_api_key": load_finnhub_key(),
+        "finnhub_api_key": None,
+        "finnhub_configured": load_finnhub_key() is not None,
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
     }
@@ -862,17 +863,34 @@ def set_symphony_export_config(body: _SymphonyExportBody):
     return {"ok": True, "local_path": local_path}
 
 
+class _ScreenshotConfigBody(BaseModel):
+    local_path: str
+    enabled: bool = True
+    account_id: str = ""
+    chart_mode: str = ""
+    period: str = ""
+    custom_start: str = ""
+    hide_portfolio_value: bool = False
+    metrics: List[str] = []
+    benchmarks: List[str] = []
+
 @router.post("/config/screenshot")
-def set_screenshot_config(body: dict):
+def set_screenshot_config(body: _ScreenshotConfigBody):
     """Save screenshot configuration from the frontend settings modal."""
-    save_screenshot_config(body)
+    local_path = body.local_path.strip()
+    if not local_path:
+        raise HTTPException(400, "local_path is required")
+    save_screenshot_config(body.model_dump())
     return {"ok": True}
 
+
+_MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024  # 10 MB
 
 @router.post("/screenshot")
 async def upload_screenshot(request: Request):
     """Receive a PNG screenshot and save it to the configured folder."""
     import os
+    import re
 
     cfg = load_screenshot_config()
     if not cfg:
@@ -891,11 +909,17 @@ async def upload_screenshot(request: Request):
         from datetime import date as _date
         date_str = _date.today().isoformat()
 
+    # Validate date_str to prevent path traversal via crafted filenames
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+        raise HTTPException(400, "Invalid date format, expected YYYY-MM-DD")
+
     os.makedirs(local_path, exist_ok=True)
     filename = f"Snapshot_{date_str}.png"
     filepath = os.path.join(local_path, filename)
 
     contents = await file.read()
+    if len(contents) > _MAX_SCREENSHOT_BYTES:
+        raise HTTPException(413, f"File too large (max {_MAX_SCREENSHOT_BYTES // 1024 // 1024} MB)")
     with open(filepath, "wb") as f:
         f.write(contents)
 
