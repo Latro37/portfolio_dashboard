@@ -2,7 +2,6 @@
 
 Starts both the Python backend (FastAPI) and the Next.js frontend.
 Usage: python start.py
-       (or double-click start.bat on Windows)
 """
 
 import os
@@ -74,26 +73,18 @@ def check_node():
         print("WARNING: Could not determine Node.js version. Continuing anyway...")
 
 
-def check_accounts():
-    """Verify accounts.json exists."""
-    accounts_path = os.path.join(ROOT, "accounts.json")
-    if not os.path.exists(accounts_path):
-        print("\nERROR: accounts.json not found.\n")
-        print("  1. Copy accounts.json.example to accounts.json")
-        print("  2. Edit accounts.json and add your Composer API credentials")
-        print("  3. Run this script again\n")
-        print("Your API credentials never leave your machine. See README.md for details.")
-        sys.exit(1)
-    print("  accounts.json ......... OK")
-
-
-def check_env():
-    """Check for optional .env file."""
-    env_path = os.path.join(ROOT, ".env")
-    if not os.path.exists(env_path):
-        print("  .env .................. not found (using defaults)")
+def check_config():
+    """Verify config.json exists."""
+    config_path = os.path.join(ROOT, "config.json")
+    if os.path.exists(config_path):
+        print("  config.json ........... OK")
     else:
-        print("  .env .................. OK")
+        print("\nERROR: config.json not found.\n")
+        print("  1. Copy config.json.example to config.json")
+        print("  2. Edit config.json and add your Composer API credentials")
+        print("  3. Run this script again\n")
+        print("Your API credentials never leave your machine. See the README for details.")
+        sys.exit(1)
 
 
 def check_prerequisites():
@@ -101,8 +92,7 @@ def check_prerequisites():
     print("Checking prerequisites...\n")
     check_python()
     check_node()
-    check_accounts()
-    check_env()
+    check_config()
     print()
 
 
@@ -159,7 +149,7 @@ def main():
     # Start backend
     print("\nStarting backend...")
     backend = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
         cwd=BACKEND_DIR,
     )
     processes.append(backend)

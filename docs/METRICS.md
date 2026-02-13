@@ -1,14 +1,12 @@
 # Portfolio Metrics Reference
 
-This document defines every metric calculated in the Composer Portfolio Visualizer, explains the underlying math, describes the backend function that implements it, and shows where each metric surfaces in the UI.
+This document defines every metric calculated in the Composer Portfolio Visualizer and explains the underlying math.
 
 ---
 
 ## Table of Contents
 
-1. [Data Pipeline Overview](#data-pipeline-overview)
-2. [Input Data](#input-data)
-3. [Core Metrics](#core-metrics)
+1. [Core Metrics](#core-metrics)
    - [Daily Return](#1-daily-return)
    - [Cumulative Return](#2-cumulative-return)
    - [Time-Weighted Return (TWR)](#3-time-weighted-return-twr)
@@ -22,99 +20,12 @@ This document defines every metric calculated in the Composer Portfolio Visualiz
    - [Calmar Ratio](#11-calmar-ratio)
    - [Win / Loss Statistics](#12-win--loss-statistics)
    - [Profit Factor](#13-profit-factor)
-4. [Orchestrator Functions](#orchestrator-functions)
-5. [Chart Views](#chart-views)
+2. [Chart Views](#chart-views)
    - [Account-Level Dashboard](#account-level-dashboard)
    - [Symphony Detail — Live](#symphony-detail--live)
    - [Symphony Detail — Backtest](#symphony-detail--backtest)
-6. [Metric Card Layouts](#metric-card-layouts)
-7. [Glossary](#glossary)
-
----
-
-## Data Pipeline Overview
-
-```
-Composer API ──► sync.py (backfill / incremental)
-                    │
-                    ├──► SymphonyDailyPortfolio (date, value, net_deposits)
-                    │         │
-                    │         ▼
-                    ├──► compute_all_metrics()   ← single metric engine
-                    │         │
-                    │         ▼
-                    ├──► SymphonyDailyMetrics (all rolling metrics per day)
-                    │
-                    ▼
-              API Endpoints
-                    │
-        ┌───────────┼───────────────┐
-        ▼           ▼               ▼
-  /performance   /summary      /backtest
-   (chart data)  (card metrics) (pre-computed)
-        │           │               │
-        └───────────┼───────────────┘
-                    ▼
-              Frontend Views
-         (charts + metric cards)
-```
-
-All metric math lives in **one file**: `backend/app/services/metrics.py`. The frontend consumes pre-computed values from the API — it does not calculate metrics itself (except date lookups for best/worst day tooltips and client-side backtest filtering for sub-period views).
-
-### Live Intraday Overlay
-
-In addition to the sync-based pipeline above, an intraday live overlay updates metrics every ~60 seconds using data from Composer's `symphony-stats-meta` API (which the Active Symphonies panel already polls):
-
-```
-Every 60s (weekdays, market hours only):
-  symphony-stats-meta API ──► SymphonyInfo[] (value, net_deposits per symphony)
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-              livePV = Σ value  liveND = Σ net_dep  live holdings
-                    │               │               │
-                    ▼               ▼               ▼
-             /summary/live     (chart point)    HoldingsPie
-            (compute_latest_    appended to     + HoldingsList
-             metrics on stored  performance[]   (instant, no
-             series + today)                     animation)
-                    │
-                    ▼
-            MetricCards + PortfolioHeader
-```
-
-**Key endpoints:**
-
-| Endpoint | Description |
-|---|---|
-| `GET /api/summary/live?live_pv=&live_nd=&account_id=&period=` | Portfolio summary with today's value replaced by live symphony data. Uses `compute_latest_metrics()` on the stored daily series with the live "today" row appended/replaced. DB query results cached for 120s. |
-| `GET /api/symphonies/{id}/summary/live?live_pv=&live_nd=&account_id=&period=` | Same pattern for individual symphonies. |
-
-**How it works:**
-1. The stored daily series (from `DailyPortfolio`) is loaded and cached in memory (120s TTL).
-2. If today's date matches the last row, its `portfolio_value` and `net_deposits` are replaced with the live values. Otherwise, a new row is appended.
-3. Intraday deposits are detected automatically: `Δ net_deposits = live_nd − last_stored_nd`. If |Δ| > $0.50, a cash flow event is inferred for MWR's IRR solve.
-4. `compute_latest_metrics()` runs on the full series (including the live today row) but only computes the final day's metrics — avoiding the cost of recomputing all historical days.
-5. Best/worst day dates are not recomputed in the live response (they come from the base `/summary` endpoint on sync).
-
-**Frontend controls:**
-- **Live toggle** (top-right of dashboard): Enables/disables live overlay. Persisted in `localStorage`. When disabled, base sync-time values are restored.
-- **Market hours guard** (`isMarketOpen()`): Skips the live overlay call on weekends and outside 9 AM – 8 PM ET.
-- **Chart point:** A synthetic "today" `PerformancePoint` is appended/updated in the `performance[]` array using approximate TWR/drawdown derived from the last stored data point and today's live return. This appears on all chart timeframes.
-
----
-
-## Input Data
-
-Every metric function ultimately consumes three arrays extracted from `daily_rows`:
-
-| Field | Type | Description |
-|---|---|---|
-| `portfolio_value` | `float` | End-of-day total market value of the portfolio or symphony |
-| `net_deposits` | `float` | Cumulative sum of all deposits minus withdrawals as of that date |
-| `date` | `date` | Calendar date |
-
-Additionally, `cash_flow_events` (a list of `{date, amount}` dicts representing external deposits/withdrawals) are used for MWR calculation. For symphonies, cash flow events are **inferred** from day-over-day changes in `net_deposits` (any change > $0.50 is treated as a cash flow).
+3. [Metric Card Layouts](#metric-card-layouts)
+4. [Glossary](#glossary)
 
 ---
 
@@ -792,46 +703,12 @@ profit_factor = Σ(positive returns) / |Σ(negative returns)|
 
 ---
 
-## Orchestrator Functions
-
-### `compute_all_metrics()`
-
-The main orchestrator. Takes the full daily time series and produces **one row of metrics per day** — a rolling computation where each day's metrics reflect the entire history up to that point.
-
-**Location:** `backend/app/services/metrics.py`, line 231
-
-**Inputs:**
-- `daily_rows` — list of `{date, portfolio_value, net_deposits}` dicts
-- `cash_flow_events` — list of `{date, amount}` dicts
-- `benchmark_closes` — (optional, unused currently)
-- `risk_free_rate` — annualized rate (default: 5%)
-
-**Output:** list of dicts, one per day, with all metric columns.
-
-**Key behavior:**
-- For each day `i`, metrics are computed over the window `[0, i]`
-- All values are stored as **rounded percentages** (e.g., 8.05% stored as `8.05`, not `0.0805`)
-- The risk-free rate is converted to a daily rate: `rf_daily = (1 + rf_annual)^(1/252) - 1`
-- This function is called by both the sync engine (for DB storage) and the `/summary` endpoint (for on-the-fly period queries)
-
-### `compute_performance_series()`
-
-A lighter-weight version that produces only the fields needed for **chart rendering**: `date`, `portfolio_value`, `net_deposits`, `cumulative_return_pct`, `daily_return_pct`, `time_weighted_return`, `money_weighted_return`, `current_drawdown`.
-
-**Location:** `backend/app/services/metrics.py`, line 339
-
-This is used by the `/performance` endpoint when serving chart data from the live Composer API fallback path.
-
----
-
 ## Chart Views
 
 The application has four chart modes, available in both the account-level dashboard and the symphony detail modal.
 
 ### Account-Level Dashboard
 
-**Component:** `PerformanceChart.tsx`
-**Data source:** `/api/performance?account_id=...&period=...`
 **Chart modes:**
 
 #### Portfolio Value (default)
@@ -869,18 +746,11 @@ The application has four chart modes, available in both the account-level dashbo
 
 ### Symphony Detail — Live
 
-**Component:** `SymphonyDetail.tsx` (Live tab)
-**Data source:** `/api/symphonies/{id}/performance?account_id=...`
-**Chart modes:** Same as account-level (Portfolio Value, TWR, Drawdown) but **without MWR**
-
-The live performance chart uses the same `PerformanceChart` component with `hideMWR={true}` for symphony views.
+Same chart modes as account-level (Portfolio Value, TWR, Drawdown) but **without MWR**.
 
 ---
 
 ### Symphony Detail — Backtest
-
-**Component:** `SymphonyDetail.tsx` (Backtest tab)
-**Data source:** `/api/symphonies/{id}/backtest?account_id=...`
 
 Backtest data comes from Composer's backtest API. The raw data is `dvm_capital` — a dictionary mapping day-offset numbers to simulated portfolio values (e.g., `{"0": 10000, "1": 10050, ...}`). Day offsets are converted to dates using `epochDayToDate()`.
 
@@ -908,9 +778,6 @@ Backtest data comes from Composer's backtest API. The raw data is `dvm_capital` 
 
 ### Account-Level Dashboard Cards
 
-**Component:** `MetricCards.tsx`
-**Data source:** `/api/summary?account_id=...&period=...`
-
 Displayed as a 6-column grid of cards:
 
 | Row 1 | | | | | |
@@ -926,9 +793,6 @@ Tooltips on TWR, MWR, Best Day, Worst Day, and Max Drawdown provide additional c
 ---
 
 ### Symphony Detail — Live Metrics
-
-**Component:** `SymphonyDetail.tsx` (Live Metrics section)
-**Data source:** `/api/symphonies/{id}/summary?account_id=...&period=...`
 
 Displayed above the chart as a 6-column grid of smaller metric tiles:
 
@@ -947,9 +811,6 @@ These metrics are **period-aware** — they update when the period filter change
 ---
 
 ### Symphony Detail — Backtest Metrics
-
-**Component:** `SymphonyDetail.tsx` (Backtest Metrics section, below chart)
-**Data source:** `backtest.summary_metrics` (pre-computed for ALL) or client-side (for sub-periods)
 
 Displayed as a compact horizontal strip of small tags:
 

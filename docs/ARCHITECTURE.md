@@ -7,8 +7,7 @@
 | Backend | Python 3.10+, FastAPI, SQLAlchemy, Pydantic |
 | Database | SQLite (file-based, zero config) |
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, Recharts |
-| External API | Composer Trade REST API, Finnhub WebSocket + REST (optional) |
-| Deployment | Docker Compose (optional) |
+| External API | Composer Trade REST API, Finnhub WebSocket + REST (optional, proxied) |
 
 ## High-Level Overview
 
@@ -134,7 +133,7 @@ composer_portfolio_visualizer/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                # FastAPI app, CORS, lifespan (account discovery)
-│   │   ├── config.py              # Settings from .env + accounts.json loader
+│   │   ├── config.py              # Settings from config.json loader
 │   │   ├── database.py            # SQLAlchemy engine, session, migrations
 │   │   ├── models.py              # ORM table definitions
 │   │   ├── schemas.py             # Pydantic request/response models
@@ -147,13 +146,12 @@ composer_portfolio_visualizer/
 │   │   └── routers/
 │   │       ├── portfolio.py       # Portfolio endpoints (summary, performance, holdings, etc.)
 │   │       ├── symphonies.py      # Symphony endpoints (list, summary, backtest, allocations)
-│   │       └── health.py          # Health check + metrics guide
+│   │       └── health.py          # Health check, metrics guide, Finnhub proxy
 │   ├── tests/
 │   │   ├── test_metrics.py        # 83 metric computation tests
 │   │   └── conftest.py            # Shared test fixtures
 │   ├── data/                      # SQLite database (auto-created)
-│   ├── requirements.txt
-│   └── Dockerfile
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
@@ -184,14 +182,11 @@ composer_portfolio_visualizer/
 │   │       ├── api.ts             # Backend API client + TypeScript interfaces
 │   │       ├── marketHours.ts     # US market hours detection
 │   │       └── utils.ts           # Tailwind class merge utility
-│   ├── package.json
-│   └── Dockerfile
+│   └── package.json
 ├── docs/
 │   ├── ARCHITECTURE.md            # This file
 │   └── METRICS.md                 # Detailed metric formulas
-├── accounts.json.example          # Credential template (multi-account)
-├── .env.example                   # Optional config overrides
-├── docker-compose.yml
+├── config.json.example            # Configuration template (credentials + settings)
 ├── start.py                       # One-command launcher
 └── README.md
 ```
@@ -203,10 +198,12 @@ composer_portfolio_visualizer/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | Health check |
-| GET | `/api/config` | Client-safe config (Finnhub key, export status) |
+| GET | `/api/config` | Client-safe config (Finnhub availability, export status) |
 | POST | `/api/config/symphony-export` | Save symphony export local path |
 | POST | `/api/config/screenshot` | Save daily snapshot configuration |
 | POST | `/api/screenshot` | Upload PNG screenshot to configured folder |
+| GET | `/api/finnhub/quote` | Proxy: fetch Finnhub quotes server-side (comma-separated symbols) |
+| WS | `/api/finnhub/ws` | Proxy: WebSocket relay to Finnhub (keeps API key server-side) |
 | GET | `/api/metrics-guide` | Serve METRICS.md as plain text |
 | GET | `/api/accounts` | List discovered sub-accounts |
 | GET | `/api/summary` | Portfolio summary with all latest metrics (computed live) |
@@ -253,7 +250,7 @@ All portfolio endpoints accept an optional `account_id` query parameter:
 erDiagram
     accounts {
         text id PK "Composer account UUID"
-        text credential_name "Label from accounts.json"
+        text credential_name "Label from config.json"
         text account_type "INDIVIDUAL, IRA_ROTH, etc."
         text display_name "Friendly name"
         text status
@@ -460,17 +457,17 @@ The application does **not** run a background scheduler or cron job. All syncs a
 
 1. **Manual sync** — User clicks **Update** in the UI → `POST /api/sync` → runs `incremental_update()` (or `full_backfill()` on first run).
 2. **Automatic post-close sync** — The frontend runs a once-per-day check after market close (4:00 PM ET). On mount and every 60 seconds, it checks `isAfterClose()` and a `localStorage` flag (`last_post_close_update`). If the market has closed today and no sync has run yet, it auto-triggers `POST /api/sync` + data refresh. The flag prevents duplicate syncs if the page stays open.
-3. **Gap recovery** — If the app hasn't run for multiple days, `incremental_update()` fetches the full portfolio-history from the Composer API (which returns the complete daily series), so all missing days are backfilled automatically on the next sync.
+3. **Gap recovery** — If the app hasn't run for multiple days, `incremental_update()` fetches the full portfolio-history from the Composer API (which returns the complete daily series), so all missing portfolio days are backfilled automatically on the next sync. Note: per-symphony daily values (`_sync_symphony_daily_incremental`) only capture today's value, so symphony-level charts may have gaps for days the app wasn't running.
 
-This design means the app works correctly whether it runs continuously or is only opened occasionally — no data is lost from downtime.
+This design means the app works correctly whether it runs continuously or is only opened occasionally — no portfolio data is lost from downtime.
 
 ### Real-Time Ticker Quotes
 
-Live price changes per holding are streamed via a Finnhub WebSocket connection:
+Live price changes per holding are streamed via a Finnhub WebSocket connection, **proxied through the backend** so the API key never reaches the browser:
 
-1. On mount, the frontend fetches the Finnhub API key from `GET /api/config` (key is stored in `accounts.json`).
-2. The `useFinnhubQuotes` hook fetches `previousClose` for each holding symbol via the Finnhub REST `/quote` endpoint.
-3. A WebSocket connection to `wss://ws.finnhub.io` subscribes to all holding symbols and streams trade updates.
+1. On mount, the frontend checks `GET /api/config` for `finnhub_configured: true` (the actual key is never sent).
+2. The `useFinnhubQuotes` hook fetches `previousClose` for each holding symbol via the backend proxy `GET /api/finnhub/quote?symbols=...`.
+3. A WebSocket connection to `ws://localhost:8000/api/finnhub/ws` subscribes to all holding symbols. The backend relays messages to/from `wss://ws.finnhub.io` with the API key attached server-side.
 4. Each trade update computes `change = price - previousClose` and `changePct = change / previousClose * 100`.
 5. The `HoldingsList` component displays badges like `+$1.23 (+0.5%)` next to each ticker.
 
@@ -483,7 +480,7 @@ Symphony definitions (logic trees) are automatically exported as JSON files:
 1. During each **daily sync** (`full_backfill` / `incremental_update`), `export_all_symphonies()` runs as a sync step. It calls `GET /api/v0.1/symphonies/{id}/versions` for each symphony and compares the latest version's `created_at` against a stored timestamp in `sync_state`. Only new/changed versions are saved.
 2. When the **backtest endpoint** detects a stale cache (symphony edited since last backtest), it triggers `export_single_symphony()` for immediate export of the changed symphony.
 
-Files are saved locally as `<SymphonyName>/<SymphonyName>_<YYYY-MM-DD>.json`. The local export path is configured via the frontend Settings modal (`POST /api/config/symphony-export`) and persisted in `accounts.json`.
+Files are saved locally as `<SymphonyName>/<SymphonyName>_<YYYY-MM-DD>.json`. The local export path is configured via the frontend Settings modal (`POST /api/config/symphony-export`) and persisted in `config.json`.
 
 ### Daily Snapshot
 
@@ -498,7 +495,7 @@ The snapshot layout is a fixed 1200×900px (4:3) dark card with:
 - One full-width chart (TWR / Portfolio Value / MWR / Drawdown — user-configurable)
 - Metric cards in a 4-column grid (user selects which metrics to include)
 
-Configuration is stored in `accounts.json` under the `screenshot` key and managed via the Settings modal's "Daily Snapshot" section. Options include: account, chart type, date range (preset or custom start date), hide portfolio value, and metric selection.
+Configuration is stored in `config.json` under the `screenshot` key and managed via the Settings modal's "Daily Snapshot" section. Options include: account, chart type, date range (preset or custom start date), hide portfolio value, and metric selection.
 
 ### Schema Migrations
 

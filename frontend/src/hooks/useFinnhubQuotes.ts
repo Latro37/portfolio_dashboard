@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const WS_BASE = API_BASE.replace(/^http/, "ws");
+
 export interface QuoteData {
   price: number;
   change: number;
@@ -11,16 +14,15 @@ export interface QuoteData {
 /**
  * Finnhub WebSocket hook — streams real-time trade prices for a list of symbols.
  *
- * On mount, fetches previousClose for each symbol via the Finnhub REST `/quote`
- * endpoint, then opens a WebSocket to receive live trade updates. Computes
- * dollar change and percent change from previousClose.
+ * All Finnhub communication is proxied through the backend so the API key
+ * never reaches the browser.
  *
  * Auto-reconnects with exponential backoff (max 30s).
  * Stays connected on weekdays from 9:30 AM to midnight ET (regular + extended hours).
  */
 export function useFinnhubQuotes(
   symbols: string[],
-  apiKey: string | null,
+  finnhubEnabled: boolean,
 ): { quotes: Record<string, QuoteData>; connected: boolean } {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [connected, setConnected] = useState(false);
@@ -38,57 +40,54 @@ export function useFinnhubQuotes(
 
   // Check if we should be connected (weekdays 9:30 AM – midnight ET)
   const shouldConnect = useCallback((): boolean => {
-    if (!apiKey || symbols.length === 0) return false;
+    if (!finnhubEnabled || symbols.length === 0) return false;
     const et = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
     const day = et.getDay();
     if (day === 0 || day === 6) return false; // weekend
     const mins = et.getHours() * 60 + et.getMinutes();
     return mins >= 9 * 60 + 30; // 9:30 AM ET through midnight
-  }, [apiKey, symbols.length]);
+  }, [finnhubEnabled, symbols.length]);
 
-  // Fetch previousClose for all symbols via REST
+  // Fetch previousClose for all symbols via backend proxy
   const fetchPreviousCloses = useCallback(async () => {
-    if (!apiKey || symbols.length === 0) return;
+    if (!finnhubEnabled || symbols.length === 0) return;
     const closes: Record<string, number> = {};
-    await Promise.all(
-      symbols.map(async (sym) => {
-        try {
-          const res = await fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${apiKey}`,
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data.pc && data.pc > 0) {
-              closes[sym] = data.pc; // previousClose
-            }
-            // Also seed initial quote from REST data
-            if (data.c && data.c > 0 && data.pc && data.pc > 0) {
-              const change = data.c - data.pc;
-              const changePct = (change / data.pc) * 100;
-              setQuotes((prev) => ({
-                ...prev,
-                [sym]: { price: data.c, change, changePct },
-              }));
-            }
+    try {
+      const res = await fetch(
+        `${API_BASE}/finnhub/quote?symbols=${encodeURIComponent(symbols.join(","))}`,
+      );
+      if (res.ok) {
+        const data: Record<string, { c?: number; pc?: number }> = await res.json();
+        for (const [sym, q] of Object.entries(data)) {
+          if (q.pc && q.pc > 0) {
+            closes[sym] = q.pc;
           }
-        } catch {
-          // Silently skip — badge just won't show for this symbol
+          if (q.c && q.c > 0 && q.pc && q.pc > 0) {
+            const change = q.c - q.pc;
+            const changePct = (change / q.pc) * 100;
+            setQuotes((prev) => ({
+              ...prev,
+              [sym]: { price: q.c!, change, changePct },
+            }));
+          }
         }
-      }),
-    );
+      }
+    } catch {
+      // Silently skip — badge just won't show
+    }
     prevCloseRef.current = { ...prevCloseRef.current, ...closes };
-  }, [apiKey, symbols]);
+  }, [finnhubEnabled, symbols]);
 
-  // Open WebSocket connection
+  // Open WebSocket connection via backend proxy
   const connectWS = useCallback(() => {
-    if (!apiKey || !mountedRef.current) return;
+    if (!finnhubEnabled || !mountedRef.current) return;
 
     // Clean up any existing connection
     if (wsRef.current) {
       try { wsRef.current.close(); } catch { /* ignore */ }
     }
 
-    const ws = new WebSocket(`wss://ws.finnhub.io?token=${apiKey}`);
+    const ws = new WebSocket(`${WS_BASE}/finnhub/ws`);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -150,13 +149,13 @@ export function useFinnhubQuotes(
     ws.onerror = () => {
       // onclose will fire after onerror, triggering reconnect
     };
-  }, [apiKey, symbols, shouldConnect]);
+  }, [finnhubEnabled, symbols, shouldConnect]);
 
   // Main effect: fetch closes + connect WS when symbols or key change
   useEffect(() => {
     mountedRef.current = true;
 
-    if (!apiKey || symbols.length === 0) {
+    if (!finnhubEnabled || symbols.length === 0) {
       setQuotes({});
       setConnected(false);
       return;
@@ -193,7 +192,7 @@ export function useFinnhubQuotes(
       subscribedSymbols.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, symbolsKey]);
+  }, [finnhubEnabled, symbolsKey]);
 
   return { quotes, connected };
 }

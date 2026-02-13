@@ -2,7 +2,7 @@
 
 import { ReactNode } from "react";
 import { Summary } from "@/lib/api";
-import { RefreshCw, Settings, Camera } from "lucide-react";
+import { RefreshCw, Settings, Camera, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   syncing: boolean;
   onSettings?: () => void;
   onSnapshot?: () => void;
+  onHelp?: () => void;
   accountSwitcher?: ReactNode;
   liveToggle?: ReactNode;
   todayDollarChange?: number;
@@ -27,7 +28,7 @@ function fmtPct(v: number) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
-export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapshot, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
+export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapshot, onHelp, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
   const totalPositive = summary.total_return_dollars >= 0;
   const totalPct = summary.cumulative_return_pct;
   const dayDollar = todayDollarChange ?? 0;
@@ -73,6 +74,18 @@ export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapsh
               title="Take screenshot"
             >
               <Camera className="h-4 w-4" />
+            </Button>
+          )}
+          {/* Help button */}
+          {onHelp && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onHelp}
+              className="cursor-pointer h-8 w-8 text-muted-foreground hover:text-foreground"
+              title="Help & documentation"
+            >
+              <HelpCircle className="h-4 w-4" />
             </Button>
           )}
           {/* Settings button */}

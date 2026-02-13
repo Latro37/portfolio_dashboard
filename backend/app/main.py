@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _discover_accounts():
-    """For each credential set in accounts.json, discover sub-accounts and persist to DB."""
+    """For each credential set in config.json, discover sub-accounts and persist to DB."""
     accounts_creds = load_accounts()
     db = SessionLocal()
     try:
@@ -84,7 +84,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
