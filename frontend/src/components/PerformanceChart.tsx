@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { BenchmarkEntry, PerformancePoint } from "@/lib/api";
+import { BenchmarkSelectorRow } from "@/features/charting/BenchmarkSelectorRow";
 import { useBenchmarkCatalog } from "@/features/charting/hooks/useBenchmarkCatalog";
 import { adaptPortfolioChart } from "@/features/charting/portfolioChartAdapter";
 import {
@@ -100,10 +101,6 @@ export function PerformanceChart({
     benchmarksCount: benchmarks.length,
     maxBenchmarks: MAX_BENCHMARKS,
   });
-  const isLightColor = (c: string) => c === "#e4e4e7";
-  const benchBtnStyle = (color: string) => isLightColor(color)
-    ? { backgroundColor: color, color: "#1a1a1a", fontWeight: 700, boxShadow: `0 0 0 1px ${color}` }
-    : { backgroundColor: `${color}20`, color, boxShadow: `0 0 0 1px ${color}66` };
 
   const tradingData = useMemo<ChartSeriesPoint[]>(() => {
     const dataset = adaptPortfolioChart(data, benchmarks);
@@ -545,111 +542,33 @@ export function PerformanceChart({
 
         {/* Benchmark toggle row — hidden in Portfolio mode */}
         {mode !== "portfolio" && hasData && onBenchmarkAdd && (
-          <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
-            <span className="text-[11px] text-muted-foreground mr-1">Benchmark:</span>
-            {["SPY", "QQQ", "TQQQ"].map((t) => {
-              const entry = benchmarks.find((b) => b.ticker === t);
-              const isActive = !!entry;
-              return (
-                <button
-                  key={t}
-                  data-testid={`benchmark-${t}`}
-                  data-active={isActive ? "true" : "false"}
-                  onClick={() => {
-                    if (isActive) { onBenchmarkRemove?.(t); }
-                    else if (benchmarks.length < MAX_BENCHMARKS) { onBenchmarkAdd(t); }
-                  }}
-                  className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    isActive
-                      ? (isLightColor(entry.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : "")
-                      : benchmarks.length >= MAX_BENCHMARKS
-                        ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
-                        : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
-                  }`}
-                  style={isActive && !isLightColor(entry.color) ? benchBtnStyle(entry.color) : undefined}
-                  disabled={!isActive && benchmarks.length >= MAX_BENCHMARKS}
-                >
-                  {t}
-                </button>
-              );
-            })}
-            {!showCustomInput ? (
-              <button
-                onClick={openCustomInput}
-                disabled={benchmarks.length >= MAX_BENCHMARKS}
-                className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${
-                  benchmarks.length >= MAX_BENCHMARKS
-                    ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
-                    : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
-                }`}
-              >
-                +
-              </button>
-            ) : (
-              <div className="relative" ref={dropdownRef}>
-                <form
-                  className="flex items-center gap-1"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    submitCustomBenchmark();
-                  }}
-                >
-                  <input
-                    autoFocus
-                    value={customTickerInput}
-                    onChange={(e) => {
-                      handleInputChange(e.target.value);
-                    }}
-                    placeholder="Symphony name/link or Ticker"
-                    className="w-56 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
-                    onFocus={handleInputFocus}
-                    onBlur={handleInputBlur}
-                  />
-                  <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
-                  <button
-                    type="button"
-                    onClick={refreshCatalog}
-                    className="cursor-pointer rounded-md bg-muted/50 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    title="Refresh symphony list"
-                  >
-                    R
-                  </button>
-                </form>
-                {catalogDropdownOpen && catalogMatches.length > 0 && (
-                  <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-md border border-border/50 bg-card shadow-lg max-h-48 overflow-y-auto">
-                    {catalogMatches.map((item) => (
-                      <button
-                        key={item.symphony_id}
-                        type="button"
-                        className="w-full cursor-pointer px-3 py-1.5 text-left text-xs hover:bg-muted/60 flex items-center justify-between gap-2"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          selectCatalogItem(item.symphony_id);
-                        }}
-                      >
-                        <span className="truncate text-foreground">{item.name}</span>
-                        <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-medium ${
-                          item.source === "invested" ? "bg-emerald-500/20 text-emerald-400" :
-                          item.source === "watchlist" ? "bg-blue-500/20 text-blue-400" :
-                          "bg-amber-500/20 text-amber-400"
-                        }`}>{item.source}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {benchmarks.filter((b) => !["SPY", "QQQ", "TQQQ"].includes(b.ticker)).map((b) => (
-              <button
-                key={b.ticker}
-                onClick={() => onBenchmarkRemove?.(b.ticker)}
-                className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${isLightColor(b.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : ""}`}
-                style={!isLightColor(b.color) ? benchBtnStyle(b.color) : undefined}
-              >
-                {b.label} x
-              </button>
-            ))}
-          </div>
+          <BenchmarkSelectorRow
+            benchmarks={benchmarks}
+            maxBenchmarks={MAX_BENCHMARKS}
+            showCustomInput={showCustomInput}
+            customTickerInput={customTickerInput}
+            catalogDropdownOpen={catalogDropdownOpen}
+            catalogMatches={catalogMatches}
+            dropdownRef={dropdownRef}
+            onPresetToggle={(ticker) => {
+              const isActive = benchmarks.some((benchmark) => benchmark.ticker === ticker);
+              if (isActive) {
+                onBenchmarkRemove?.(ticker);
+                return;
+              }
+              if (benchmarks.length < MAX_BENCHMARKS) {
+                onBenchmarkAdd(ticker);
+              }
+            }}
+            onOpenCustomInput={openCustomInput}
+            onInputChange={handleInputChange}
+            onInputFocus={handleInputFocus}
+            onInputBlur={handleInputBlur}
+            onSubmitCustom={submitCustomBenchmark}
+            onRefreshCatalog={refreshCatalog}
+            onSelectCatalogItem={selectCatalogItem}
+            onRemoveBenchmark={(ticker) => onBenchmarkRemove?.(ticker)}
+          />
         )}
       </CardContent>
     </Card>
