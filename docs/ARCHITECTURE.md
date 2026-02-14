@@ -242,7 +242,7 @@ All portfolio endpoints accept an optional `account_id` query parameter:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/benchmark-history` | Ticker benchmark (yfinance): TWR, drawdown, MWR series |
+| GET | `/api/benchmark-history` | Ticker benchmark (Stooq historical + Finnhub live quote): TWR, drawdown, MWR series |
 | GET | `/api/symphony-benchmark/{id}` | Symphony benchmark: backtest → BenchmarkPoint[] format |
 
 ## Database Schema
@@ -414,10 +414,14 @@ The dashboard displays the cumulative-based variant as "Annualized Return" since
 
 All chart views (Dashboard, SymphonyDetail live + backtest) support a benchmark overlay:
 
-- **Predefined tickers**: SPY, QQQ, TQQQ via yfinance historical data (`/api/benchmark-history`)
+- **Predefined tickers**: SPY, QQQ, TQQQ via Stooq historical candles; today's point uses Finnhub quote (`/api/benchmark-history`)
 - **Custom tickers**: Any valid ticker symbol via the `+` input
 - **Symphony name search**: Type 2+ characters to search the symphony catalog by name. The catalog is cached in `symphony_catalog` (SQLite) and auto-refreshes every hour or on sync. Currently populated from invested symphonies (`symphony-stats-meta`). Watchlist/draft endpoints (`backtest-api.composer.trade`) require web session auth and are not accessible via API keys.
 - **Symphony backtests**: Paste a Composer symphony URL (e.g. `https://app.composer.trade/symphony/{id}/details`) or raw ID. The frontend detects `composer.trade/symphony/` URLs and routes to `/api/symphony-benchmark/{id}`.
+
+Split-event source for holdings reconstruction:
+- Primary: Finnhub `/stock/split` (if plan permits)
+- Fallback: Polygon `/v3/reference/splits` when `polygon_api_key` is configured
 
 Symphony benchmark fetching loops through all credential sets to find private symphonies across accounts. The symphony name (clamped to 21 characters) is displayed as the label. Benchmark return data is rebased to start at 0% from the chart's first visible date using growth-factor division.
 

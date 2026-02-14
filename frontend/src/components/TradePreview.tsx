@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { api, TradePreviewItem } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
@@ -52,8 +52,13 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [isFinalPreview, setIsFinalPreview] = useState(false);
   const [priceQuotes, setPriceQuotes] = useState<Record<string, PriceQuote>>({});
+  const tradesRef = useRef<TradePreviewItem[]>([]);
 
-  const fetchPrices = async (tickers: string[]) => {
+  useEffect(() => {
+    tradesRef.current = trades;
+  }, [trades]);
+
+  const fetchPrices = useCallback(async (tickers: string[]) => {
     if (!finnhubConfigured || tickers.length === 0 || !isMarketOpen()) return;
     const results: Record<string, PriceQuote> = {};
     try {
@@ -72,34 +77,34 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
       }
     } catch { /* skip */ }
     setPriceQuotes((prev) => ({ ...prev, ...results }));
-  };
+  }, [finnhubConfigured]);
 
-  const fetchPreview = async () => {
+  const fetchPreview = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await api.getTradePreview(accountId);
       const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
       const pastCutoff = nowET.getHours() > 15 || (nowET.getHours() === 15 && nowET.getMinutes() >= 40);
-      if (data.length === 0 && pastCutoff && trades.length > 0) {
+      if (data.length === 0 && pastCutoff && tradesRef.current.length > 0) {
         setIsFinalPreview(true);
       } else {
         setTrades(data);
         setLastRefreshed(new Date());
         setIsFinalPreview(false);
         const uniqueTickers = [...new Set(data.map((t) => t.ticker))];
-        fetchPrices(uniqueTickers);
+        await fetchPrices(uniqueTickers);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load trade preview");
     } finally {
       setLoading(false);
     }
-  };
+  }, [accountId, fetchPrices]);
 
   useEffect(() => {
     if (accountId) fetchPreview();
-  }, [accountId]);
+  }, [accountId, fetchPreview]);
 
   useAutoRefresh(fetchPreview, 60_000, autoRefreshEnabled);
 
@@ -214,7 +219,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
               </tr>
             </thead>
             <tbody className="text-sm">
-              {grouped.map((row, i) => {
+              {grouped.map((row) => {
                 const key = `${row.ticker}|${row.side}`;
                 const isMulti = row.symphonies.length > 1;
                 const isOpen = expanded.has(key);

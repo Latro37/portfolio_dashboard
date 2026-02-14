@@ -302,6 +302,7 @@ export interface ScreenshotConfig {
 export interface AppConfig {
   finnhub_api_key: string | null;
   finnhub_configured: boolean;
+  polygon_configured?: boolean;
   symphony_export: SymphonyExportStatus | null;
   screenshot: ScreenshotConfig | null;
   test_mode: boolean;

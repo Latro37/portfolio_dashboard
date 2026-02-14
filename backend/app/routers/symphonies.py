@@ -33,6 +33,14 @@ TEST_CREDENTIAL = "__TEST__"
 _TEST_META_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "test_symphony_meta.json")
 
 
+def _parse_iso_date(value: str, field_name: str) -> date:
+    """Parse a YYYY-MM-DD date string or raise HTTP 400."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(400, f"Invalid {field_name}: expected YYYY-MM-DD")
+
+
 def _compute_backtest_summary(dvm_capital: Dict, first_day: int, last_market_day: int) -> Dict:
     """Compute summary metrics from backtest dvm_capital series.
 
@@ -579,8 +587,10 @@ def get_symphony_summary(
 
     # Apply date filters: custom dates take precedence over period presets
     if start_date or end_date:
-        sd = date.fromisoformat(start_date) if start_date else None
-        ed = date.fromisoformat(end_date) if end_date else None
+        sd = _parse_iso_date(start_date, "start_date") if start_date else None
+        ed = _parse_iso_date(end_date, "end_date") if end_date else None
+        if sd and ed and sd > ed:
+            raise HTTPException(400, "start_date cannot be after end_date")
         rows = [r for r in rows if (sd is None or r.date >= sd) and (ed is None or r.date <= ed)]
     elif period and period != "ALL":
         all_dates = [r.date for r in rows]
@@ -683,8 +693,10 @@ def get_symphony_summary_live(
             raise HTTPException(404, "No stored data for this symphony.")
 
         if start_date or end_date:
-            sd = date.fromisoformat(start_date) if start_date else None
-            ed = date.fromisoformat(end_date) if end_date else None
+            sd = _parse_iso_date(start_date, "start_date") if start_date else None
+            ed = _parse_iso_date(end_date, "end_date") if end_date else None
+            if sd and ed and sd > ed:
+                raise HTTPException(400, "start_date cannot be after end_date")
             rows = [r for r in rows if (sd is None or r.date >= sd) and (ed is None or r.date <= ed)]
         elif period and period != "ALL":
             all_dates = [r.date for r in rows]

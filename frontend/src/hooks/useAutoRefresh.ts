@@ -19,7 +19,10 @@ export function useAutoRefresh(
 ) {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const fnRef = useRef(fn);
-  fnRef.current = fn;
+
+  useEffect(() => {
+    fnRef.current = fn;
+  }, [fn]);
 
   const refresh = useCallback(async () => {
     await fnRef.current();

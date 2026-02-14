@@ -25,16 +25,20 @@ export function HelpModal({ onClose }: Props) {
   }, []);
 
   useEffect(() => {
-    if (view === "menu") {
-      setMarkdown(null);
-      return;
-    }
-    setMarkdown(null);
+    if (view === "menu") return;
+    let cancelled = false;
     const endpoint = view === "user-guide" ? "/user-guide" : "/metrics-guide";
     fetch(`${API_BASE}${endpoint}`)
       .then((r) => r.text())
-      .then(setMarkdown)
-      .catch(() => setMarkdown("Failed to load guide."));
+      .then((text) => {
+        if (!cancelled) setMarkdown(text);
+      })
+      .catch(() => {
+        if (!cancelled) setMarkdown("Failed to load guide.");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [view]);
 
   const handleContentClick = (e: React.MouseEvent) => {
@@ -77,7 +81,10 @@ export function HelpModal({ onClose }: Props) {
             <h2 className="text-xl font-semibold text-foreground mb-6 text-center">Help & Documentation</h2>
             <div className="grid gap-4 max-w-md mx-auto">
               <button
-                onClick={() => setView("user-guide")}
+                onClick={() => {
+                  setMarkdown(null);
+                  setView("user-guide");
+                }}
                 className="cursor-pointer flex items-center gap-4 rounded-xl border border-border/50 p-5 text-left hover:bg-muted/50 transition-colors"
               >
                 <BookOpen className="h-6 w-6 text-emerald-400 shrink-0" />
@@ -87,7 +94,10 @@ export function HelpModal({ onClose }: Props) {
                 </div>
               </button>
               <button
-                onClick={() => setView("metrics-guide")}
+                onClick={() => {
+                  setMarkdown(null);
+                  setView("metrics-guide");
+                }}
                 className="cursor-pointer flex items-center gap-4 rounded-xl border border-border/50 p-5 text-left hover:bg-muted/50 transition-colors"
               >
                 <Calculator className="h-6 w-6 text-emerald-400 shrink-0" />

@@ -65,9 +65,6 @@ function makeDateFormatter(data: { date: string }[]) {
     return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 }
-function formatValue(v: number): string {
-  return "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
-}
 function formatPctAxis(v: number): string {
   return v.toFixed(2) + "%";
 }
@@ -79,12 +76,37 @@ function epochDayToDate(dayNum: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
-const TOOLTIP_STYLE = {
-  backgroundColor: "#18181b",
-  border: "1px solid #27272a",
-  borderRadius: 8,
-  fontSize: 13,
+type TooltipEntry = {
+  dataKey?: string | number;
+  value?: number | string | ReadonlyArray<number | string>;
 };
+
+type ChartTooltipProps = {
+  active?: boolean;
+  payload?: ReadonlyArray<TooltipEntry>;
+  label?: string | number;
+};
+
+type BacktestChartPoint = {
+  date: string;
+  value: number;
+  twr: number;
+  drawdown: number;
+  [key: string]: number | string | null | undefined;
+};
+
+type LiveChartPoint = PerformancePoint & {
+  [key: string]: number | string | null | undefined;
+};
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 // Custom tooltip for backtest chart with overlay delta + prev day delta (backtest is baseline)
 const btDCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
@@ -95,37 +117,39 @@ function backtestOverlayTooltip(
   oKey: string, oLabel: string,
   showOverlay: boolean,
   fmtDate: (d: string) => string,
-  chartData: any[],
+  chartData: BacktestChartPoint[],
   benchSuffix: string,
   activeBenchmarks: BenchmarkEntry[],
-  benchColors: string[],
 ) {
-  return ({ active, payload, label }: any) => {
-    if (!active || !payload?.length) return null;
-    const idx = chartData.findIndex((d: any) => d.date === label);
-    const prev: any = idx > 0 ? chartData[idx - 1] : null;
-    const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
-    const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
-    const pVal = primaryEntry?.value as number | undefined;
-    const oVal = overlayEntry?.value as number | undefined;
+  function BacktestOverlayTooltipContent({ active, payload, label }: ChartTooltipProps) {
+    if (!active || !payload?.length || label == null) return null;
+
+    const labelText = String(label);
+    const idx = chartData.findIndex((d) => d.date === labelText);
+    const prev = idx > 0 ? chartData[idx - 1] : null;
+    const primaryEntry = payload.find((p) => p.dataKey === primaryKey);
+    const overlayEntry = payload.find((p) => p.dataKey === oKey);
+    const pVal = toFiniteNumber(primaryEntry?.value);
+    const oVal = toFiniteNumber(overlayEntry?.value);
     const hasBoth = pVal != null && oVal != null;
     const delta = hasBoth ? pVal - oVal : null;
-    const pPrev = prev ? prev[primaryKey] : null;
-    const pDayD = pVal != null && pPrev != null ? Number(pVal) - Number(pPrev) : null;
+    const pPrev = prev ? toFiniteNumber(prev[primaryKey]) : null;
+    const pDayD = pVal != null && pPrev != null ? pVal - pPrev : null;
     const pDC = pDayD != null ? btDCol(pDayD) : "#71717a";
     const dDC = delta != null ? btDCol(delta) : "#71717a";
     const hasBench = activeBenchmarks.length > 0;
     const singleBench = activeBenchmarks.length === 1;
+
     return (
-      <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{fmtDate(String(label))}</p>
+      <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
+        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{fmtDate(labelText)}</p>
         {pVal != null && (
           <div>
             <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
               {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
             </p>
             {!showOverlay && !hasBench && pDayD != null && (
-              <p key={`bpd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Δ to Prev. Day: {btFmtDelta(pDayD)}</p>
+              <p key={`bpd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Delta to Prev. Day: {btFmtDelta(pDayD)}</p>
             )}
           </div>
         )}
@@ -138,12 +162,12 @@ function backtestOverlayTooltip(
         )}
         {showOverlay && delta != null && (
           <p key={`bdl-${dDC}`} style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: dDC }}>
-            Δ : {btFmtDelta(delta)}
+            Delta : {btFmtDelta(delta)}
           </p>
         )}
         {activeBenchmarks.map((bench, i) => {
-          const bEntry = payload.find((p: any) => p.dataKey === `bench_${i}_${benchSuffix}`);
-          const bVal = bEntry?.value as number | undefined;
+          const bEntry = payload.find((p) => p.dataKey === `bench_${i}_${benchSuffix}`);
+          const bVal = toFiniteNumber(bEntry?.value);
           if (bVal == null) return null;
           return (
             <div key={bench.ticker}>
@@ -151,8 +175,8 @@ function backtestOverlayTooltip(
                 {bench.label} : {formatPctAxis(bVal)}
               </p>
               {singleBench && pVal != null && (
-                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
-                  Δ : {btFmtDelta(pVal - bVal)}
+                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? "#10b981" : "#ef4444" }}>
+                  Delta : {btFmtDelta(pVal - bVal)}
                 </p>
               )}
             </div>
@@ -160,7 +184,9 @@ function backtestOverlayTooltip(
         })}
       </div>
     );
-  };
+  }
+
+  return BacktestOverlayTooltipContent;
 }
 
 // --- Metric card ---
@@ -187,6 +213,7 @@ function Metric({ label, value, color, subValue, tooltip, valueTooltip, subValue
 
 type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL" | "OOS";
 const PERIODS: Period[] = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"];
+const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
 function isWeekday(dateStr: string): boolean {
   const day = new Date(dateStr + "T00:00").getDay();
@@ -213,10 +240,10 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [liveData, setLiveData] = useState<PerformancePoint[]>([]);
   const [backtest, setBacktest] = useState<SymphonyBacktest | null>(null);
   const [loadingLive, setLoadingLive] = useState(true);
-  const [loadingBacktest, setLoadingBacktest] = useState(false);
+  const [loadingBacktest, setLoadingBacktest] = useState(true);
   const [liveAllocations, setLiveAllocations] = useState<Record<string, Record<string, number>>>({});
   const [tradePreview, setTradePreview] = useState<SymphonyTradePreview | null>(null);
-  const [loadingTradePreview, setLoadingTradePreview] = useState(false);
+  const [loadingTradePreview, setLoadingTradePreview] = useState(true);
   const [tradePreviewRefreshedAt, setTradePreviewRefreshedAt] = useState<Date | null>(null);
   const tradePreviewRef = useRef<HTMLDivElement>(null);
   const [period, setPeriod] = useState<Period>("ALL");
@@ -241,7 +268,6 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
   const btDropdownRef = useRef<HTMLDivElement>(null);
-  const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
   const MAX_BENCHMARKS = 3;
   const isLightColor = (c: string) => c === "#e4e4e7";
   const benchBtnStyle = (color: string) => isLightColor(color)
@@ -280,11 +306,10 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   }, []);
 
   const clampLabel = (str: string) => str.length > 21 ? str.slice(0, 19) + "\u2026" : str;
-  const pickColor = (current: BenchmarkEntry[]) => BENCH_COLORS.find((c) => !current.some((b) => b.color === c)) || BENCH_COLORS[0];
 
   const handleBenchmarkAdd = useCallback((ticker: string) => {
     if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
-    const color = pickColor(benchmarks);
+    const color = BENCH_COLORS.find((c) => !benchmarks.some((b) => b.color === c)) || BENCH_COLORS[0];
     const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
     setBenchmarks((prev) => [...prev, placeholder]);
     if (ticker.startsWith("symphony:")) {
@@ -308,27 +333,45 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
   // Fetch live performance on mount
   useEffect(() => {
-    setLoadingLive(true);
+    let active = true;
     api
       .getSymphonyPerformance(s.id, s.account_id)
-      .then((data) => { setLiveData(data); baseLiveDataRef.current = data; })
-      .catch(() => { setLiveData([]); baseLiveDataRef.current = []; })
-      .finally(() => setLoadingLive(false));
+      .then((data) => {
+        if (!active) return;
+        setLiveData(data);
+        baseLiveDataRef.current = data;
+      })
+      .catch(() => {
+        if (!active) return;
+        setLiveData([]);
+        baseLiveDataRef.current = [];
+      })
+      .finally(() => {
+        if (active) setLoadingLive(false);
+      });
+    return () => { active = false; };
   }, [s.id, s.account_id]);
 
   // Fetch backtest eagerly on mount
-  const fetchBacktest = useCallback((forceRefresh = false) => {
-    setLoadingBacktest(true);
-    api
+  const loadBacktest = useCallback((forceRefresh = false) => {
+    return api
       .getSymphonyBacktest(s.id, s.account_id, forceRefresh)
       .then(setBacktest)
-      .catch(() => setBacktest(null))
-      .finally(() => setLoadingBacktest(false));
+      .catch(() => setBacktest(null));
   }, [s.id, s.account_id]);
 
+  const fetchBacktest = useCallback((forceRefresh = false) => {
+    setLoadingBacktest(true);
+    loadBacktest(forceRefresh).finally(() => setLoadingBacktest(false));
+  }, [loadBacktest]);
+
   useEffect(() => {
-    fetchBacktest();
-  }, [fetchBacktest]);
+    let active = true;
+    loadBacktest().finally(() => {
+      if (active) setLoadingBacktest(false);
+    });
+    return () => { active = false; };
+  }, [loadBacktest]);
 
   // Fetch live allocation history
   useEffect(() => {
@@ -339,21 +382,28 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   }, [s.id, s.account_id]);
 
   // Fetch trade preview
-  const fetchTradePreview = () => {
-    setLoadingTradePreview(true);
-    api
+  const loadTradePreview = useCallback(() => {
+    return api
       .getSymphonyTradePreview(s.id, s.account_id)
       .then((data) => {
         setTradePreview(data);
         setTradePreviewRefreshedAt(new Date());
       })
-      .catch(() => setTradePreview(null))
-      .finally(() => setLoadingTradePreview(false));
-  };
+      .catch(() => setTradePreview(null));
+  }, [s.id, s.account_id]);
+
+  const fetchTradePreview = useCallback(() => {
+    setLoadingTradePreview(true);
+    loadTradePreview().finally(() => setLoadingTradePreview(false));
+  }, [loadTradePreview]);
 
   useEffect(() => {
-    fetchTradePreview();
-  }, [s.id, s.account_id]);
+    let active = true;
+    loadTradePreview().finally(() => {
+      if (active) setLoadingTradePreview(false);
+    });
+    return () => { active = false; };
+  }, [loadTradePreview]);
 
   // Refresh live summary metrics using live symphony data
   const refreshLiveMetrics = useCallback(() => {
@@ -413,7 +463,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
       refreshLiveMetrics();
     }, 60_000);
     return () => clearInterval(id);
-  }, [s.id, s.account_id, refreshLiveMetrics]);
+  }, [fetchTradePreview, refreshLiveMetrics]);
 
   // Scroll to trade preview section if requested
   useEffect(() => {
@@ -457,7 +507,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   }, [liveData, period, customStart, customEnd, oosDate]);
 
   // Compute backtest chart data
-  const backtestChartData = useMemo(() => {
+  const backtestChartData = useMemo<BacktestChartPoint[]>(() => {
     if (!backtest) return [];
     const dvm = backtest.dvm_capital;
     // dvm_capital is {symphony_id: {day_number: value}}
@@ -498,7 +548,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   };
 
   // Filter backtest data by period/custom dates (client-side)
-  const filteredBacktestData = useMemo(() => {
+  const filteredBacktestData = useMemo<BacktestChartPoint[]>(() => {
     if (!backtestChartData.length) return [];
     const start = customStart || (period === "OOS" ? oosDate : periodStartDate(period));
     const end = customEnd || "";
@@ -535,8 +585,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   // The overlay is rebased multiplicatively so it starts at 0% on the first
   // overlapping date: rebased = ((1+twr)/(1+baseTwr) - 1) * 100.
   // This ensures both series are on the same scale.
-  const mergedLiveData = useMemo(() => {
-    if (!filteredLiveData.length) return filteredLiveData;
+  const mergedLiveData = useMemo<LiveChartPoint[]>(() => {
+    if (!filteredLiveData.length) return filteredLiveData as LiveChartPoint[];
 
     // Rebase live TWR to start at 0% from the first visible date
     const liveBaseFactor = 1 + filteredLiveData[0].time_weighted_return / 100;
@@ -555,7 +605,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
     // Compute rebased live drawdown from rebased TWR (tracks peak within visible window)
     let peakGrowth = 1;
-    return filteredLiveData.map((pt) => {
+    return filteredLiveData.map((pt): LiveChartPoint => {
       const rebasedTwr = liveBaseFactor !== 0
         ? ((1 + pt.time_weighted_return / 100) / liveBaseFactor - 1) * 100
         : pt.time_weighted_return;
@@ -574,7 +624,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     });
   }, [filteredLiveData, filteredBacktestData]);
 
-  const mergedBacktestData = useMemo(() => {
+  const mergedBacktestData = useMemo<BacktestChartPoint[]>(() => {
     if (!filteredBacktestData.length) return filteredBacktestData;
     const liveByDate: Record<string, number> = {};
     for (const pt of filteredLiveData) liveByDate[pt.date] = pt.time_weighted_return;
@@ -608,7 +658,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     });
 
     return filteredBacktestData.map((pt) => {
-      const merged: any = {
+      const merged: BacktestChartPoint = {
         ...pt,
         liveTwr: liveByDate[pt.date] != null && baseFactor != null && baseFactor !== 0
           ? ((1 + liveByDate[pt.date] / 100) / baseFactor - 1) * 100
@@ -881,7 +931,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
               </div>
             ) : (
               <PerformanceChart
-                data={mergedLiveData as any}
+                data={mergedLiveData}
                 period={period}
                 onPeriodChange={(p) => setPeriod(p as Period)}
                 startDate={customStart}
@@ -997,7 +1047,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "return", benchmarks, BENCH_COLORS)} />
+                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "return", benchmarks)} />
                       <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveTwr" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
@@ -1037,7 +1087,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                       <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
                       <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                       <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "drawdown", benchmarks, BENCH_COLORS)} />
+                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "drawdown", benchmarks)} />
                       <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
                       {showLiveOverlay && (
                         <Line type="monotone" dataKey="liveDrawdown" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
@@ -1540,3 +1590,4 @@ function HistoricalAllocations({ tdvmWeights, label, isLive }: { tdvmWeights: Re
     </div>
   );
 }
+

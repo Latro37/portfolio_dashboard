@@ -44,6 +44,29 @@ interface Props {
 
 const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
 
+type TradingChartPoint = PerformancePoint & { [key: string]: number | string | null | undefined };
+
+type TooltipEntry = {
+  dataKey?: string | number;
+  value?: number | string | ReadonlyArray<number | string>;
+  color?: string;
+};
+
+type ChartTooltipProps = {
+  active?: boolean;
+  payload?: ReadonlyArray<TooltipEntry>;
+  label?: string | number;
+};
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function PerformanceChart({
   data,
   startDate,
@@ -103,7 +126,6 @@ export function PerformanceChart({
     return symphonyCatalog.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 8);
   }, [customTickerInput, symphonyCatalog]);
 
-  const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
   const MAX_BENCHMARKS = 3;
   const isLightColor = (c: string) => c === "#e4e4e7";
   const benchBtnStyle = (color: string) => isLightColor(color)
@@ -117,8 +139,8 @@ export function PerformanceChart({
   });
 
   // Merge benchmark data into trading data by date (supports up to 3 benchmarks)
-  const tradingData = useMemo(() => {
-    if (!benchmarks.length) return rawTradingData;
+  const tradingData = useMemo<TradingChartPoint[]>(() => {
+    if (!benchmarks.length) return rawTradingData as TradingChartPoint[];
     const benchStates = benchmarks.map((bench) => {
       const map = new Map(bench.data.map((b: BenchmarkPoint) => [b.date, b]));
       let baseGrowth: number | null = null;
@@ -129,7 +151,7 @@ export function PerformanceChart({
       return { map, baseGrowth: baseGrowth ?? 1, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined, lastMwr: undefined as number | undefined };
     });
     return rawTradingData.map((pt) => {
-      const merged: any = { ...pt };
+      const merged: TradingChartPoint = { ...pt };
       benchStates.forEach((bs, i) => {
         const b = bs.map.get(pt.date);
         if (b != null) {
@@ -188,34 +210,39 @@ export function PerformanceChart({
 
   const fmtDelta = (d: number) => (d >= 0 ? "+" : "") + formatPct(d);
   const dCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
+  const getPointValue = (point: TradingChartPoint | null, key: string) => toFiniteNumber(point?.[key]);
 
   // Custom tooltip for TWR/Drawdown modes with overlay delta + prev day delta
   const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string, benchSuffix: string) => {
     const multiLine = (showOverlay && !!oKey) || hasBenchmark;
-    return ({ active, payload, label }: any) => {
-      if (!active || !payload?.length) return null;
-      const idx = tradingData.findIndex((d) => d.date === label);
-      const prev: any = idx > 0 ? tradingData[idx - 1] : null;
-      const primaryEntry = payload.find((p: any) => p.dataKey === primaryKey);
-      const overlayEntry = payload.find((p: any) => p.dataKey === oKey);
-      const pVal = primaryEntry?.value as number | undefined;
-      const oVal = overlayEntry?.value as number | undefined;
+
+    function OverlayTooltipContent({ active, payload, label }: ChartTooltipProps) {
+      if (!active || !payload?.length || label == null) return null;
+
+      const labelText = String(label);
+      const idx = tradingData.findIndex((d) => d.date === labelText);
+      const prev = idx > 0 ? tradingData[idx - 1] : null;
+      const primaryEntry = payload.find((p) => p.dataKey === primaryKey);
+      const overlayEntry = payload.find((p) => p.dataKey === oKey);
+      const pVal = toFiniteNumber(primaryEntry?.value);
+      const oVal = toFiniteNumber(overlayEntry?.value);
       const hasBoth = pVal != null && oVal != null;
       const delta = hasBoth ? pVal - oVal : null;
-      const pPrev = prev ? prev[primaryKey] : null;
-      const pDayD = pVal != null && pPrev != null ? Number(pVal) - Number(pPrev) : null;
+      const pPrev = prev ? getPointValue(prev, primaryKey) : null;
+      const pDayD = pVal != null && pPrev != null ? pVal - pPrev : null;
       const pDC = pDayD != null ? dCol(pDayD) : "#71717a";
       const dDC = delta != null ? dCol(delta) : "#71717a";
+
       return (
-        <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-          <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
+        <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
+          <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
           {pVal != null && (
             <div>
               <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
                 {showOverlay && oKey ? "Live" : primaryLabel} : {formatPct(pVal)}
               </p>
               {!multiLine && pDayD != null && (
-                <p key={`pd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Δ to Prev. Day: {fmtDelta(pDayD)}</p>
+                <p key={`pd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Delta to Prev. Day: {fmtDelta(pDayD)}</p>
               )}
             </div>
           )}
@@ -228,12 +255,12 @@ export function PerformanceChart({
           )}
           {showOverlay && delta != null && (
             <p key={`dl-${dDC}`} style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: dDC }}>
-              Δ : {fmtDelta(delta)}
+              Delta : {fmtDelta(delta)}
             </p>
           )}
           {benchmarks.map((bench, i) => {
-            const bEntry = payload.find((p: any) => p.dataKey === `bench_${i}_${benchSuffix}`);
-            const bVal = bEntry?.value as number | undefined;
+            const bEntry = payload.find((p) => p.dataKey === `bench_${i}_${benchSuffix}`);
+            const bVal = toFiniteNumber(bEntry?.value);
             if (bVal == null) return null;
             return (
               <div key={bench.ticker}>
@@ -241,8 +268,8 @@ export function PerformanceChart({
                   {bench.label} : {formatPct(bVal)}
                 </p>
                 {singleBenchmark && pVal != null && (
-                  <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
-                    Δ : {fmtDelta(pVal - bVal)}
+                  <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? "#10b981" : "#ef4444" }}>
+                    Delta : {fmtDelta(pVal - bVal)}
                   </p>
                 )}
               </div>
@@ -250,31 +277,39 @@ export function PerformanceChart({
           })}
         </div>
       );
-    };
+    }
+
+    return OverlayTooltipContent;
   };
 
   // Custom tooltip for Portfolio mode with prev day delta (not on Deposits)
-  const renderPortfolioTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload?.length) return null;
-    const idx = tradingData.findIndex((d) => d.date === label);
+  const renderPortfolioTooltip = ({ active, payload, label }: ChartTooltipProps) => {
+    if (!active || !payload?.length || label == null) return null;
+
+    const labelText = String(label);
+    const idx = tradingData.findIndex((d) => d.date === labelText);
     const prev = idx > 0 ? tradingData[idx - 1] : null;
+
     return (
-      <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
-        {payload.map((entry: any) => {
-          const val = Number(entry.value);
-          const isDeposits = entry.dataKey === "net_deposits";
-          const name = entry.dataKey === "portfolio_value" ? "Portfolio" : "Deposits";
-          const prevVal = prev ? (prev as any)[entry.dataKey] : null;
-          const dayD = !isDeposits && prevVal != null && prevVal !== 0 ? ((val - Number(prevVal)) / Number(prevVal)) * 100 : null;
+      <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
+        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
+        {payload.map((entry, i) => {
+          const val = toFiniteNumber(entry.value);
+          if (val == null) return null;
+          const dataKey = typeof entry.dataKey === "string" ? entry.dataKey : "";
+          const isDeposits = dataKey === "net_deposits";
+          const name = dataKey === "portfolio_value" ? "Portfolio" : "Deposits";
+          const prevVal = dataKey ? getPointValue(prev, dataKey) : null;
+          const dayD = !isDeposits && prevVal != null && prevVal !== 0 ? ((val - prevVal) / prevVal) * 100 : null;
           const dc = dayD != null ? dCol(dayD) : "#71717a";
+
           return (
-            <div key={entry.dataKey}>
+            <div key={`${dataKey || "series"}-${i}`}>
               <p style={{ margin: 0, lineHeight: 1.6, color: entry.color || "#e4e4e7" }}>
                 {name} : {formatValue(val)}
               </p>
               {dayD != null && (
-                <p key={`pfd-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Δ to Prev. Day: {fmtDelta(dayD)}</p>
+                <p key={`pfd-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Delta to Prev. Day: {fmtDelta(dayD)}</p>
               )}
             </div>
           );
@@ -284,29 +319,32 @@ export function PerformanceChart({
   };
 
   // Custom tooltip for MWR mode with prev day delta
-  const renderMwrTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload?.length) return null;
-    const idx = tradingData.findIndex((d) => d.date === label);
+  const renderMwrTooltip = ({ active, payload, label }: ChartTooltipProps) => {
+    if (!active || !payload?.length || label == null) return null;
+
+    const labelText = String(label);
+    const idx = tradingData.findIndex((d) => d.date === labelText);
     const prev = idx > 0 ? tradingData[idx - 1] : null;
-    const entry = payload.find((p: any) => p.dataKey === "money_weighted_return");
-    const val = entry ? Number(entry.value) : null;
-    const prevVal = prev ? (prev as any).money_weighted_return : null;
-    const dayD = val != null && prevVal != null ? val - Number(prevVal) : null;
+    const entry = payload.find((p) => p.dataKey === "money_weighted_return");
+    const val = toFiniteNumber(entry?.value);
+    const prevVal = prev ? toFiniteNumber(prev.money_weighted_return) : null;
+    const dayD = val != null && prevVal != null ? val - prevVal : null;
     const dc = dayD != null ? dCol(dayD) : "#71717a";
+
     return (
-      <div key={String(label)} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(String(label))}</p>
+      <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
+        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
         {val != null && (
           <>
             <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>MWR : {formatPct(val)}</p>
             {!hasBenchmark && dayD != null && (
-              <p key={`md-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Δ to Prev. Day: {fmtDelta(dayD)}</p>
+              <p key={`md-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Delta to Prev. Day: {fmtDelta(dayD)}</p>
             )}
           </>
         )}
         {benchmarks.map((bench, i) => {
-          const bEntry = payload.find((p: any) => p.dataKey === `bench_${i}_mwr`);
-          const bVal = bEntry?.value as number | undefined;
+          const bEntry = payload.find((p) => p.dataKey === `bench_${i}_mwr`);
+          const bVal = toFiniteNumber(bEntry?.value);
           if (bVal == null) return null;
           return (
             <div key={bench.ticker}>
@@ -314,8 +352,8 @@ export function PerformanceChart({
                 {bench.label} : {formatPct(bVal)}
               </p>
               {singleBenchmark && val != null && (
-                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (val - bVal) >= 0 ? '#10b981' : '#ef4444' }}>
-                  Δ : {fmtDelta(val - bVal)}
+                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (val - bVal) >= 0 ? "#10b981" : "#ef4444" }}>
+                  Delta : {fmtDelta(val - bVal)}
                 </p>
               )}
             </div>
@@ -324,7 +362,6 @@ export function PerformanceChart({
       </div>
     );
   };
-
   const isCustomRange = startDate !== "" || endDate !== "";
   const displayStart = startDate || (hasData ? tradingData[0].date : "");
   const displayEnd = endDate || (hasData ? tradingData[tradingData.length - 1].date : "");
@@ -817,3 +854,4 @@ export function PerformanceChart({
     </Card>
   );
 }
+

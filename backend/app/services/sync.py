@@ -15,6 +15,12 @@ from app.models import (
     SymphonyDailyPortfolio, SymphonyDailyMetrics,
 )
 from app.services.holdings import reconstruct_holdings
+from app.services.finnhub_market_data import (
+    FinnhubAccessError,
+    FinnhubError,
+    get_daily_closes,
+    get_daily_closes_stooq,
+)
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.services.symphony_export import export_all_symphonies
 from app.config import get_settings
@@ -366,11 +372,11 @@ def _sync_holdings_history(db: Session, client: ComposerClient, account_id: str)
 
 
 def _sync_benchmark(db: Session, account_id: str):
-    """Fetch SPY daily closes from yfinance and store.
+    """Fetch benchmark daily closes and store.
 
     Incremental: only fetches from the last stored benchmark date onward.
+    Provider order: Stooq (free historical) -> Finnhub candles fallback.
     """
-    import yfinance as yf
     settings = get_settings()
     ticker = settings.benchmark_ticker
 
@@ -382,27 +388,35 @@ def _sync_benchmark(db: Session, account_id: str):
         return
 
     # Start from last stored benchmark date (minus 1 day buffer) for incremental
-    last_stored = db.query(func.max(BenchmarkData.date)).scalar()
+    last_stored = db.query(func.max(BenchmarkData.date)).filter(
+        BenchmarkData.symbol == ticker
+    ).scalar()
     if last_stored:
         fetch_start = str(last_stored - timedelta(days=1))
     else:
         fetch_start = str(first)
 
-    try:
-        data = yf.download(ticker, start=fetch_start, progress=False)
-        if data.empty:
+    start_date = date.fromisoformat(fetch_start)
+    end_date = date.today()
+    rows = get_daily_closes_stooq(ticker, start_date, end_date)
+    if not rows:
+        try:
+            rows = get_daily_closes(ticker, start_date, end_date)
+        except FinnhubAccessError as e:
+            logger.warning("Failed to fetch benchmark data (Finnhub access): %s", e)
             return
-    except Exception as e:
-        logger.warning("Failed to fetch benchmark data: %s", e)
+        except FinnhubError as e:
+            logger.warning("Failed to fetch benchmark data (Finnhub error): %s", e)
+            return
+    if not rows:
         return
 
     new_count = 0
-    for idx, row in data.iterrows():
-        d = idx.date() if hasattr(idx, "date") else idx
-        close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
+    for d, close_val in rows:
         existing = db.query(BenchmarkData).filter_by(date=d).first()
         if existing:
             existing.close = close_val
+            existing.symbol = ticker
         else:
             db.add(BenchmarkData(date=d, symbol=ticker, close=close_val))
             new_count += 1

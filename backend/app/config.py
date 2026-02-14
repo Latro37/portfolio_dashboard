@@ -122,6 +122,16 @@ def load_finnhub_key() -> Optional[str]:
         return None
 
 
+def load_polygon_key() -> Optional[str]:
+    """Return the Polygon API key from config.json, or None if not configured."""
+    try:
+        data = _load_config_json()
+        key = data.get("polygon_api_key", "")
+        return key if key else None
+    except Exception:
+        return None
+
+
 def _config_json_path() -> str:
     """Return path to config.json."""
     return os.path.join(_PROJECT_ROOT, "config.json")

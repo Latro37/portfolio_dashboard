@@ -28,7 +28,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
 
   // Resolve to a single account UUID (manual entries need a specific account, not "all:...")
   const resolvedSingleAccountId =
-    accountId && !accountId.startsWith("all:") ? accountId : undefined;
+    accountId && accountId !== "all" && !accountId.startsWith("all:") ? accountId : undefined;
 
   const handleAddManual = async () => {
     if (!resolvedSingleAccountId || !manualDate || !manualAmount) return;
