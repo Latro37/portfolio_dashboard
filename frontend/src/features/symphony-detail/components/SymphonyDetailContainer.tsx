@@ -6,6 +6,7 @@ import { SymphonyInfo } from "@/lib/api";
 import { PerformanceChart } from "@/components/PerformanceChart";
 import type { ChartMode } from "@/features/charting/types";
 import { SymphonyBacktestControls } from "@/features/symphony-detail/components/SymphonyBacktestControls";
+import { SymphonyBacktestBenchmarkRow } from "@/features/symphony-detail/components/SymphonyBacktestBenchmarkRow";
 import { SymphonyBacktestChartPanel } from "@/features/symphony-detail/components/SymphonyBacktestChartPanel";
 import { BacktestMetricsSummary } from "@/features/symphony-detail/components/BacktestMetricsSummary";
 import { HistoricalAllocationsTable } from "@/features/symphony-detail/components/HistoricalAllocationsTable";
@@ -183,13 +184,6 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 customEnd={customEnd}
                 filteredBacktestData={filteredBacktestData}
                 oosDate={oosDate}
-                benchmarks={benchmarks}
-                maxBenchmarks={MAX_BENCHMARKS}
-                customInputVisible={btCustomInput}
-                customTickerInput={btCustomTickerInput}
-                catalogDropdownOpen={catalogDropdownOpen}
-                catalogMatches={btCatalogMatches}
-                benchmarkDropdownRef={btDropdownRef}
                 onChartModeChange={setChartMode}
                 onPeriodChange={setPeriod}
                 onCustomStartChange={setCustomStart}
@@ -197,14 +191,6 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 onClearCustomRange={() => {
                   setCustomStart("");
                   setCustomEnd("");
-                }}
-                onAddBenchmark={handleBenchmarkAdd}
-                onRemoveBenchmark={handleBenchmarkRemove}
-                onCustomInputVisibleChange={setBtCustomInput}
-                onCustomTickerInputChange={setBtCustomTickerInput}
-                onCatalogDropdownOpenChange={setCatalogDropdownOpen}
-                onRefreshCatalog={() => {
-                  refreshSymphonyCatalog().catch(() => undefined);
                 }}
               />
 
@@ -218,6 +204,25 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 showLiveOverlay={showLiveOverlay}
                 onToggleLiveOverlay={() => setShowLiveOverlay(!showLiveOverlay)}
                 benchmarks={benchmarks}
+              />
+
+              <SymphonyBacktestBenchmarkRow
+                hasData={filteredBacktestData.length > 0}
+                benchmarks={benchmarks}
+                maxBenchmarks={MAX_BENCHMARKS}
+                customInputVisible={btCustomInput}
+                customTickerInput={btCustomTickerInput}
+                catalogDropdownOpen={catalogDropdownOpen}
+                catalogMatches={btCatalogMatches}
+                benchmarkDropdownRef={btDropdownRef}
+                onAddBenchmark={handleBenchmarkAdd}
+                onRemoveBenchmark={handleBenchmarkRemove}
+                onCustomInputVisibleChange={setBtCustomInput}
+                onCustomTickerInputChange={setBtCustomTickerInput}
+                onCatalogDropdownOpenChange={setCatalogDropdownOpen}
+                onRefreshCatalog={() => {
+                  refreshSymphonyCatalog().catch(() => undefined);
+                }}
               />
 
               <BacktestMetricsSummary btMetrics={btMetrics} show={filteredBacktestData.length >= 2} />
