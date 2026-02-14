@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useId } from "react";
-import { PerformancePoint, BenchmarkEntry, SymphonyCatalogItem, api } from "@/lib/api";
+import { useId, useMemo, useState } from "react";
+import { BenchmarkEntry, PerformancePoint } from "@/lib/api";
+import { useBenchmarkCatalog } from "@/features/charting/hooks/useBenchmarkCatalog";
 import { adaptPortfolioChart } from "@/features/charting/portfolioChartAdapter";
+import {
+  createMwrTooltipRenderer,
+  createOverlayTooltipRenderer,
+  createPortfolioTooltipRenderer,
+} from "@/features/charting/performanceChartTooltips";
 import { calcGradientOffset } from "@/features/charting/transforms";
+import type { ChartMode, ChartSeriesPoint } from "@/features/charting/types";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   AreaChart,
@@ -15,8 +22,6 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-
-type ChartMode = "portfolio" | "twr" | "mwr" | "drawdown";
 
 export type { ChartMode };
 
@@ -45,29 +50,6 @@ interface Props {
 }
 
 const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
-
-type TradingChartPoint = PerformancePoint & { [key: string]: number | string | null | undefined };
-
-type TooltipEntry = {
-  dataKey?: string | number;
-  value?: number | string | ReadonlyArray<number | string>;
-  color?: string;
-};
-
-type ChartTooltipProps = {
-  active?: boolean;
-  payload?: ReadonlyArray<TooltipEntry>;
-  label?: string | number;
-};
-
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
 
 export function PerformanceChart({
   data,
@@ -98,45 +80,34 @@ export function PerformanceChart({
   const setMode = onChartModeChange ?? setInternalMode;
   const [showPortfolio, setShowPortfolio] = useState(true);
   const [showDeposits, setShowDeposits] = useState(true);
-  const [customTickerInput, setCustomTickerInput] = useState("");
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const [symphonyCatalog, setSymphonyCatalog] = useState<SymphonyCatalogItem[]>([]);
-  const [catalogLoaded, setCatalogLoaded] = useState(false);
-  const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Fetch symphony catalog on first open of the custom input
-  useEffect(() => {
-    if (showCustomInput && !catalogLoaded) {
-      api.getSymphonyCatalog().then((items) => { setSymphonyCatalog(items); setCatalogLoaded(true); }).catch(() => setCatalogLoaded(true));
-    }
-  }, [showCustomInput, catalogLoaded]);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!catalogDropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setCatalogDropdownOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [catalogDropdownOpen]);
-
-  const catalogMatches = useMemo(() => {
-    const q = customTickerInput.trim().toLowerCase();
-    if (!q || q.length < 2) return [];
-    return symphonyCatalog.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 8);
-  }, [customTickerInput, symphonyCatalog]);
 
   const MAX_BENCHMARKS = 3;
+  const {
+    customTickerInput,
+    showCustomInput,
+    catalogDropdownOpen,
+    catalogMatches,
+    dropdownRef,
+    openCustomInput,
+    handleInputChange,
+    handleInputFocus,
+    handleInputBlur,
+    submitCustomBenchmark,
+    selectCatalogItem,
+    refreshCatalog,
+  } = useBenchmarkCatalog({
+    onBenchmarkAdd,
+    benchmarksCount: benchmarks.length,
+    maxBenchmarks: MAX_BENCHMARKS,
+  });
   const isLightColor = (c: string) => c === "#e4e4e7";
   const benchBtnStyle = (color: string) => isLightColor(color)
     ? { backgroundColor: color, color: "#1a1a1a", fontWeight: 700, boxShadow: `0 0 0 1px ${color}` }
     : { backgroundColor: `${color}20`, color, boxShadow: `0 0 0 1px ${color}66` };
 
-  const tradingData = useMemo<TradingChartPoint[]>(() => {
+  const tradingData = useMemo<ChartSeriesPoint[]>(() => {
     const dataset = adaptPortfolioChart(data, benchmarks);
-    return dataset.points as TradingChartPoint[];
+    return dataset.points;
   }, [data, benchmarks]);
 
   const hasBenchmark = benchmarks.length > 0;
@@ -165,161 +136,44 @@ export function PerformanceChart({
     "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   const formatPct = (v: number) => v.toFixed(2) + "%";
-
-  const fmtDelta = (d: number) => (d >= 0 ? "+" : "") + formatPct(d);
-  const dCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
-  const getPointValue = (point: TradingChartPoint | null, key: string) => toFiniteNumber(point?.[key]);
-
-  // Custom tooltip for TWR/Drawdown modes with overlay delta + prev day delta
-  const renderOverlayTooltip = (primaryKey: string, primaryLabel: string, oKey: string | undefined, oLabel: string, benchSuffix: string) => {
-    const multiLine = (showOverlay && !!oKey) || hasBenchmark;
-
-    function OverlayTooltipContent({ active, payload, label }: ChartTooltipProps) {
-      if (!active || !payload?.length || label == null) return null;
-
-      const labelText = String(label);
-      const idx = tradingData.findIndex((d) => d.date === labelText);
-      const prev = idx > 0 ? tradingData[idx - 1] : null;
-      const primaryEntry = payload.find((p) => p.dataKey === primaryKey);
-      const overlayEntry = payload.find((p) => p.dataKey === oKey);
-      const pVal = toFiniteNumber(primaryEntry?.value);
-      const oVal = toFiniteNumber(overlayEntry?.value);
-      const hasBoth = pVal != null && oVal != null;
-      const delta = hasBoth ? pVal - oVal : null;
-      const pPrev = prev ? getPointValue(prev, primaryKey) : null;
-      const pDayD = pVal != null && pPrev != null ? pVal - pPrev : null;
-      const pDC = pDayD != null ? dCol(pDayD) : "#71717a";
-      const dDC = delta != null ? dCol(delta) : "#71717a";
-
-      return (
-        <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-          <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
-          {pVal != null && (
-            <div>
-              <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
-                {showOverlay && oKey ? "Live" : primaryLabel} : {formatPct(pVal)}
-              </p>
-              {!multiLine && pDayD != null && (
-                <p key={`pd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Delta to Prev. Day: {fmtDelta(pDayD)}</p>
-              )}
-            </div>
-          )}
-          {showOverlay && oVal != null && (
-            <div>
-              <p style={{ margin: 0, lineHeight: 1.6, color: overlayColor }}>
-                {oLabel} : {formatPct(oVal)}
-              </p>
-            </div>
-          )}
-          {showOverlay && delta != null && (
-            <p key={`dl-${dDC}`} style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: dDC }}>
-              Delta : {fmtDelta(delta)}
-            </p>
-          )}
-          {benchmarks.map((bench, i) => {
-            const bEntry = payload.find((p) => p.dataKey === `bench_${i}_${benchSuffix}`);
-            const bVal = toFiniteNumber(bEntry?.value);
-            if (bVal == null) return null;
-            return (
-              <div key={bench.ticker}>
-                <p style={{ margin: 0, lineHeight: 1.6, color: bench.color }}>
-                  {bench.label} : {formatPct(bVal)}
-                </p>
-                {singleBenchmark && pVal != null && (
-                  <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? "#10b981" : "#ef4444" }}>
-                    Delta : {fmtDelta(pVal - bVal)}
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    return OverlayTooltipContent;
-  };
-
-  // Custom tooltip for Portfolio mode with prev day delta (not on Deposits)
-  const renderPortfolioTooltip = ({ active, payload, label }: ChartTooltipProps) => {
-    if (!active || !payload?.length || label == null) return null;
-
-    const labelText = String(label);
-    const idx = tradingData.findIndex((d) => d.date === labelText);
-    const prev = idx > 0 ? tradingData[idx - 1] : null;
-
-    return (
-      <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
-        {payload.map((entry, i) => {
-          const val = toFiniteNumber(entry.value);
-          if (val == null) return null;
-          const dataKey = typeof entry.dataKey === "string" ? entry.dataKey : "";
-          const isDeposits = dataKey === "net_deposits";
-          const name = dataKey === "portfolio_value" ? "Portfolio" : "Deposits";
-          const prevVal = dataKey ? getPointValue(prev, dataKey) : null;
-          const dayD = !isDeposits && prevVal != null && prevVal !== 0 ? ((val - prevVal) / prevVal) * 100 : null;
-          const dc = dayD != null ? dCol(dayD) : "#71717a";
-
-          return (
-            <div key={`${dataKey || "series"}-${i}`}>
-              <p style={{ margin: 0, lineHeight: 1.6, color: entry.color || "#e4e4e7" }}>
-                {name} : {formatValue(val)}
-              </p>
-              {dayD != null && (
-                <p key={`pfd-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Delta to Prev. Day: {fmtDelta(dayD)}</p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // Custom tooltip for MWR mode with prev day delta
-  const renderMwrTooltip = ({ active, payload, label }: ChartTooltipProps) => {
-    if (!active || !payload?.length || label == null) return null;
-
-    const labelText = String(label);
-    const idx = tradingData.findIndex((d) => d.date === labelText);
-    const prev = idx > 0 ? tradingData[idx - 1] : null;
-    const entry = payload.find((p) => p.dataKey === "money_weighted_return");
-    const val = toFiniteNumber(entry?.value);
-    const prevVal = prev ? toFiniteNumber(prev.money_weighted_return) : null;
-    const dayD = val != null && prevVal != null ? val - prevVal : null;
-    const dc = dayD != null ? dCol(dayD) : "#71717a";
-
-    return (
-      <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
-        {val != null && (
-          <>
-            <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>MWR : {formatPct(val)}</p>
-            {!hasBenchmark && dayD != null && (
-              <p key={`md-${dc}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: dc }}>Delta to Prev. Day: {fmtDelta(dayD)}</p>
-            )}
-          </>
-        )}
-        {benchmarks.map((bench, i) => {
-          const bEntry = payload.find((p) => p.dataKey === `bench_${i}_mwr`);
-          const bVal = toFiniteNumber(bEntry?.value);
-          if (bVal == null) return null;
-          return (
-            <div key={bench.ticker}>
-              <p style={{ margin: 0, lineHeight: 1.6, color: bench.color }}>
-                {bench.label} : {formatPct(bVal)}
-              </p>
-              {singleBenchmark && val != null && (
-                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (val - bVal) >= 0 ? "#10b981" : "#ef4444" }}>
-                  Delta : {fmtDelta(val - bVal)}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
+  const tooltipFormatters = { formatDate, formatValue, formatPct };
+  const renderPortfolioTooltip = createPortfolioTooltipRenderer({
+    tradingData,
+    formatters: tooltipFormatters,
+  });
+  const renderMwrTooltip = createMwrTooltipRenderer({
+    tradingData,
+    benchmarks,
+    singleBenchmark,
+    hasBenchmark,
+    formatters: tooltipFormatters,
+  });
+  const renderTwrTooltip = createOverlayTooltipRenderer({
+    tradingData,
+    benchmarks,
+    singleBenchmark,
+    showOverlay,
+    overlayColor,
+    primaryKey: "time_weighted_return",
+    primaryLabel: "TWR",
+    overlayKey,
+    overlayLabel: overlayLabel || "Backtest",
+    benchmarkSuffix: "return",
+    formatters: tooltipFormatters,
+  });
+  const renderDrawdownTooltip = createOverlayTooltipRenderer({
+    tradingData,
+    benchmarks,
+    singleBenchmark,
+    showOverlay,
+    overlayColor,
+    primaryKey: "current_drawdown",
+    primaryLabel: "Drawdown",
+    overlayKey: drawdownOverlayKey,
+    overlayLabel: overlayLabel || "Backtest",
+    benchmarkSuffix: "drawdown",
+    formatters: tooltipFormatters,
+  });
   const isCustomRange = startDate !== "" || endDate !== "";
   const displayStart = startDate || (hasData ? tradingData[0].date : "");
   const displayEnd = endDate || (hasData ? tradingData[tradingData.length - 1].date : "");
@@ -521,7 +375,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip content={renderOverlayTooltip("time_weighted_return", "TWR", overlayKey, overlayLabel || "Backtest", "return")} />
+              <Tooltip content={renderTwrTooltip} />
               <Area
                 type="monotone"
                 dataKey="time_weighted_return"
@@ -616,7 +470,7 @@ export function PerformanceChart({
                 width={70}
               />
               <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-              <Tooltip content={renderOverlayTooltip("current_drawdown", "Drawdown", drawdownOverlayKey, overlayLabel || "Backtest", "drawdown")} />
+              <Tooltip content={renderDrawdownTooltip} />
               <Area
                 type="monotone"
                 dataKey="current_drawdown"
@@ -721,7 +575,7 @@ export function PerformanceChart({
             })}
             {!showCustomInput ? (
               <button
-                onClick={() => setShowCustomInput(true)}
+                onClick={openCustomInput}
                 disabled={benchmarks.length >= MAX_BENCHMARKS}
                 className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${
                   benchmarks.length >= MAX_BENCHMARKS
@@ -737,36 +591,28 @@ export function PerformanceChart({
                   className="flex items-center gap-1"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    const raw = customTickerInput.trim();
-                    if (!raw || benchmarks.length >= MAX_BENCHMARKS) return;
-                    const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
-                    if (symMatch) {
-                      onBenchmarkAdd?.(`symphony:${symMatch[1]}`);
-                    } else {
-                      onBenchmarkAdd?.(raw.toUpperCase());
-                    }
-                    setCustomTickerInput("");
-                    setShowCustomInput(false);
-                    setCatalogDropdownOpen(false);
+                    submitCustomBenchmark();
                   }}
                 >
                   <input
                     autoFocus
                     value={customTickerInput}
-                    onChange={(e) => { setCustomTickerInput(e.target.value); setCatalogDropdownOpen(true); }}
+                    onChange={(e) => {
+                      handleInputChange(e.target.value);
+                    }}
                     placeholder="Symphony name/link or Ticker"
                     className="w-56 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
-                    onFocus={() => setCatalogDropdownOpen(true)}
-                    onBlur={() => { setTimeout(() => { if (!customTickerInput.trim()) { setShowCustomInput(false); setCatalogDropdownOpen(false); } }, 200); }}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
                   />
                   <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
                   <button
                     type="button"
-                    onClick={() => { setCatalogLoaded(false); api.getSymphonyCatalog(true).then((items) => { setSymphonyCatalog(items); setCatalogLoaded(true); }).catch(() => setCatalogLoaded(true)); }}
+                    onClick={refreshCatalog}
                     className="cursor-pointer rounded-md bg-muted/50 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
                     title="Refresh symphony list"
                   >
-                    ↻
+                    R
                   </button>
                 </form>
                 {catalogDropdownOpen && catalogMatches.length > 0 && (
@@ -778,10 +624,7 @@ export function PerformanceChart({
                         className="w-full cursor-pointer px-3 py-1.5 text-left text-xs hover:bg-muted/60 flex items-center justify-between gap-2"
                         onMouseDown={(e) => {
                           e.preventDefault();
-                          onBenchmarkAdd?.(`symphony:${item.symphony_id}`);
-                          setCustomTickerInput("");
-                          setShowCustomInput(false);
-                          setCatalogDropdownOpen(false);
+                          selectCatalogItem(item.symphony_id);
                         }}
                       >
                         <span className="truncate text-foreground">{item.name}</span>
@@ -803,7 +646,7 @@ export function PerformanceChart({
                 className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${isLightColor(b.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : ""}`}
                 style={!isLightColor(b.color) ? benchBtnStyle(b.color) : undefined}
               >
-                {b.label} ✕
+                {b.label} x
               </button>
             ))}
           </div>
@@ -812,4 +655,5 @@ export function PerformanceChart({
     </Card>
   );
 }
+
 
