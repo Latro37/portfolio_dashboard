@@ -1,24 +1,21 @@
 """Portfolio API routes."""
 
-import logging
-import time
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    Account, CashFlow,
+    Account,
 )
 from app.schemas import (
     AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
     TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
     SyncStatus, SyncTriggerResponse, ManualCashFlowRequest, ManualCashFlowResponse,
-    AppConfigResponse, SaveSymphonyExportResponse, OkResponse, ScreenshotUploadResponse,
+    AppConfigResponse, SaveSymphonyExportResponse, SaveSymphonyExportRequest,
+    OkResponse, ScreenshotUploadResponse, SaveScreenshotConfigRequest,
 )
-from app.services.sync import full_backfill, incremental_update, get_sync_state
 from app.services.finnhub_market_data import (
     get_daily_closes,
     get_daily_closes_stooq,
@@ -37,13 +34,18 @@ from app.services.portfolio_holdings_read import (
 )
 from app.services.portfolio_live_overlay import get_portfolio_live_summary_data
 from app.services.portfolio_read import get_portfolio_performance_data, get_portfolio_summary_data
-from app.config import load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
+from app.services.portfolio_admin import (
+    add_manual_cash_flow_data,
+    get_app_config_data,
+    get_sync_status_data,
+    save_screenshot_config_data,
+    save_symphony_export_config_data,
+    trigger_sync_data,
+    upload_screenshot_data,
+)
+from app.config import is_test_mode
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
-
-# Simple in-memory sync lock
-_syncing = False
 
 
 def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
@@ -230,34 +232,12 @@ def add_manual_cash_flow(
     db: Session = Depends(get_db),
 ):
     """The Composer API does not support automatic cash flow detection for certain account types (e.g. Roth IRAs). Manually add a dated deposit/withdrawal for accounts where reports fail."""
-    if body.account_id == "all" or body.account_id.startswith("all:"):
-        raise HTTPException(400, "account_id must be a specific sub-account UUID")
-
-    # Reuse account resolution for existence + test-mode visibility validation.
-    _resolve_account_ids(db, body.account_id)
-
-    cf_type = body.type if body.type in ("deposit", "withdrawal") else "deposit"
-    amount = abs(body.amount) if cf_type == "deposit" else -abs(body.amount)
-
-    db.add(CashFlow(
-        account_id=body.account_id,
-        date=body.date,
-        type=cf_type,
-        amount=amount,
-        description=body.description or "Manual entry",
-    ))
-    db.commit()
-
-    # Recalculate portfolio history net_deposits and metrics for this account
-    try:
-        client = get_client_for_account(db, body.account_id)
-        from app.services.sync import _sync_portfolio_history, _recompute_metrics
-        _sync_portfolio_history(db, client, body.account_id)
-        _recompute_metrics(db, body.account_id)
-    except Exception as e:
-        logger.warning("Post-manual-entry recompute failed: %s", e)
-
-    return {"status": "ok", "date": str(body.date), "type": cf_type, "amount": amount}
+    return add_manual_cash_flow_data(
+        db,
+        body,
+        resolve_account_ids_fn=_resolve_account_ids,
+        get_client_for_account_fn=get_client_for_account,
+    )
 
 
 # ------------------------------------------------------------------
@@ -271,13 +251,7 @@ def get_sync_status(
 ):
     """Current sync status."""
     ids = _resolve_account_ids(db, account_id)
-    state = get_sync_state(db, ids[0])
-    return SyncStatus(
-        status="syncing" if _syncing else "idle",
-        last_sync_date=state.get("last_sync_date"),
-        initial_backfill_done=state.get("initial_backfill_done") == "true",
-        message="",
-    )
+    return get_sync_status_data(db, ids[0])
 
 
 @router.post("/sync", response_model=SyncTriggerResponse)
@@ -286,141 +260,33 @@ def trigger_sync(
     db: Session = Depends(get_db),
 ):
     """Trigger data sync. Runs backfill on first call, incremental after."""
-    global _syncing
-    if _syncing:
-        return {"status": "already_syncing"}
-
-    _syncing = True
-    try:
-        # Determine which sub-accounts to sync
-        if account_id:
-            ids = _resolve_account_ids(db, account_id)
-        else:
-            # Sync all visible accounts for the current mode.
-            ids = _resolve_account_ids(db, "all")
-
-        # Skip __TEST__ accounts (synthetic data, no real Composer credentials)
-        test_ids = {a.id for a in db.query(Account).filter_by(credential_name="__TEST__").all()}
-        sync_ids = [aid for aid in ids if aid not in test_ids]
-        if not sync_ids:
-            return {"status": "skipped", "synced_accounts": 0, "reason": "No sync-eligible accounts"}
-
-        for aid in sync_ids:
-            client = get_client_for_account(db, aid)
-            state = get_sync_state(db, aid)
-            if state.get("initial_backfill_done") == "true":
-                incremental_update(db, client, aid)
-            else:
-                full_backfill(db, client, aid)
-            # Rate limit between accounts
-            if len(sync_ids) > 1:
-                time.sleep(1)
-
-        return {"status": "complete", "synced_accounts": len(sync_ids)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Sync failed: %s", e, exc_info=True)
-        raise HTTPException(500, f"Sync failed: {e}")
-    finally:
-        _syncing = False
+    return trigger_sync_data(
+        db,
+        account_id=account_id,
+        resolve_account_ids_fn=_resolve_account_ids,
+        get_client_for_account_fn=get_client_for_account,
+    )
 
 
 @router.get("/config", response_model=AppConfigResponse)
 def get_app_config():
     """Return client-safe configuration (e.g. Finnhub API key, export settings)."""
-    export_cfg = load_symphony_export_config()
-    export_status = None
-    if export_cfg:
-        export_status = {
-            "local_path": export_cfg.get("local_path", ""),
-        }
-    screenshot_cfg = load_screenshot_config()
-    return {
-        "finnhub_api_key": None,
-        "finnhub_configured": load_finnhub_key() is not None,
-        "polygon_configured": load_polygon_key() is not None,
-        "symphony_export": export_status,
-        "screenshot": screenshot_cfg,
-        "test_mode": is_test_mode(),
-    }
-
-
-class _SymphonyExportBody(BaseModel):
-    local_path: str
+    return get_app_config_data()
 
 @router.post("/config/symphony-export", response_model=SaveSymphonyExportResponse)
-def set_symphony_export_config(body: _SymphonyExportBody):
+def set_symphony_export_config(body: SaveSymphonyExportRequest):
     """Save symphony export local_path from the frontend settings modal."""
-    local_path = body.local_path.strip()
-    if not local_path:
-        raise HTTPException(400, "local_path is required")
-    save_symphony_export_path(local_path)
-    return {"ok": True, "local_path": local_path}
-
-
-class _ScreenshotConfigBody(BaseModel):
-    local_path: str
-    enabled: bool = True
-    account_id: str = ""
-    chart_mode: str = ""
-    period: str = ""
-    custom_start: str = ""
-    hide_portfolio_value: bool = False
-    metrics: List[str] = []
-    benchmarks: List[str] = []
+    return save_symphony_export_config_data(body.local_path)
 
 @router.post("/config/screenshot", response_model=OkResponse)
-def set_screenshot_config(body: _ScreenshotConfigBody):
+def set_screenshot_config(body: SaveScreenshotConfigRequest):
     """Save screenshot configuration from the frontend settings modal."""
-    local_path = body.local_path.strip()
-    if not local_path:
-        raise HTTPException(400, "local_path is required")
-    save_screenshot_config(body.model_dump())
-    return {"ok": True}
-
-
-_MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024  # 10 MB
+    return save_screenshot_config_data(body.model_dump())
 
 @router.post("/screenshot", response_model=ScreenshotUploadResponse)
 async def upload_screenshot(request: Request):
     """Receive a PNG screenshot and save it to the configured folder."""
-    import os
-    import re
-
-    cfg = load_screenshot_config()
-    if not cfg:
-        raise HTTPException(400, "Screenshot not configured")
-    local_path = cfg.get("local_path", "")
-    if not local_path:
-        raise HTTPException(400, "Screenshot save folder not configured")
-
-    form = await request.form()
-    file = form.get("file")
-    date_str = form.get("date", "")
-    if not file:
-        raise HTTPException(400, "No file uploaded")
-
-    if not date_str:
-        from datetime import date as _date
-        date_str = _date.today().isoformat()
-
-    # Validate date_str to prevent path traversal via crafted filenames
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
-        raise HTTPException(400, "Invalid date format, expected YYYY-MM-DD")
-
-    os.makedirs(local_path, exist_ok=True)
-    filename = f"Snapshot_{date_str}.png"
-    filepath = os.path.join(local_path, filename)
-
-    contents = await file.read()
-    if len(contents) > _MAX_SCREENSHOT_BYTES:
-        raise HTTPException(413, f"File too large (max {_MAX_SCREENSHOT_BYTES // 1024 // 1024} MB)")
-    with open(filepath, "wb") as f:
-        f.write(contents)
-
-    logger.info("Screenshot saved to %s (%d bytes)", filepath, len(contents))
-    return {"ok": True, "path": filepath}
+    return await upload_screenshot_data(request)
 
 
 # ---------------------------------------------------------------------------

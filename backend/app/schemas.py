@@ -62,6 +62,10 @@ class SaveSymphonyExportResponse(BaseModel):
     local_path: str
 
 
+class SaveSymphonyExportRequest(BaseModel):
+    local_path: str
+
+
 class OkResponse(BaseModel):
     ok: bool
 
@@ -69,6 +73,18 @@ class OkResponse(BaseModel):
 class ScreenshotUploadResponse(BaseModel):
     ok: bool
     path: str
+
+
+class SaveScreenshotConfigRequest(BaseModel):
+    local_path: str
+    enabled: bool = True
+    account_id: str = ""
+    chart_mode: str = ""
+    period: str = ""
+    custom_start: str = ""
+    hide_portfolio_value: bool = False
+    metrics: List[str] = []
+    benchmarks: List[str] = []
 
 
 # --- Portfolio ---
