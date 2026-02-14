@@ -8,28 +8,26 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.database import get_db
 from app.models import (
-    Account, DailyPortfolio, DailyMetrics, HoldingsHistory,
-    Transaction, CashFlow, SyncState,
+    Account, HoldingsHistory, Transaction, CashFlow,
 )
 from app.schemas import (
-    AccountInfo, PortfolioSummary, DailyPortfolioRow,
-    HoldingsForDate, HoldingSnapshot, TransactionRow, CashFlowRow,
+    AccountInfo, PortfolioSummary,
     PerformancePoint, SyncStatus, ManualCashFlowRequest,
 )
-from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
-from app.services.metrics import compute_all_metrics, compute_latest_metrics
+from app.services.sync import full_backfill, incremental_update, get_sync_state
 from app.services.finnhub_market_data import (
     get_daily_closes,
     get_daily_closes_stooq,
     get_latest_price,
 )
 from app.services.account_scope import resolve_account_ids
-from app.services.date_filters import parse_iso_date, resolve_date_range
+from app.services.date_filters import parse_iso_date
 from app.services.benchmark_read import get_benchmark_history_data
+from app.services.portfolio_live_overlay import get_portfolio_live_summary_data
+from app.services.portfolio_read import get_portfolio_performance_data, get_portfolio_summary_data
 from app.composer_client import ComposerClient
 from app.config import load_accounts, load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
 
@@ -99,144 +97,19 @@ def get_summary(
     db: Session = Depends(get_db),
 ):
     """Portfolio summary with metrics, optionally filtered to a time period."""
-    from collections import defaultdict
-
     ids = _resolve_account_ids(db, account_id)
-    date_start, date_end = resolve_date_range(period, start_date, end_date)
-
-    latest_portfolio = db.query(DailyPortfolio).filter(
-        DailyPortfolio.account_id.in_(ids)
-    ).order_by(DailyPortfolio.date.desc()).first()
-
-    if not latest_portfolio:
-        raise HTTPException(404, "No portfolio data. Run sync first.")
-
-    state = get_sync_state(db, ids[0])
-
-    # --- Load daily portfolio rows (all accounts, filtered by date range) ---
-    port_query = db.query(DailyPortfolio).filter(
-        DailyPortfolio.account_id.in_(ids)
-    ).order_by(DailyPortfolio.date)
-    if date_start:
-        port_query = port_query.filter(DailyPortfolio.date >= date_start)
-    if date_end:
-        port_query = port_query.filter(DailyPortfolio.date <= date_end)
-    all_rows = port_query.all()
-
-    if not all_rows:
-        raise HTTPException(404, "No portfolio data for selected period.")
-
-    # --- Build aggregated daily series (handles single + multi account) ---
-    per_acct: dict[str, dict[str, DailyPortfolio]] = defaultdict(dict)
-    for r in all_rows:
-        per_acct[r.account_id][str(r.date)] = r
-
-    all_dates = sorted({str(r.date) for r in all_rows})
-
-    last_vals: dict[str, dict] = {
-        aid: {"pv": 0.0, "nd": 0.0, "fees": 0.0, "div": 0.0}
-        for aid in per_acct
-    }
-    daily_series = []  # list of dicts for compute_all_metrics
-    fees_series = []
-    divs_series = []
-    for ds in all_dates:
-        sum_pv = sum_nd = sum_fees = sum_div = 0.0
-        for aid in per_acct:
-            if ds in per_acct[aid]:
-                row = per_acct[aid][ds]
-                last_vals[aid] = {
-                    "pv": row.portfolio_value, "nd": row.net_deposits,
-                    "fees": row.total_fees, "div": row.total_dividends,
-                }
-            sum_pv += last_vals[aid]["pv"]
-            sum_nd += last_vals[aid]["nd"]
-            sum_fees += last_vals[aid]["fees"]
-            sum_div += last_vals[aid]["div"]
-        daily_series.append({"date": ds, "portfolio_value": sum_pv, "net_deposits": sum_nd})
-        fees_series.append(sum_fees)
-        divs_series.append(sum_div)
-
-    # --- Load cash flows for MWR ---
-    cf_query = db.query(CashFlow).filter(
-        CashFlow.account_id.in_(ids),
-        CashFlow.type.in_(["deposit", "withdrawal"]),
-    ).order_by(CashFlow.date)
-    if date_start:
-        cf_query = cf_query.filter(CashFlow.date >= date_start)
-    if date_end:
-        cf_query = cf_query.filter(CashFlow.date <= date_end)
-    cf_dicts = [{"date": cf.date, "amount": cf.amount} for cf in cf_query.all()]
-
-    # --- Compute metrics via shared engine ---
-    from app.config import get_settings
-    settings = get_settings()
-    metrics = compute_all_metrics(daily_series, cf_dicts, risk_free_rate=settings.risk_free_rate)
-
-    if not metrics:
-        raise HTTPException(404, "Could not compute metrics for selected period.")
-
-    m = metrics[-1]  # last row has cumulative values for the period
-
-    # Find best/worst day dates and max drawdown date from the computed series
-    best_day_date = worst_day_date = max_dd_date = None
-    for row in metrics:
-        if row["daily_return_pct"] == m["best_day_pct"] and m["best_day_pct"] != 0:
-            best_day_date = str(row["date"])
-        if row["daily_return_pct"] == m["worst_day_pct"] and m["worst_day_pct"] != 0:
-            worst_day_date = str(row["date"])
-        if row["current_drawdown"] == m["max_drawdown"] and m["max_drawdown"] != 0 and max_dd_date is None:
-            max_dd_date = str(row["date"])
-
-    total_pv = daily_series[-1]["portfolio_value"]
-    total_deposits = daily_series[-1]["net_deposits"]
-
-    return PortfolioSummary(
-        portfolio_value=round(total_pv, 2),
-        net_deposits=round(total_deposits, 2),
-        total_return_dollars=round(m.get("total_return_dollars", 0), 2),
-        daily_return_pct=round(m.get("daily_return_pct", 0), 4),
-        cumulative_return_pct=round(m.get("cumulative_return_pct", 0), 4),
-        cagr=round(m.get("cagr", 0), 4),
-        annualized_return=round(m.get("annualized_return", 0), 4),
-        annualized_return_cum=round(m.get("annualized_return_cum", 0), 4),
-        time_weighted_return=round(m.get("time_weighted_return", 0), 4),
-        money_weighted_return=round(m.get("money_weighted_return", 0), 4),
-        money_weighted_return_period=round(m.get("money_weighted_return_period", 0), 4),
-        sharpe_ratio=round(m.get("sharpe_ratio", 0), 4),
-        calmar_ratio=round(m.get("calmar_ratio", 0), 4),
-        sortino_ratio=round(m.get("sortino_ratio", 0), 4),
-        max_drawdown=round(m.get("max_drawdown", 0), 4),
-        max_drawdown_date=max_dd_date,
-        current_drawdown=round(m.get("current_drawdown", 0), 4),
-        win_rate=round(m.get("win_rate", 0), 2),
-        num_wins=m.get("num_wins", 0),
-        num_losses=m.get("num_losses", 0),
-        avg_win_pct=round(m.get("avg_win_pct", 0), 4),
-        avg_loss_pct=round(m.get("avg_loss_pct", 0), 4),
-        annualized_volatility=round(m.get("annualized_volatility", 0), 4),
-        best_day_pct=round(m.get("best_day_pct", 0), 4),
-        best_day_date=best_day_date,
-        worst_day_pct=round(m.get("worst_day_pct", 0), 4),
-        worst_day_date=worst_day_date,
-        profit_factor=round(m.get("profit_factor", 0), 4),
-        median_drawdown=round(m.get("median_drawdown", 0), 4),
-        longest_drawdown_days=m.get("longest_drawdown_days", 0),
-        median_drawdown_days=m.get("median_drawdown_days", 0),
-        total_fees=round(fees_series[-1], 2),
-        total_dividends=round(divs_series[-1], 2),
-        last_updated=state.get("last_sync_date"),
+    return get_portfolio_summary_data(
+        db=db,
+        account_ids=ids,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
 # ------------------------------------------------------------------
 # Live Summary (intraday overlay)
 # ------------------------------------------------------------------
-
-# In-memory cache for the daily series to avoid re-querying DB every 60s
-_live_cache: dict = {}  # key: (account_ids_tuple, period, start, end) â†’ {ts, data}
-_LIVE_CACHE_TTL = 120  # seconds
-
 
 @router.get("/summary/live", response_model=PortfolioSummary)
 def get_summary_live(
@@ -249,146 +122,16 @@ def get_summary_live(
     db: Session = Depends(get_db),
 ):
     """Portfolio summary with today's value replaced by live symphony data."""
-    from collections import defaultdict
-    from app.config import get_settings
-
     ids = _resolve_account_ids(db, account_id)
-    date_start, date_end = resolve_date_range(period, start_date, end_date)
-    today = date.today()
-
-    cache_key = (tuple(sorted(ids)), period, start_date, end_date)
-    cached = _live_cache.get(cache_key)
-    if cached and time.time() - cached["ts"] < _LIVE_CACHE_TTL:
-        daily_series = cached["daily_series"]
-        cf_dicts = cached["cf_dicts"]
-        fees_total = cached["fees_total"]
-        divs_total = cached["divs_total"]
-        state = cached["state"]
-    else:
-        state = get_sync_state(db, ids[0])
-
-        port_query = db.query(DailyPortfolio).filter(
-            DailyPortfolio.account_id.in_(ids)
-        ).order_by(DailyPortfolio.date)
-        if date_start:
-            port_query = port_query.filter(DailyPortfolio.date >= date_start)
-        if date_end:
-            port_query = port_query.filter(DailyPortfolio.date <= date_end)
-        all_rows = port_query.all()
-
-        if not all_rows:
-            raise HTTPException(404, "No portfolio data for selected period.")
-
-        per_acct: dict[str, dict[str, DailyPortfolio]] = defaultdict(dict)
-        for r in all_rows:
-            per_acct[r.account_id][str(r.date)] = r
-
-        all_dates = sorted({str(r.date) for r in all_rows})
-
-        last_vals: dict[str, dict] = {
-            aid: {"pv": 0.0, "nd": 0.0, "fees": 0.0, "div": 0.0}
-            for aid in per_acct
-        }
-        daily_series = []
-        fees_series = []
-        divs_series = []
-        for ds in all_dates:
-            sum_pv = sum_nd = sum_fees = sum_div = 0.0
-            for aid in per_acct:
-                if ds in per_acct[aid]:
-                    row = per_acct[aid][ds]
-                    last_vals[aid] = {
-                        "pv": row.portfolio_value, "nd": row.net_deposits,
-                        "fees": row.total_fees, "div": row.total_dividends,
-                    }
-                sum_pv += last_vals[aid]["pv"]
-                sum_nd += last_vals[aid]["nd"]
-                sum_fees += last_vals[aid]["fees"]
-                sum_div += last_vals[aid]["div"]
-            daily_series.append({"date": ds, "portfolio_value": sum_pv, "net_deposits": sum_nd})
-            fees_series.append(sum_fees)
-            divs_series.append(sum_div)
-
-        fees_total = fees_series[-1] if fees_series else 0.0
-        divs_total = divs_series[-1] if divs_series else 0.0
-
-        cf_query = db.query(CashFlow).filter(
-            CashFlow.account_id.in_(ids),
-            CashFlow.type.in_(["deposit", "withdrawal"]),
-        ).order_by(CashFlow.date)
-        if date_start:
-            cf_query = cf_query.filter(CashFlow.date >= date_start)
-        if date_end:
-            cf_query = cf_query.filter(CashFlow.date <= date_end)
-        cf_dicts = [{"date": cf.date, "amount": cf.amount} for cf in cf_query.all()]
-
-        _live_cache[cache_key] = {
-            "ts": time.time(),
-            "daily_series": daily_series,
-            "cf_dicts": cf_dicts,
-            "fees_total": fees_total,
-            "divs_total": divs_total,
-            "state": state,
-        }
-
-    # Deep-copy the series so we don't mutate the cache
-    series = [dict(d) for d in daily_series]
-    cf = list(cf_dicts)
-
-    # Append or replace today's row with live values
-    today_str = str(today)
-    if series and series[-1]["date"] == today_str:
-        series[-1]["portfolio_value"] = live_pv
-        series[-1]["net_deposits"] = live_nd
-    else:
-        # Infer intraday cash flow from net_deposits delta
-        last_nd = series[-1]["net_deposits"] if series else 0.0
-        deposit_delta = live_nd - last_nd
-        if abs(deposit_delta) > 0.50:
-            cf.append({"date": today, "amount": deposit_delta})
-        series.append({"date": today_str, "portfolio_value": live_pv, "net_deposits": live_nd})
-
-    settings = get_settings()
-    m = compute_latest_metrics(series, cf, risk_free_rate=settings.risk_free_rate)
-    if not m:
-        raise HTTPException(404, "Could not compute live metrics.")
-
-    # For best/worst day dates we need the full metrics series (use compute_all_metrics)
-    # But that's expensive â€” for live updates, skip date lookups and reuse cached dates
-    # The live response uses the same shape but without best/worst day dates
-    return {
-        "portfolio_value": round(live_pv, 2),
-        "net_deposits": round(live_nd, 2),
-        "total_return_dollars": round(m.get("total_return_dollars", 0), 2),
-        "daily_return_pct": round(m.get("daily_return_pct", 0), 4),
-        "cumulative_return_pct": round(m.get("cumulative_return_pct", 0), 4),
-        "cagr": round(m.get("cagr", 0), 4),
-        "annualized_return": round(m.get("annualized_return", 0), 4),
-        "annualized_return_cum": round(m.get("annualized_return_cum", 0), 4),
-        "time_weighted_return": round(m.get("time_weighted_return", 0), 4),
-        "money_weighted_return": round(m.get("money_weighted_return", 0), 4),
-        "money_weighted_return_period": round(m.get("money_weighted_return_period", 0), 4),
-        "sharpe_ratio": round(m.get("sharpe_ratio", 0), 4),
-        "calmar_ratio": round(m.get("calmar_ratio", 0), 4),
-        "sortino_ratio": round(m.get("sortino_ratio", 0), 4),
-        "max_drawdown": round(m.get("max_drawdown", 0), 4),
-        "current_drawdown": round(m.get("current_drawdown", 0), 4),
-        "win_rate": round(m.get("win_rate", 0), 2),
-        "num_wins": m.get("num_wins", 0),
-        "num_losses": m.get("num_losses", 0),
-        "avg_win_pct": round(m.get("avg_win_pct", 0), 4),
-        "avg_loss_pct": round(m.get("avg_loss_pct", 0), 4),
-        "annualized_volatility": round(m.get("annualized_volatility", 0), 4),
-        "best_day_pct": round(m.get("best_day_pct", 0), 4),
-        "worst_day_pct": round(m.get("worst_day_pct", 0), 4),
-        "profit_factor": round(m.get("profit_factor", 0), 4),
-        "median_drawdown": round(m.get("median_drawdown", 0), 4),
-        "longest_drawdown_days": m.get("longest_drawdown_days", 0),
-        "median_drawdown_days": m.get("median_drawdown_days", 0),
-        "total_fees": round(fees_total, 2),
-        "total_dividends": round(divs_total, 2),
-        "last_updated": state.get("last_sync_date"),
-    }
+    return get_portfolio_live_summary_data(
+        db=db,
+        account_ids=ids,
+        live_pv=live_pv,
+        live_nd=live_nd,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 # ------------------------------------------------------------------
@@ -405,131 +148,13 @@ def get_performance(
 ):
     """Performance chart data (portfolio value + deposits + returns over time)."""
     ids = _resolve_account_ids(db, account_id)
-
-    query = db.query(DailyPortfolio, DailyMetrics).outerjoin(
-        DailyMetrics,
-        (DailyPortfolio.date == DailyMetrics.date) & (DailyPortfolio.account_id == DailyMetrics.account_id),
-    ).filter(
-        DailyPortfolio.account_id.in_(ids)
-    ).order_by(DailyPortfolio.date)
-
-    # Apply date filtering
-    d_start, d_end = resolve_date_range(period, start_date, end_date)
-    if d_start:
-        query = query.filter(DailyPortfolio.date >= d_start)
-    if d_end:
-        query = query.filter(DailyPortfolio.date <= d_end)
-
-    results = query.all()
-
-    # For single account, return directly
-    if len(ids) == 1:
-        return [
-            {
-                "date": str(p.date),
-                "portfolio_value": p.portfolio_value,
-                "net_deposits": p.net_deposits,
-                "cumulative_return_pct": m.cumulative_return_pct if m else 0,
-                "daily_return_pct": m.daily_return_pct if m else 0,
-                "time_weighted_return": m.time_weighted_return if m else 0,
-                "money_weighted_return": getattr(m, "money_weighted_return_period", m.money_weighted_return) if m else 0,
-                "current_drawdown": m.current_drawdown if m else 0,
-            }
-            for p, m in results
-        ]
-
-    # Aggregate: sum values per date across sub-accounts with forward-fill.
-    # Each account may have different date ranges; forward-fill ensures dates
-    # where one account has no row still use its last known values.
-    from collections import defaultdict
-
-    fields = [
-        "portfolio_value", "net_deposits", "cumulative_return_pct",
-        "daily_return_pct", "time_weighted_return", "money_weighted_return",
-        "current_drawdown",
-    ]
-    zeros = {f: 0.0 for f in fields}
-
-    # Build per-account, per-date data
-    per_account: dict[str, dict[str, dict]] = defaultdict(dict)
-    for p, m in results:
-        ds = str(p.date)
-        per_account[p.account_id][ds] = {
-            "portfolio_value": p.portfolio_value,
-            "net_deposits": p.net_deposits,
-            "cumulative_return_pct": m.cumulative_return_pct if m else 0,
-            "daily_return_pct": m.daily_return_pct if m else 0,
-            "time_weighted_return": m.time_weighted_return if m else 0,
-            "money_weighted_return": getattr(m, "money_weighted_return_period", m.money_weighted_return) if m else 0,
-            "current_drawdown": m.current_drawdown if m else 0,
-        }
-
-    # Get the union of all dates, sorted
-    all_dates = sorted({ds for acct in per_account.values() for ds in acct})
-
-    # Forward-fill and sum dollar values across accounts per date.
-    # Percentage metrics are recalculated from the aggregated dollar values.
-    aggregated = []
-    last_known: dict[str, dict] = {aid: dict(zeros) for aid in per_account}
-    prev_pv = None
-    prev_nd = None
-    peak_pv = 0.0
-    twr_cum = 1.0
-
-    # Also collect per-account MWR for value-weighted average
-    last_mwr: dict[str, float] = {aid: 0.0 for aid in per_account}
-    last_pv: dict[str, float] = {aid: 0.0 for aid in per_account}
-
-    for ds in all_dates:
-        sum_pv = 0.0
-        sum_nd = 0.0
-        for aid in per_account:
-            if ds in per_account[aid]:
-                last_known[aid] = per_account[aid][ds]
-            sum_pv += last_known[aid]["portfolio_value"]
-            sum_nd += last_known[aid]["net_deposits"]
-            last_mwr[aid] = last_known[aid]["money_weighted_return"]
-            last_pv[aid] = last_known[aid]["portfolio_value"]
-
-        # Cumulative return from dollar values
-        cum_ret = ((sum_pv - sum_nd) / sum_nd * 100) if sum_nd else 0
-
-        # Daily return accounting for deposit changes
-        if prev_pv is not None and prev_pv > 0:
-            cf_today = sum_nd - (prev_nd or 0)
-            daily_ret = (sum_pv - prev_pv - cf_today) / prev_pv * 100
-        else:
-            daily_ret = 0
-
-        # TWR: compound daily returns
-        twr_cum *= (1 + daily_ret / 100)
-        twr = (twr_cum - 1) * 100
-
-        # Drawdown from deposit-adjusted equity curve (TWR), not raw portfolio value
-        peak_pv = max(peak_pv, twr_cum)
-        drawdown = ((twr_cum / peak_pv - 1) * 100) if peak_pv > 0 else 0
-
-        # MWR: value-weighted average of per-account MWR
-        total_weight = sum(last_pv.values())
-        if total_weight > 0:
-            mwr = sum(last_mwr[a] * last_pv[a] for a in per_account) / total_weight
-        else:
-            mwr = 0
-
-        aggregated.append({
-            "date": ds,
-            "portfolio_value": sum_pv,
-            "net_deposits": sum_nd,
-            "cumulative_return_pct": round(cum_ret, 4),
-            "daily_return_pct": round(daily_ret, 4),
-            "time_weighted_return": round(twr, 4),
-            "money_weighted_return": round(mwr, 4),
-            "current_drawdown": round(drawdown, 4),
-        })
-        prev_pv = sum_pv
-        prev_nd = sum_nd
-
-    return aggregated
+    return get_portfolio_performance_data(
+        db=db,
+        account_ids=ids,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 # ------------------------------------------------------------------
