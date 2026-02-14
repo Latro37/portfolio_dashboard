@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { SymphonyInfo } from "@/lib/api";
 import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
@@ -17,6 +17,7 @@ import { SymphonyTradePreviewSection } from "@/features/symphony-detail/componen
 import { useSymphonyBenchmarkManager } from "@/features/symphony-detail/hooks/useSymphonyBenchmarkManager";
 import { useSymphonyChartModels } from "@/features/symphony-detail/hooks/useSymphonyChartModels";
 import { useSymphonyDetailData } from "@/features/symphony-detail/hooks/useSymphonyDetailData";
+import { useSymphonyDetailViewEffects } from "@/features/symphony-detail/hooks/useSymphonyDetailViewEffects";
 import {
   SymphonyDetailPeriod,
   SymphonyDetailTab,
@@ -78,17 +79,12 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     return timestamp ? timestamp.slice(0, 10) : "";
   }, [backtest]);
   const s = symphony;
-  useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, []);
-  useEffect(() => {
-    if (scrollToSection === "trade-preview" && tradePreviewRef.current) {
-      tradePreviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [scrollToSection, tradePreview]);
+
+  useSymphonyDetailViewEffects({
+    scrollToSection,
+    tradePreview,
+    tradePreviewRef,
+  });
   const btCustomInput = customInputVisible;
   const btCustomTickerInput = customTickerInput;
   const btCatalogMatches = catalogMatches;
