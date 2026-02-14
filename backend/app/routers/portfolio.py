@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import date
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models import (
     Account, DailyPortfolio, DailyMetrics, HoldingsHistory,
-    Transaction, CashFlow, SyncState, BenchmarkData,
+    Transaction, CashFlow, SyncState,
 )
 from app.schemas import (
     AccountInfo, PortfolioSummary, DailyPortfolioRow,
@@ -23,14 +23,13 @@ from app.schemas import (
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.services.finnhub_market_data import (
-    FinnhubAccessError,
-    FinnhubError,
     get_daily_closes,
     get_daily_closes_stooq,
     get_latest_price,
 )
 from app.services.account_scope import resolve_account_ids
 from app.services.date_filters import parse_iso_date, resolve_date_range
+from app.services.benchmark_read import get_benchmark_history_data
 from app.composer_client import ComposerClient
 from app.config import load_accounts, load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
 
@@ -924,13 +923,6 @@ async def upload_screenshot(request: Request):
 # Benchmark history
 # ---------------------------------------------------------------------------
 
-import math
-from datetime import datetime as _datetime
-
-_benchmark_cache: Dict[Tuple[str, str, str, str], Tuple[float, list]] = {}  # key -> (timestamp, data)
-_BENCHMARK_TTL = 3600  # 1 hour
-
-
 @router.get("/benchmark-history")
 def get_benchmark_history(
     ticker: str = Query(..., description="Ticker symbol, e.g. SPY"),
@@ -940,157 +932,14 @@ def get_benchmark_history(
     db: Session = Depends(get_db),
 ):
     """Fetch benchmark price history and compute TWR, drawdown, and MWR series."""
-    from app.services.metrics import compute_mwr
-
-    ticker = ticker.strip().upper()
-    if not ticker:
-        raise HTTPException(400, "Ticker is required")
-
-    if start_date:
-        start_dt = parse_iso_date(start_date, "start_date")
-    else:
-        start_dt = date(2020, 1, 1)
-    if end_date:
-        end_dt = parse_iso_date(end_date, "end_date")
-    else:
-        end_dt = date.today()
-    if start_dt > end_dt:
-        raise HTTPException(400, "start_date cannot be after end_date")
-
-    resolved_account_ids: List[str] = []
-    if account_id:
-        resolved_account_ids = _resolve_account_ids(db, account_id)
-
-    s_date = str(start_dt)
-    e_date = str(end_dt)
-    account_scope = ",".join(sorted(resolved_account_ids))
-    cache_key = (ticker, s_date, e_date, account_scope)
-
-    # Check cache
-    if cache_key in _benchmark_cache:
-        ts, cached_data = _benchmark_cache[cache_key]
-        if time.time() - ts < _BENCHMARK_TTL:
-            return {"ticker": ticker, "data": cached_data}
-
-    # Free historical source: use Stooq for daily history.
-    closes: List[Tuple[date, float]] = get_daily_closes_stooq(ticker, start_dt, end_dt)
-
-    # Optional paid source: fallback to Finnhub candles if Stooq has no rows.
-    finnhub_error: Optional[str] = None
-    if not closes:
-        try:
-            closes = get_daily_closes(ticker, start_dt, end_dt)
-        except FinnhubAccessError as e:
-            finnhub_error = str(e)
-            logger.warning("Finnhub access denied for %s candles: %s", ticker, e)
-        except FinnhubError as e:
-            finnhub_error = str(e)
-            logger.warning("Finnhub candle request failed for %s: %s", ticker, e)
-
-    # Fallback to DB benchmark_data if external sources returned nothing.
-    if not closes:
-        db_rows = (
-            db.query(BenchmarkData)
-            .filter(
-                BenchmarkData.symbol == ticker,
-                BenchmarkData.date >= start_dt,
-                BenchmarkData.date <= end_dt,
-            )
-            .order_by(BenchmarkData.date)
-            .all()
-        )
-        if db_rows:
-            closes = [(r.date, float(r.close)) for r in db_rows]
-            logger.info("Benchmark %s: using %d rows from DB fallback", ticker, len(closes))
-
-    if not closes:
-        if finnhub_error:
-            raise HTTPException(
-                502,
-                f"Finnhub benchmark data unavailable for '{ticker}': {finnhub_error}",
-            )
-        raise HTTPException(400, f"No valid price data for '{ticker}'")
-
-    closes.sort(key=lambda x: x[0])
-
-    # Fill today's price if missing (handles pre-market / after-hours gap)
-    today = date.today()
-    if closes[-1][0] < today <= end_dt:
-        try:
-            live_price = get_latest_price(ticker)
-            if live_price and not math.isnan(live_price):
-                closes.append((today, float(live_price)))
-            else:
-                # Carry forward last close
-                closes.append((today, closes[-1][1]))
-        except FinnhubError:
-            closes.append((today, closes[-1][1]))
-
-    # Compute TWR (cumulative return from first date)
-    first_close = closes[0][1]
-    twr_series: List[float] = []
-    for _, c in closes:
-        twr_series.append(round(((c / first_close) - 1) * 100, 4))
-
-    # Compute drawdown series
-    peak = first_close
-    dd_series: List[float] = []
-    for _, c in closes:
-        if c > peak:
-            peak = c
-        dd = ((c / peak) - 1) * 100 if peak > 0 else 0.0
-        dd_series.append(round(dd, 4))
-
-    # Compute MWR series (simulate user's cash flows into the benchmark)
-    mwr_series: List[float] = [0.0] * len(closes)
-    if resolved_account_ids:
-        # Load external cash flows for this account scope
-        cf_query = db.query(CashFlow).filter(
-            CashFlow.account_id.in_(resolved_account_ids),
-            func.lower(CashFlow.type).in_(["deposit", "withdrawal"]),
-        ).order_by(CashFlow.date).all()
-
-        ext_flows: Dict[date, float] = {}
-        for cf in cf_query:
-            d = cf.date if isinstance(cf.date, date) else date.fromisoformat(str(cf.date))
-            ext_flows[d] = ext_flows.get(d, 0) + cf.amount
-
-        if ext_flows:
-            # Pre-compute cumulative shares and hypothetical PV at each date
-            shares_acc = 0.0
-            hypo_pv_list: List[float] = []
-            bench_date_list: List[date] = []
-
-            for bd, bc in closes:
-                if bd in ext_flows and bc > 0:
-                    shares_acc += ext_flows[bd] / bc
-                hypo_pv_list.append(shares_acc * bc if shares_acc > 0 else 0.0)
-                bench_date_list.append(bd)
-
-            # Compute rolling MWR using pre-computed PV series
-            for i in range(1, len(closes)):
-                if hypo_pv_list[i] > 0:
-                    try:
-                        _, mwr_period = compute_mwr(
-                            bench_date_list[: i + 1], hypo_pv_list[: i + 1], ext_flows
-                        )
-                        mwr_series[i] = round(mwr_period * 100, 4)
-                    except Exception:
-                        pass
-
-    # Build response
-    result = []
-    for i, (d, c) in enumerate(closes):
-        result.append({
-            "date": str(d),
-            "close": round(c, 2),
-            "return_pct": twr_series[i],
-            "drawdown_pct": dd_series[i],
-            "mwr_pct": mwr_series[i],
-        })
-
-    _benchmark_cache[cache_key] = (time.time(), result)
-    return {"ticker": ticker, "data": result}
-
-
+    return get_benchmark_history_data(
+        db=db,
+        ticker=ticker,
+        start_date=start_date,
+        end_date=end_date,
+        account_id=account_id,
+        get_daily_closes_stooq_fn=get_daily_closes_stooq,
+        get_daily_closes_fn=get_daily_closes,
+        get_latest_price_fn=get_latest_price,
+    )
 
