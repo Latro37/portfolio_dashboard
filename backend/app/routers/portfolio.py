@@ -14,7 +14,8 @@ from app.models import (
 )
 from app.schemas import (
     AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
-    TransactionListResponse, CashFlowRow, PerformancePoint, SyncStatus, ManualCashFlowRequest,
+    TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
+    SyncStatus, ManualCashFlowRequest,
 )
 from app.services.sync import full_backfill, incremental_update, get_sync_state
 from app.services.finnhub_market_data import (
@@ -425,7 +426,7 @@ async def upload_screenshot(request: Request):
 # Benchmark history
 # ---------------------------------------------------------------------------
 
-@router.get("/benchmark-history")
+@router.get("/benchmark-history", response_model=BenchmarkHistoryResponse)
 def get_benchmark_history(
     ticker: str = Query(..., description="Ticker symbol, e.g. SPY"),
     start_date: Optional[str] = Query(None),
