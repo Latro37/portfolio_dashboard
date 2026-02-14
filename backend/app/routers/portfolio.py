@@ -2,8 +2,7 @@
 
 import logging
 import time
-from datetime import date
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -11,11 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    Account, HoldingsHistory, Transaction, CashFlow,
+    Account, CashFlow,
 )
 from app.schemas import (
-    AccountInfo, PortfolioSummary,
-    PerformancePoint, SyncStatus, ManualCashFlowRequest,
+    AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
+    TransactionListResponse, CashFlowRow, PerformancePoint, SyncStatus, ManualCashFlowRequest,
 )
 from app.services.sync import full_backfill, incremental_update, get_sync_state
 from app.services.finnhub_market_data import (
@@ -25,8 +24,15 @@ from app.services.finnhub_market_data import (
 )
 from app.services.account_scope import resolve_account_ids
 from app.services.account_clients import get_client_for_account
-from app.services.date_filters import parse_iso_date
+from app.services.portfolio_activity_read import (
+    get_portfolio_cash_flows_data,
+    get_portfolio_transactions_data,
+)
 from app.services.benchmark_read import get_benchmark_history_data
+from app.services.portfolio_holdings_read import (
+    get_portfolio_holdings_data,
+    get_portfolio_holdings_history_data,
+)
 from app.services.portfolio_live_overlay import get_portfolio_live_summary_data
 from app.services.portfolio_read import get_portfolio_performance_data, get_portfolio_summary_data
 from app.config import load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
@@ -149,7 +155,7 @@ def get_performance(
 # Holdings
 # ------------------------------------------------------------------
 
-@router.get("/holdings")
+@router.get("/holdings", response_model=PortfolioHoldingsResponse)
 def get_holdings(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
     target_date: Optional[str] = Query(None, alias="date", description="YYYY-MM-DD"),
@@ -157,117 +163,31 @@ def get_holdings(
 ):
     """Holdings for a specific date (defaults to latest)."""
     ids = _resolve_account_ids(db, account_id)
+    return get_portfolio_holdings_data(
+        db=db,
+        account_ids=ids,
+        target_date=target_date,
+        get_client_for_account_fn=get_client_for_account,
+    )
 
-    base_query = db.query(HoldingsHistory).filter(HoldingsHistory.account_id.in_(ids))
-
-    rows = []
-    latest_date = None
-    if target_date:
-        d = parse_iso_date(target_date, "date")
-        rows = base_query.filter(
-            HoldingsHistory.date <= d
-        ).order_by(HoldingsHistory.date.desc()).all()
-        if rows:
-            latest_date = rows[0].date
-            rows = [r for r in rows if r.date == latest_date]
-        else:
-            latest_date = d
-    else:
-        ld = base_query.with_entities(HoldingsHistory.date).order_by(
-            HoldingsHistory.date.desc()
-        ).first()
-        if ld:
-            latest_date = ld[0]
-            rows = base_query.filter_by(date=latest_date).all()
-
-    # Fetch notional values from Composer holding-stats for market-value-based allocation
-    # For single account, call the API; for aggregate, call each sub-account
-    # For __TEST__ accounts, derive values from stored allocation data
-    notional_map = {}
-    test_ids = {a.id for a in db.query(Account).filter_by(credential_name="__TEST__").all()}
-    for aid in ids:
-        if aid in test_ids:
-            # Compute market values from SymphonyAllocationHistory for test accounts
-            from app.models import SymphonyAllocationHistory
-            alloc_rows = (
-                db.query(SymphonyAllocationHistory)
-                .filter_by(account_id=aid)
-                .order_by(SymphonyAllocationHistory.date.desc())
-                .all()
-            )
-            if alloc_rows:
-                alloc_date = alloc_rows[0].date
-                for r in alloc_rows:
-                    if r.date == alloc_date and r.value > 0:
-                        notional_map[r.ticker] = notional_map.get(r.ticker, 0) + r.value
-            continue
-        try:
-            client = get_client_for_account(db, aid)
-            stats = client.get_holding_stats(aid)
-            for h in stats.get("holdings", []):
-                sym = h.get("symbol", "")
-                if sym and sym != "$USD":
-                    notional_map[sym] = notional_map.get(sym, 0) + float(h.get("notional_value", 0))
-        except Exception:
-            pass  # Fall back to quantity-based if API fails
-
-    # Aggregate holdings by symbol (for multi-account)
-    holdings_by_symbol = {}
-    for r in rows:
-        if r.symbol in holdings_by_symbol:
-            holdings_by_symbol[r.symbol]["quantity"] += r.quantity
-        else:
-            holdings_by_symbol[r.symbol] = {"symbol": r.symbol, "quantity": r.quantity}
-
-    if holdings_by_symbol:
-        # Have stored history — merge with notional values
-        holdings = []
-        for sym, h in holdings_by_symbol.items():
-            market_value = notional_map.get(sym, 0.0)
-            holdings.append({
-                "symbol": sym,
-                "quantity": h["quantity"],
-                "market_value": round(market_value, 2),
-            })
-    elif notional_map:
-        # No stored history but API returned holding stats — use API data directly
-        holdings = [
-            {"symbol": sym, "quantity": 0, "market_value": round(val, 2)}
-            for sym, val in notional_map.items()
-        ]
-        latest_date = date.today()
-    else:
-        return {"date": str(latest_date) if latest_date else None, "holdings": []}
-
-    total_value = sum(h["market_value"] for h in holdings)
-    for h in holdings:
-        h["allocation_pct"] = round(h["market_value"] / total_value * 100, 2) if total_value > 0 else 0
-
-    return {"date": str(latest_date), "holdings": holdings}
-
-
-@router.get("/holdings-history")
+@router.get("/holdings-history", response_model=List[HoldingsHistoryRow])
 def get_holdings_history(
     account_id: Optional[str] = Query(None, description="Sub-account ID"),
     db: Session = Depends(get_db),
 ):
     """All holdings history dates with position counts."""
-    from sqlalchemy import func
     ids = _resolve_account_ids(db, account_id)
-    rows = db.query(
-        HoldingsHistory.date,
-        func.count(HoldingsHistory.symbol).label("num_positions"),
-    ).filter(
-        HoldingsHistory.account_id.in_(ids)
-    ).group_by(HoldingsHistory.date).order_by(HoldingsHistory.date).all()
-    return [{"date": str(r.date), "num_positions": r.num_positions} for r in rows]
+    return get_portfolio_holdings_history_data(
+        db=db,
+        account_ids=ids,
+    )
 
 
 # ------------------------------------------------------------------
 # Transactions
 # ------------------------------------------------------------------
 
-@router.get("/transactions")
+@router.get("/transactions", response_model=TransactionListResponse)
 def get_transactions(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
     symbol: Optional[str] = None,
@@ -277,61 +197,30 @@ def get_transactions(
 ):
     """Transaction history with optional symbol filter."""
     ids = _resolve_account_ids(db, account_id)
-    query = db.query(Transaction).filter(
-        Transaction.account_id.in_(ids)
-    ).order_by(Transaction.date.desc())
-    if symbol:
-        query = query.filter(Transaction.symbol == symbol.upper())
-    total = query.count()
-    rows = query.offset(offset).limit(limit).all()
-    # Build account name lookup
-    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
-    return {
-        "total": total,
-        "transactions": [
-            {
-                "date": str(r.date),
-                "symbol": r.symbol,
-                "action": r.action,
-                "quantity": r.quantity,
-                "price": r.price,
-                "total_amount": r.total_amount,
-                "account_id": r.account_id,
-                "account_name": acct_names.get(r.account_id, r.account_id),
-            }
-            for r in rows
-        ],
-    }
+    return get_portfolio_transactions_data(
+        db=db,
+        account_ids=ids,
+        symbol=symbol,
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ------------------------------------------------------------------
 # Cash Flows
 # ------------------------------------------------------------------
 
-@router.get("/cash-flows")
+@router.get("/cash-flows", response_model=List[CashFlowRow])
 def get_cash_flows(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
     db: Session = Depends(get_db),
 ):
     """All deposits, fees, and dividends."""
     ids = _resolve_account_ids(db, account_id)
-    rows = db.query(CashFlow).filter(
-        CashFlow.account_id.in_(ids)
-    ).order_by(CashFlow.date).all()
-    # Build account name lookup
-    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
-    return [
-        {
-            "date": str(r.date),
-            "type": r.type,
-            "amount": r.amount,
-            "description": r.description,
-            "account_id": r.account_id,
-            "account_name": acct_names.get(r.account_id, r.account_id),
-        }
-        for r in rows
-    ]
-
+    return get_portfolio_cash_flows_data(
+        db=db,
+        account_ids=ids,
+    )
 
 @router.post("/cash-flows/manual")
 def add_manual_cash_flow(
@@ -555,5 +444,6 @@ def get_benchmark_history(
         get_daily_closes_fn=get_daily_closes,
         get_latest_price_fn=get_latest_price,
     )
+
 
 

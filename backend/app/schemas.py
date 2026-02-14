@@ -108,12 +108,23 @@ class PortfolioSummary(BaseModel):
 class HoldingSnapshot(BaseModel):
     symbol: str
     quantity: float
+    market_value: float = 0.0
     allocation_pct: Optional[float] = None
 
 
 class HoldingsForDate(BaseModel):
     date: date
     holdings: List[HoldingSnapshot]
+
+
+class PortfolioHoldingsResponse(BaseModel):
+    date: Optional[str] = None
+    holdings: List[HoldingSnapshot]
+
+
+class HoldingsHistoryRow(BaseModel):
+    date: str
+    num_positions: int
 
 
 # --- Transactions ---
@@ -124,6 +135,13 @@ class TransactionRow(BaseModel):
     quantity: float
     price: float
     total_amount: float
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
+
+
+class TransactionListResponse(BaseModel):
+    total: int
+    transactions: List[TransactionRow]
 
 
 # --- Cash Flows ---
@@ -132,6 +150,8 @@ class CashFlowRow(BaseModel):
     type: str
     amount: float
     description: str = ""
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
 
 
 # --- Performance chart data ---
