@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 
 import { DEFAULT_METRICS, SnapshotView } from "@/components/SnapshotView";
+import type { SnapshotChartMode } from "@/features/dashboard/snapshot/types";
 import type { ScreenshotConfig } from "@/lib/api";
 import type { DashboardSnapshotData } from "@/features/dashboard/types";
 
@@ -30,11 +31,7 @@ export function DashboardSnapshotRenderer({
         data={snapshotData.perf}
         summary={snapshotData.sum}
         chartMode={
-          (screenshotConfig.chart_mode || "twr") as
-            | "portfolio"
-            | "twr"
-            | "mwr"
-            | "drawdown"
+          (screenshotConfig.chart_mode || "twr") as SnapshotChartMode
         }
         selectedMetrics={
           screenshotConfig.metrics?.length

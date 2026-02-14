@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { X, FolderOpen, Check, Loader2, Camera } from "lucide-react";
 import { useSettingsModalState } from "@/features/settings/hooks/useSettingsModalState";
 import { CHART_MODES, PERIOD_OPTIONS } from "@/features/settings/options";
-import { METRIC_OPTIONS } from "@/components/SnapshotView";
+import { METRIC_OPTIONS } from "@/features/dashboard/snapshot/metricCards";
 
 interface Props {
   onClose: () => void;
