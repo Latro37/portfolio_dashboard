@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { isMarketOpen } from "@/lib/marketHours";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
@@ -18,7 +19,7 @@ export interface QuoteData {
  * never reaches the browser.
  *
  * Auto-reconnects with exponential backoff (max 30s).
- * Stays connected on weekdays from 9:30 AM to midnight ET (regular + extended hours).
+ * Only active during regular market hours (9:30 AM – 4:00 PM ET, weekdays).
  */
 export function useFinnhubQuotes(
   symbols: string[],
@@ -38,19 +39,15 @@ export function useFinnhubQuotes(
   // Stable sorted key for symbols to avoid unnecessary reconnects
   const symbolsKey = [...symbols].sort().join(",");
 
-  // Check if we should be connected (weekdays 9:30 AM – midnight ET)
+  // Check if we should be connected (regular market hours only)
   const shouldConnect = useCallback((): boolean => {
     if (!finnhubEnabled || symbols.length === 0) return false;
-    const et = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
-    const day = et.getDay();
-    if (day === 0 || day === 6) return false; // weekend
-    const mins = et.getHours() * 60 + et.getMinutes();
-    return mins >= 9 * 60 + 30; // 9:30 AM ET through midnight
+    return isMarketOpen();
   }, [finnhubEnabled, symbols.length]);
 
-  // Fetch previousClose for all symbols via backend proxy
+  // Fetch previousClose for all symbols via backend proxy (market hours only)
   const fetchPreviousCloses = useCallback(async () => {
-    if (!finnhubEnabled || symbols.length === 0) return;
+    if (!finnhubEnabled || symbols.length === 0 || !isMarketOpen()) return;
     const closes: Record<string, number> = {};
     try {
       const res = await fetch(
@@ -156,6 +153,13 @@ export function useFinnhubQuotes(
     mountedRef.current = true;
 
     if (!finnhubEnabled || symbols.length === 0) {
+      setQuotes({});
+      setConnected(false);
+      return;
+    }
+
+    // Only fetch and connect during market hours
+    if (!isMarketOpen()) {
       setQuotes({});
       setConnected(false);
       return;

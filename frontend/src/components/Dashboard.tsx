@@ -548,8 +548,8 @@ export default function Dashboard() {
           }}
         />
 
-        {/* Detail tabs: Transactions, Cash Flows, All Metrics */}
-        <DetailTabs accountId={resolvedAccountId} summary={summary ?? undefined} onDataChange={fetchData} />
+        {/* Detail tabs: Transactions, Non-Trade Activity */}
+        <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />
 
       </div>
 

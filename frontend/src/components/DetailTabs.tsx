@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { api, Summary, TransactionRow, CashFlowRow } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, TransactionRow, CashFlowRow } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -9,18 +9,15 @@ import { ArrowUpRight, ArrowDownRight, DollarSign, TrendingDown, Plus } from "lu
 
 interface Props {
   accountId?: string;
-  summary?: Summary;
   onDataChange?: () => void;
 }
 
-export function DetailTabs({ accountId, summary, onDataChange }: Props) {
+export function DetailTabs({ accountId, onDataChange }: Props) {
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [txTotal, setTxTotal] = useState(0);
   const [cashFlows, setCashFlows] = useState<CashFlowRow[]>([]);
   const [txPage, setTxPage] = useState(0);
   const PAGE_SIZE = 50;
-  const metricsRef = useRef<HTMLDivElement>(null);
-  const [metricsHeight, setMetricsHeight] = useState<number | null>(null);
 
   // Manual cash flow form state
   const [showManualForm, setShowManualForm] = useState(false);
@@ -59,11 +56,6 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
     api.getCashFlows(accountId).then((data) => setCashFlows(data));
   }, [accountId]);
 
-  useEffect(() => {
-    if (metricsRef.current) {
-      setMetricsHeight(metricsRef.current.scrollHeight);
-    }
-  }, [summary]);
 
   const loadTxPage = (page: number) => {
     setTxPage(page);
@@ -76,16 +68,15 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
 
   return (
     <Card className="border-border/50">
-      <Tabs defaultValue="metrics">
+      <Tabs defaultValue="transactions">
         <TabsList className="mx-4 mt-4">
-          <TabsTrigger value="metrics">All Metrics</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="cashflows">Non-Trade Activity</TabsTrigger>
         </TabsList>
 
         {/* Transactions */}
         <TabsContent value="transactions">
-          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { minHeight: metricsHeight, maxHeight: metricsHeight } : { minHeight: 500, maxHeight: 500 }}>
+          <CardContent className="pt-4 overflow-y-auto" style={{ minHeight: 500, maxHeight: 500 }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -148,7 +139,7 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
 
         {/* Cash Flows */}
         <TabsContent value="cashflows">
-          <CardContent className="pt-4 overflow-y-auto" style={metricsHeight ? { minHeight: metricsHeight, maxHeight: metricsHeight } : { minHeight: 500, maxHeight: 500 }}>
+          <CardContent className="pt-4 overflow-y-auto" style={{ minHeight: 500, maxHeight: 500 }}>
             {/* Manual entry form */}
             {!showManualForm ? (
               <div className="mb-4">
@@ -271,75 +262,6 @@ export function DetailTabs({ accountId, summary, onDataChange }: Props) {
           </CardContent>
         </TabsContent>
 
-        {/* All Metrics (latest row) */}
-        <TabsContent value="metrics">
-          <CardContent className="pt-4" ref={metricsRef}>
-            {summary && (() => {
-              const s = summary;
-              const fPct = (v: number) => v.toFixed(2) + "%";
-              const fRatio = (v: number) => v.toFixed(2);
-              const fInt = (v: number) => String(Math.round(v));
-
-              const sections: { title: string; items: { label: string; value: string }[] }[] = [
-                {
-                  title: "Returns",
-                  items: [
-                    { label: "Cumulative Return", value: fPct(s.cumulative_return_pct) },
-                    { label: "Annualized Return", value: fPct(s.annualized_return_cum) },
-                    { label: "TWR", value: fPct(s.time_weighted_return) },
-                    { label: "MWR", value: fPct(s.money_weighted_return_period) },
-                    { label: "Daily Return", value: fPct(s.daily_return_pct) },
-                  ],
-                },
-                {
-                  title: "Risk",
-                  items: [
-                    { label: "Max Drawdown", value: fPct(s.max_drawdown) },
-                    { label: "Current Drawdown", value: fPct(s.current_drawdown) },
-                    { label: "Annualized Volatility", value: fPct(s.annualized_volatility) },
-                  ],
-                },
-                {
-                  title: "Risk-Adjusted",
-                  items: [
-                    { label: "Sharpe Ratio", value: fRatio(s.sharpe_ratio) },
-                    { label: "Sortino Ratio", value: fRatio(s.sortino_ratio) },
-                    { label: "Calmar Ratio", value: fRatio(s.calmar_ratio) },
-                  ],
-                },
-                {
-                  title: "Win / Loss",
-                  items: [
-                    { label: "Win Rate", value: fPct(s.win_rate) },
-                    { label: "W / L", value: `${fInt(s.num_wins)} / ${fInt(s.num_losses)}` },
-                    { label: "Avg Win / Avg Loss", value: `${fPct(s.avg_win_pct)} / ${fPct(s.avg_loss_pct)}` },
-                    { label: "Best Day", value: fPct(s.best_day_pct) },
-                    { label: "Worst Day", value: fPct(s.worst_day_pct) },
-                    { label: "Profit Factor", value: fRatio(s.profit_factor) },
-                  ],
-                },
-              ];
-
-              return (
-                <div className="space-y-5">
-                  {sections.map((section) => (
-                    <div key={section.title}>
-                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">{section.title}</h4>
-                      <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-4">
-                        {section.items.map((item) => (
-                          <div key={item.label} className="flex justify-between gap-2 border-b border-border/20 pb-2">
-                            <span className="text-muted-foreground">{item.label}</span>
-                            <span className="font-medium tabular-nums">{item.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </CardContent>
-        </TabsContent>
       </Tabs>
     </Card>
   );
