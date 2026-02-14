@@ -1,4 +1,4 @@
-"""Stop script for Composer Portfolio Visualizer.
+"""Stop script for Portfolio Dashboard.
 
 Kills the backend (uvicorn/python on port 8000), frontend (node/next on port 3000),
 and any zombie child processes left behind.
@@ -150,7 +150,7 @@ def kill_orphan_node_next():
 
 def main():
     print("=" * 50)
-    print("  Stopping Composer Portfolio Visualizer")
+    print("  Stopping Portfolio Dashboard")
     print("=" * 50)
     total = 0
 

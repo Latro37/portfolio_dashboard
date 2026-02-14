@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Composer Portfolio Visualizer",
+    title="Portfolio Dashboard",
     version="1.0.0",
     lifespan=lifespan,
 )

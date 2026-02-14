@@ -11,11 +11,32 @@ logger = logging.getLogger(__name__)
 
 # Project root: two levels up from this file (backend/app/config.py -> project root)
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_deprecated_env_warned: set[str] = set()
+
+
+def _env_with_alias(primary_key: str, legacy_key: str) -> str:
+    """Read preferred env var with fallback to legacy alias."""
+    primary_val = os.environ.get(primary_key, "").strip()
+    if primary_val:
+        return primary_val
+    legacy_val = os.environ.get(legacy_key, "").strip()
+    if legacy_val and legacy_key not in _deprecated_env_warned:
+        logger.warning(
+            "Environment variable '%s' is deprecated; prefer '%s'.",
+            legacy_key,
+            primary_key,
+        )
+        _deprecated_env_warned.add(legacy_key)
+    return legacy_val
 
 
 def is_test_mode() -> bool:
-    """Return True when the app was launched with --test (CPV_TEST_MODE=1)."""
-    return os.environ.get("CPV_TEST_MODE", "") == "1"
+    """Return True when test mode env flag is enabled.
+
+    Preferred: PD_TEST_MODE=1
+    Legacy alias (temporary): CPV_TEST_MODE=1
+    """
+    return _env_with_alias("PD_TEST_MODE", "CPV_TEST_MODE") == "1"
 
 
 class AccountCredentials(BaseModel):
@@ -54,7 +75,7 @@ def get_settings() -> Settings:
 
     values = {k: v for k, v in overrides.items() if k in Settings.model_fields}
     # Allow test/local runners to force an isolated DB without editing config.json.
-    env_db_url = os.environ.get("CPV_DATABASE_URL", "").strip()
+    env_db_url = _env_with_alias("PD_DATABASE_URL", "CPV_DATABASE_URL")
     if env_db_url:
         values["database_url"] = env_db_url
 

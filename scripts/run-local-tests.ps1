@@ -13,6 +13,8 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"
 
+$env:PD_TEST_MODE = "1"
+$env:PD_DATABASE_URL = "sqlite:///data/portfolio_test.db"
 $env:CPV_TEST_MODE = "1"
 $env:CPV_DATABASE_URL = "sqlite:///data/portfolio_test.db"
 $env:NEXT_PUBLIC_API_URL = "http://localhost:8000/api"

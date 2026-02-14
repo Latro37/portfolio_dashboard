@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig, BenchmarkEntry } from "@/lib/api";
+import { api, Summary, PerformancePoint, HoldingsResponse, AccountInfo, SymphonyInfo, ScreenshotConfig } from "@/lib/api";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
 import { isMarketOpen, isAfterClose, todayET } from "@/lib/marketHours";
+import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
 import { PortfolioHeader } from "./PortfolioHeader";
 import { PerformanceChart } from "./PerformanceChart";
 import { MetricCards } from "./MetricCards";
@@ -23,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { toPng } from "html-to-image";
 
 type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
-const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
 export default function Dashboard() {
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
@@ -61,7 +61,6 @@ export default function Dashboard() {
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const snapshotRef = useRef<HTMLDivElement>(null);
   const [snapshotData, setSnapshotData] = useState<{ perf: PerformancePoint[]; sum: Summary; periodReturns?: { "1W"?: number; "1M"?: number; "YTD"?: number }; benchmarks?: import("./SnapshotView").SnapshotBenchmark[] } | null>(null);
-  const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
 
   // Finnhub real-time quotes for holdings
   const holdingSymbols = (holdings?.holdings ?? []).filter((h) => h.market_value > 0.01).map((h) => h.symbol);
@@ -74,31 +73,7 @@ export default function Dashboard() {
       ? `all:${selectedCredential}`
       : selectedSubAccount || undefined;
 
-  const clampLabel = (s: string) => s.length > 21 ? s.slice(0, 19) + "\u2026" : s;
-
-  const handleBenchmarkAdd = useCallback((ticker: string) => {
-    if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
-    const color = BENCH_COLORS.find((c) => !benchmarks.some((b) => b.color === c)) || BENCH_COLORS[0];
-    const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
-    setBenchmarks((prev) => [...prev, placeholder]);
-    if (ticker.startsWith("symphony:")) {
-      const symId = ticker.slice(9);
-      api.getSymphonyBenchmark(symId)
-        .then((res) => {
-          const label = clampLabel(res.name || symId);
-          setBenchmarks((prev) => prev.map((b) => b.ticker === ticker ? { ...b, label, data: res.data } : b));
-        })
-        .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
-    } else {
-      api.getBenchmarkHistory(ticker, undefined, undefined, resolvedAccountId)
-        .then((res) => setBenchmarks((prev) => prev.map((b) => b.ticker === ticker ? { ...b, data: res.data } : b)))
-        .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
-    }
-  }, [benchmarks, resolvedAccountId]);
-
-  const handleBenchmarkRemove = useCallback((ticker: string) => {
-    setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker));
-  }, []);
+  const { benchmarks, handleBenchmarkAdd, handleBenchmarkRemove } = useBenchmarkManager(resolvedAccountId);
 
   // Load accounts + config on mount
   useEffect(() => {

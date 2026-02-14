@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useId } from "react";
-import { PerformancePoint, BenchmarkPoint, BenchmarkEntry, SymphonyCatalogItem, api } from "@/lib/api";
+import { PerformancePoint, BenchmarkEntry, SymphonyCatalogItem, api } from "@/lib/api";
+import { adaptPortfolioChart } from "@/features/charting/portfolioChartAdapter";
+import { calcGradientOffset } from "@/features/charting/transforms";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   AreaChart,
@@ -132,62 +134,18 @@ export function PerformanceChart({
     ? { backgroundColor: color, color: "#1a1a1a", fontWeight: 700, boxShadow: `0 0 0 1px ${color}` }
     : { backgroundColor: `${color}20`, color, boxShadow: `0 0 0 1px ${color}66` };
 
-  // Filter out non-trading days (weekends) to avoid flat gaps in charts
-  const rawTradingData = data.filter((pt) => {
-    const day = new Date(pt.date + "T00:00").getDay();
-    return day !== 0 && day !== 6;
-  });
-
-  // Merge benchmark data into trading data by date (supports up to 3 benchmarks)
   const tradingData = useMemo<TradingChartPoint[]>(() => {
-    if (!benchmarks.length) return rawTradingData as TradingChartPoint[];
-    const benchStates = benchmarks.map((bench) => {
-      const map = new Map(bench.data.map((b: BenchmarkPoint) => [b.date, b]));
-      let baseGrowth: number | null = null;
-      for (const pt of rawTradingData) {
-        const bp = map.get(pt.date);
-        if (bp != null) { baseGrowth = 1 + bp.return_pct / 100; break; }
-      }
-      return { map, baseGrowth: baseGrowth ?? 1, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined, lastMwr: undefined as number | undefined };
-    });
-    return rawTradingData.map((pt) => {
-      const merged: TradingChartPoint = { ...pt };
-      benchStates.forEach((bs, i) => {
-        const b = bs.map.get(pt.date);
-        if (b != null) {
-          const rebasedReturn = bs.baseGrowth !== 0 ? ((1 + b.return_pct / 100) / bs.baseGrowth - 1) * 100 : 0;
-          const growth = 1 + rebasedReturn / 100;
-          bs.peak = Math.max(bs.peak, growth);
-          bs.lastReturn = rebasedReturn;
-          bs.lastDd = bs.peak > 0 ? (growth / bs.peak - 1) * 100 : 0;
-          bs.lastMwr = b.mwr_pct !== 0 ? b.mwr_pct : rebasedReturn;
-        }
-        merged[`bench_${i}_return`] = bs.lastReturn;
-        merged[`bench_${i}_drawdown`] = bs.lastDd;
-        merged[`bench_${i}_mwr`] = bs.lastMwr;
-      });
-      return merged;
-    });
-  }, [rawTradingData, benchmarks]);
+    const dataset = adaptPortfolioChart(data, benchmarks);
+    return dataset.points as TradingChartPoint[];
+  }, [data, benchmarks]);
 
   const hasBenchmark = benchmarks.length > 0;
   const singleBenchmark = benchmarks.length === 1;
 
   const hasData = tradingData.length > 0;
 
-  // Calculate gradient offset for TWR/MWR split coloring (where 0 falls in the range)
-  const calcGradientOffset = (key: keyof PerformancePoint) => {
-    if (!hasData) return 0.5;
-    const vals = tradingData.map((d) => Number(d[key]));
-    const max = Math.max(...vals);
-    const min = Math.min(...vals);
-    if (max <= 0) return 0;   // all negative
-    if (min >= 0) return 1;   // all positive
-    return max / (max - min);
-  };
-
-  const twrOffset = calcGradientOffset("time_weighted_return");
-  const mwrOffset = calcGradientOffset("money_weighted_return");
+  const twrOffset = calcGradientOffset(tradingData, "time_weighted_return");
+  const mwrOffset = calcGradientOffset(tradingData, "money_weighted_return");
 
   // Detect if data spans multiple calendar years
   const multiYear = hasData &&

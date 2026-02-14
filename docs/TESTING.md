@@ -5,7 +5,7 @@ This project supports local-only testing with:
 - deterministic synthetic profiles (`basic`, `power`)
 - Playwright E2E smoke tests
 - optional Playwright visual snapshot tests
-- strict DB isolation via `CPV_DATABASE_URL`
+- strict DB isolation via `PD_DATABASE_URL` (legacy `CPV_DATABASE_URL` alias supported)
 
 ## One-time Setup
 
@@ -33,10 +33,12 @@ npx playwright install chromium
 - Test DB: `data/portfolio_test.db`
 
 Always set:
-- `CPV_TEST_MODE=1`
-- `CPV_DATABASE_URL=sqlite:///data/portfolio_test.db`
+- `PD_TEST_MODE=1`
+- `PD_DATABASE_URL=sqlite:///data/portfolio_test.db`
 
-`start.py --test` now sets both automatically.
+Backward-compatible aliases still work during migration:
+- `CPV_TEST_MODE`
+- `CPV_DATABASE_URL`
 
 Account visibility behavior:
 - Test mode (`--test`): only `__TEST__` accounts are visible/usable.
@@ -64,6 +66,12 @@ Safety guard:
 ### Backend unit tests
 ```bash
 python -m pytest backend/tests/test_metrics.py -q
+```
+
+### Frontend unit tests
+```bash
+cd frontend
+npm run test:unit
 ```
 
 ### E2E smoke tests
