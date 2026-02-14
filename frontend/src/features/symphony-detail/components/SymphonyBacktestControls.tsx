@@ -3,7 +3,7 @@
 import { type RefObject } from "react";
 
 import { BenchmarkEntry, SymphonyCatalogItem } from "@/lib/api";
-import { ChartMode } from "@/components/PerformanceChart";
+import type { ChartMode } from "@/features/charting/types";
 import { SymphonyDetailPeriod, SYMPHONY_DETAIL_PERIODS } from "@/features/symphony-detail/types";
 
 type DatePoint = { date: string };

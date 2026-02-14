@@ -11,8 +11,8 @@ import {
   YAxis,
 } from "recharts";
 
-import { ChartMode } from "@/components/PerformanceChart";
 import { BenchmarkEntry } from "@/lib/api";
+import type { ChartMode } from "@/features/charting/types";
 import { formatPctAxis, toFiniteNumber } from "@/features/symphony-detail/utils";
 
 type TooltipEntry = {
