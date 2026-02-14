@@ -137,7 +137,7 @@ export function createOverlayTooltipRenderer({
                   color: primaryDayColor,
                 }}
               >
-                Delta to Prev. Day: {formatDelta(primaryDayDelta, formatters.formatPct)}
+                Δ to Prev. Day: {formatDelta(primaryDayDelta, formatters.formatPct)}
               </p>
             )}
           </div>
@@ -159,7 +159,7 @@ export function createOverlayTooltipRenderer({
               color: overlayDeltaColor,
             }}
           >
-            Delta : {formatDelta(overlayDelta, formatters.formatPct)}
+            Δ: {formatDelta(overlayDelta, formatters.formatPct)}
           </p>
         )}
         {benchmarks.map((benchmark, index) => {
@@ -184,7 +184,7 @@ export function createOverlayTooltipRenderer({
                       primaryValue - benchmarkValue >= 0 ? "#10b981" : "#ef4444",
                   }}
                 >
-                  Delta :{" "}
+                  Δ:{" "}
                   {formatDelta(primaryValue - benchmarkValue, formatters.formatPct)}
                 </p>
               )}
@@ -260,7 +260,7 @@ export function createPortfolioTooltipRenderer({
                     color: dayColor,
                   }}
                 >
-                  Delta to Prev. Day: {formatDelta(dayDelta, formatters.formatPct)}
+                  Δ to Prev. Day: {formatDelta(dayDelta, formatters.formatPct)}
                 </p>
               )}
             </div>
@@ -323,7 +323,7 @@ export function createMwrTooltipRenderer({
                   color: dayColor,
                 }}
               >
-                Delta to Prev. Day: {formatDelta(dayDelta, formatters.formatPct)}
+                Δ to Prev. Day: {formatDelta(dayDelta, formatters.formatPct)}
               </p>
             )}
           </>
@@ -349,7 +349,7 @@ export function createMwrTooltipRenderer({
                     color: value - benchmarkValue >= 0 ? "#10b981" : "#ef4444",
                   }}
                 >
-                  Delta : {formatDelta(value - benchmarkValue, formatters.formatPct)}
+                  Δ: {formatDelta(value - benchmarkValue, formatters.formatPct)}
                 </p>
               )}
             </div>
