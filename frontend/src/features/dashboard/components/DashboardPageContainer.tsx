@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { AccountSwitcher } from "@/components/AccountSwitcher";
@@ -15,41 +15,29 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { SnapshotView, DEFAULT_METRICS } from "@/components/SnapshotView";
 import { SymphonyDetail } from "@/components/SymphonyDetail";
 import { SymphonyList } from "@/components/SymphonyList";
-import { ToastContainer, showToast } from "@/components/Toast";
+import { ToastContainer } from "@/components/Toast";
 import { TradePreview } from "@/components/TradePreview";
 import { Button } from "@/components/ui/button";
 import { useDashboardAccountScope } from "@/features/dashboard/hooks/useDashboardAccountScope";
 import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
 import { useDashboardBootstrap } from "@/features/dashboard/hooks/useDashboardBootstrap";
 import { useDashboardData } from "@/features/dashboard/hooks/useDashboardData";
+import { useDashboardLiveToggle } from "@/features/dashboard/hooks/useDashboardLiveToggle";
 import { useDashboardLiveOverlay } from "@/features/dashboard/hooks/useDashboardLiveOverlay";
 import { usePostCloseSyncAndSnapshot } from "@/features/dashboard/hooks/usePostCloseSyncAndSnapshot";
+import { useDashboardSymphonyRefresh } from "@/features/dashboard/hooks/useDashboardSymphonyRefresh";
+import { useDashboardSymphonySelection } from "@/features/dashboard/hooks/useDashboardSymphonySelection";
+import { useDashboardSyncAction } from "@/features/dashboard/hooks/useDashboardSyncAction";
 import type { DashboardPeriod } from "@/features/dashboard/types";
 import { summarizeSymphonyDailyChange } from "@/features/dashboard/utils";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
-import { api, SymphonyInfo } from "@/lib/api";
 
 export default function DashboardPageContainer() {
   const [period, setPeriod] = useState<DashboardPeriod>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [selectedSymphony, setSelectedSymphony] = useState<SymphonyInfo | null>(
-    null,
-  );
-  const [symphonyScrollTo, setSymphonyScrollTo] = useState<
-    "trade-preview" | undefined
-  >(undefined);
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [symphoniesRefreshing, setSymphoniesRefreshing] = useState(false);
-  const [liveEnabled, setLiveEnabled] = useState(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("live_enabled");
-      return stored === null ? true : stored === "true";
-    }
-    return true;
-  });
   const {
     accounts,
     selectedCredential,
@@ -110,6 +98,10 @@ export default function DashboardPageContainer() {
     refreshDashboardData: fetchData,
   });
 
+  const { liveEnabled, toggleLive } = useDashboardLiveToggle({
+    restoreBaseData,
+  });
+
   const { applyLiveOverlay } = useDashboardLiveOverlay({
     liveEnabled,
     resolvedAccountId,
@@ -138,6 +130,26 @@ export default function DashboardPageContainer() {
       setLoading,
     });
 
+  const { syncing, handleSync } = useDashboardSyncAction({
+    isTestMode,
+    runSyncAndRefresh,
+    setError,
+  });
+
+  const {
+    selectedSymphony,
+    symphonyScrollTo,
+    handleSymphonySelect,
+    handleSymphonyClose,
+    handleTradePreviewSymphonyClick,
+  } = useDashboardSymphonySelection();
+
+  const { symphoniesRefreshing, refreshSymphonies } = useDashboardSymphonyRefresh({
+    resolvedAccountId,
+    setSymphonies,
+    applyLiveOverlay,
+  });
+
   const holdingSymbols = (holdings?.holdings ?? [])
     .filter((holding) => holding.market_value > 0.01)
     .map((holding) => holding.symbol);
@@ -148,33 +160,6 @@ export default function DashboardPageContainer() {
 
   const { todayDollarChange, todayPctChange, totalValue: symphonyTotalValue } =
     useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
-
-  const toggleLive = useCallback(
-    (enabled: boolean) => {
-      setLiveEnabled(enabled);
-      localStorage.setItem("live_enabled", String(enabled));
-      if (!enabled) {
-        restoreBaseData();
-      }
-    },
-    [restoreBaseData],
-  );
-
-  const handleSync = useCallback(async () => {
-    if (isTestMode) {
-      showToast("Sync is disabled in test mode. Seed test data instead.", "error");
-      return;
-    }
-
-    setSyncing(true);
-    try {
-      await runSyncAndRefresh();
-    } catch {
-      setError("Sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  }, [isTestMode, runSyncAndRefresh, setError]);
 
   if (loading && !summary) {
     return (
@@ -296,22 +281,8 @@ export default function DashboardPageContainer() {
         <SymphonyList
           symphonies={symphonies}
           showAccountColumn={showAccountColumn}
-          onSelect={(symphony) => {
-            setSelectedSymphony(symphony);
-            setSymphonyScrollTo(undefined);
-          }}
-          onRefresh={async () => {
-            setSymphoniesRefreshing(true);
-            try {
-              const nextSymphonies = await api.getSymphonies(resolvedAccountId);
-              setSymphonies(nextSymphonies);
-              await applyLiveOverlay(nextSymphonies);
-            } catch {
-              // Keep existing data if refresh fails.
-            } finally {
-              setSymphoniesRefreshing(false);
-            }
-          }}
+          onSelect={handleSymphonySelect}
+          onRefresh={refreshSymphonies}
           refreshLoading={symphoniesRefreshing}
           autoRefreshEnabled={liveEnabled}
         />
@@ -321,13 +292,9 @@ export default function DashboardPageContainer() {
           portfolioValue={symphonyTotalValue ?? summary?.portfolio_value}
           autoRefreshEnabled={liveEnabled}
           finnhubConfigured={finnhubConfigured}
-          onSymphonyClick={(symphonyId) => {
-            const match = symphonies.find((symphony) => symphony.id === symphonyId);
-            if (match) {
-              setSelectedSymphony(match);
-              setSymphonyScrollTo("trade-preview");
-            }
-          }}
+          onSymphonyClick={(symphonyId) =>
+            handleTradePreviewSymphonyClick(symphonyId, symphonies)
+          }
         />
 
         <DetailTabs accountId={resolvedAccountId} onDataChange={fetchData} />
@@ -336,10 +303,7 @@ export default function DashboardPageContainer() {
       {selectedSymphony && (
         <SymphonyDetail
           symphony={selectedSymphony}
-          onClose={() => {
-            setSelectedSymphony(null);
-            setSymphonyScrollTo(undefined);
-          }}
+          onClose={handleSymphonyClose}
           scrollToSection={symphonyScrollTo}
         />
       )}
