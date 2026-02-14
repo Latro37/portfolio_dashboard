@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { SymphonyInfo } from "@/lib/api";
 import { PerformanceChart } from "@/components/PerformanceChart";
-import type { ChartMode } from "@/features/charting/types";
 import { SymphonyBacktestControls } from "@/features/symphony-detail/components/SymphonyBacktestControls";
 import { SymphonyBacktestBenchmarkRow } from "@/features/symphony-detail/components/SymphonyBacktestBenchmarkRow";
 import { SymphonyBacktestChartPanel } from "@/features/symphony-detail/components/SymphonyBacktestChartPanel";
@@ -16,14 +15,9 @@ import { SymphonyHeaderSection } from "@/features/symphony-detail/components/Sym
 import { SymphonyLiveHoldingsSection } from "@/features/symphony-detail/components/SymphonyLiveHoldingsSection";
 import { SymphonyLiveMetricsSection } from "@/features/symphony-detail/components/SymphonyLiveMetricsSection";
 import { SymphonyTradePreviewSection } from "@/features/symphony-detail/components/SymphonyTradePreviewSection";
-import { useSymphonyBenchmarkManager } from "@/features/symphony-detail/hooks/useSymphonyBenchmarkManager";
-import { useSymphonyChartModels } from "@/features/symphony-detail/hooks/useSymphonyChartModels";
-import { useSymphonyDetailData } from "@/features/symphony-detail/hooks/useSymphonyDetailData";
+import { useSymphonyDetailController } from "@/features/symphony-detail/hooks/useSymphonyDetailController";
 import { useSymphonyDetailViewEffects } from "@/features/symphony-detail/hooks/useSymphonyDetailViewEffects";
-import {
-  SymphonyDetailPeriod,
-  SymphonyDetailTab,
-} from "@/features/symphony-detail/types";
+import { SymphonyDetailPeriod } from "@/features/symphony-detail/types";
 
 interface Props {
   symphony: SymphonyInfo;
@@ -32,36 +26,36 @@ interface Props {
 }
 
 type Period = SymphonyDetailPeriod;
-type Tab = SymphonyDetailTab;
 
 export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
-  const [tab, setTab] = useState<Tab>("live");
-  const [chartMode, setChartMode] = useState<ChartMode>("portfolio");
-  const [period, setPeriod] = useState<Period>("ALL");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
   const tradePreviewRef = useRef<HTMLDivElement>(null);
-  const [showBacktestOverlay, setShowBacktestOverlay] = useState(false);
-  const [showLiveOverlay, setShowLiveOverlay] = useState(false);
   const {
-    liveData,
+    tab,
+    setTab,
+    chartMode,
+    setChartMode,
+    period,
+    setPeriod,
+    customStart,
+    setCustomStart,
+    customEnd,
+    setCustomEnd,
+    showBacktestOverlay,
+    setShowBacktestOverlay,
+    showLiveOverlay,
+    toggleLiveOverlay,
+    oosDate,
+    clearCustomRange,
+    refreshBacktest,
+    refreshTradePreview,
+    refreshSymphonyCatalog,
     backtest,
-    liveSummary,
     liveAllocations,
     tradePreview,
     tradePreviewRefreshedAt,
     loadingLive,
     loadingBacktest,
     loadingTradePreview,
-    fetchBacktest,
-    fetchTradePreview,
-  } = useSymphonyDetailData({
-    symphony,
-    period,
-    customStart,
-    customEnd,
-  });
-  const {
     benchmarks,
     customInputVisible,
     customTickerInput,
@@ -72,32 +66,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     setCustomInputVisible,
     setCustomTickerInput,
     setCatalogDropdownOpen,
-    refreshSymphonyCatalog,
     addBenchmark,
     removeBenchmark,
-  } = useSymphonyBenchmarkManager(symphony.account_id);
-  const oosDate = useMemo(() => {
-    const timestamp = backtest?.last_semantic_update_at;
-    return timestamp ? timestamp.slice(0, 10) : "";
-  }, [backtest]);
-  const s = symphony;
-
-  useSymphonyDetailViewEffects({
-    scrollToSection,
-    tradePreview,
-    tradePreviewRef,
-  });
-  const btCustomInput = customInputVisible;
-  const btCustomTickerInput = customTickerInput;
-  const btCatalogMatches = catalogMatches;
-  const btDropdownRef = benchmarkDropdownRef;
-  const MAX_BENCHMARKS = maxBenchmarks;
-  const handleBenchmarkAdd = addBenchmark;
-  const handleBenchmarkRemove = removeBenchmark;
-  const setBtCustomInput = setCustomInputVisible;
-  const setBtCustomTickerInput = setCustomTickerInput;
-
-  const {
     filteredBacktestData,
     mergedLiveData,
     mergedBacktestData,
@@ -105,15 +75,12 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     btFormatDate,
     liveMetrics,
     btMetrics,
-  } = useSymphonyChartModels({
-    liveData,
-    backtest,
-    liveSummary,
-    benchmarks,
-    period,
-    customStart,
-    customEnd,
-    oosDate,
+  } = useSymphonyDetailController(symphony);
+
+  useSymphonyDetailViewEffects({
+    scrollToSection,
+    tradePreview,
+    tradePreviewRef,
   });
 
   return (
@@ -133,17 +100,15 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
         </button>
 
         <div className="p-6 space-y-6">
-          <SymphonyHeaderSection symphony={s} />
+          <SymphonyHeaderSection symphony={symphony} />
 
-          <SymphonyLiveMetricsSection symphony={s} liveMetrics={liveMetrics} />
+          <SymphonyLiveMetricsSection symphony={symphony} liveMetrics={liveMetrics} />
 
           <SymphonyDetailTabs
             tab={tab}
             onTabChange={setTab}
             loadingBacktest={loadingBacktest}
-            onRefreshBacktest={() => {
-              fetchBacktest(true).catch(() => undefined);
-            }}
+            onRefreshBacktest={refreshBacktest}
           />
 
           {/* Chart area */}
@@ -171,8 +136,8 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 onOverlayToggle={setShowBacktestOverlay}
                 drawdownOverlayKey="backtestDrawdown"
                 benchmarks={benchmarks}
-                onBenchmarkAdd={handleBenchmarkAdd}
-                onBenchmarkRemove={handleBenchmarkRemove}
+                onBenchmarkAdd={addBenchmark}
+                onBenchmarkRemove={removeBenchmark}
               />
             )
           ) : (
@@ -188,10 +153,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 onPeriodChange={setPeriod}
                 onCustomStartChange={setCustomStart}
                 onCustomEndChange={setCustomEnd}
-                onClearCustomRange={() => {
-                  setCustomStart("");
-                  setCustomEnd("");
-                }}
+                onClearCustomRange={clearCustomRange}
               />
 
               <SymphonyBacktestChartPanel
@@ -202,38 +164,33 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 btFormatDate={btFormatDate}
                 backtestTwrOffset={backtestTwrOffset}
                 showLiveOverlay={showLiveOverlay}
-                onToggleLiveOverlay={() => setShowLiveOverlay(!showLiveOverlay)}
+                onToggleLiveOverlay={toggleLiveOverlay}
                 benchmarks={benchmarks}
               />
 
               <SymphonyBacktestBenchmarkRow
                 hasData={filteredBacktestData.length > 0}
                 benchmarks={benchmarks}
-                maxBenchmarks={MAX_BENCHMARKS}
-                customInputVisible={btCustomInput}
-                customTickerInput={btCustomTickerInput}
+                maxBenchmarks={maxBenchmarks}
+                customInputVisible={customInputVisible}
+                customTickerInput={customTickerInput}
                 catalogDropdownOpen={catalogDropdownOpen}
-                catalogMatches={btCatalogMatches}
-                benchmarkDropdownRef={btDropdownRef}
-                onAddBenchmark={handleBenchmarkAdd}
-                onRemoveBenchmark={handleBenchmarkRemove}
-                onCustomInputVisibleChange={setBtCustomInput}
-                onCustomTickerInputChange={setBtCustomTickerInput}
+                catalogMatches={catalogMatches}
+                benchmarkDropdownRef={benchmarkDropdownRef}
+                onAddBenchmark={addBenchmark}
+                onRemoveBenchmark={removeBenchmark}
+                onCustomInputVisibleChange={setCustomInputVisible}
+                onCustomTickerInputChange={setCustomTickerInput}
                 onCatalogDropdownOpenChange={setCatalogDropdownOpen}
-                onRefreshCatalog={() => {
-                  refreshSymphonyCatalog().catch(() => undefined);
-                }}
+                onRefreshCatalog={refreshSymphonyCatalog}
               />
 
               <BacktestMetricsSummary btMetrics={btMetrics} show={filteredBacktestData.length >= 2} />
             </div>
           )}
 
-          {tab === "live" && <SymphonyLiveHoldingsSection holdings={s.holdings} />}
-
-          {tab === "backtest" && (
-            <SymphonyBacktestHoldingsSection tdvmWeights={backtest?.tdvm_weights} />
-          )}
+          {tab === "live" && <SymphonyLiveHoldingsSection holdings={symphony.holdings} />}
+          {tab === "backtest" && <SymphonyBacktestHoldingsSection tdvmWeights={backtest?.tdvm_weights} />}
 
           {tab === "live" && (
             <div ref={tradePreviewRef}>
@@ -241,9 +198,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 tradePreview={tradePreview}
                 tradePreviewRefreshedAt={tradePreviewRefreshedAt}
                 loadingTradePreview={loadingTradePreview}
-                onRefresh={() => {
-                  fetchTradePreview().catch(() => undefined);
-                }}
+                onRefresh={refreshTradePreview}
               />
             </div>
           )}
