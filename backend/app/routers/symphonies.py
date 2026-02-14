@@ -8,12 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    Account, SymphonyAllocationHistory,
+    Account,
 )
 
 from app.composer_client import ComposerClient
 from app.config import load_accounts
 from app.services.backtest_cache import get_symphony_backtest_data
+from app.services.symphony_allocations_read import get_symphony_allocations_data
 from app.services.symphony_benchmark_read import get_symphony_benchmark_data
 from app.services.symphony_catalog import get_symphony_catalog_data
 from app.services.symphony_list_read import get_symphonies_list_data
@@ -207,24 +208,11 @@ def get_symphony_allocations(
     db: Session = Depends(get_db),
 ):
     """Return daily allocation history for a symphony (from sync snapshots)."""
-    rows = (
-        db.query(SymphonyAllocationHistory)
-        .filter_by(account_id=account_id, symphony_id=symphony_id)
-        .order_by(SymphonyAllocationHistory.date)
-        .all()
+    return get_symphony_allocations_data(
+        db=db,
+        symphony_id=symphony_id,
+        account_id=account_id,
     )
-    if not rows:
-        return {}
-
-    # Build {date_str: {ticker: allocation_pct}}
-    result: dict[str, dict[str, float]] = {}
-    for r in rows:
-        ds = str(r.date)
-        if ds not in result:
-            result[ds] = {}
-        result[ds][r.ticker] = r.allocation_pct
-
-    return result
 
 
 # ------------------------------------------------------------------
