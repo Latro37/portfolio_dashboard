@@ -7,6 +7,16 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas import (
+    PerformancePoint,
+    SymphonyBacktestResponse,
+    SymphonyBenchmarkResponse,
+    SymphonyCatalogRow,
+    SymphonyListRow,
+    SymphonySummary,
+    SymphonyTradePreviewResponse,
+    TradePreviewRow,
+)
 from app.services.account_clients import get_client_for_account
 from app.services.backtest_cache import get_symphony_backtest_data
 from app.services.symphony_allocations_read import get_symphony_allocations_data
@@ -34,7 +44,7 @@ TEST_CREDENTIAL = "__TEST__"
 # List symphonies
 # ------------------------------------------------------------------
 
-@router.get("/symphonies")
+@router.get("/symphonies", response_model=list[SymphonyListRow])
 def list_symphonies(
     account_id: Optional[str] = Query(None, description="Sub-account ID, all:<cred>, or all"),
     db: Session = Depends(get_db),
@@ -52,7 +62,7 @@ def list_symphonies(
 # Symphony catalog (name search for benchmarks)
 # ------------------------------------------------------------------
 
-@router.get("/symphony-catalog")
+@router.get("/symphony-catalog", response_model=list[SymphonyCatalogRow])
 def get_symphony_catalog(
     refresh: bool = Query(False, description="Force refresh from Composer API"),
     db: Session = Depends(get_db),
@@ -65,7 +75,7 @@ def get_symphony_catalog(
 # Symphony performance (live daily values)
 # ------------------------------------------------------------------
 
-@router.get("/symphonies/{symphony_id}/performance")
+@router.get("/symphonies/{symphony_id}/performance", response_model=list[PerformancePoint])
 def get_symphony_performance(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
@@ -80,7 +90,7 @@ def get_symphony_performance(
     )
 
 
-@router.get("/symphonies/{symphony_id}/summary")
+@router.get("/symphonies/{symphony_id}/summary", response_model=SymphonySummary)
 def get_symphony_summary(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
@@ -104,7 +114,7 @@ def get_symphony_summary(
 # Live Symphony Summary (intraday overlay)
 # ------------------------------------------------------------------
 
-@router.get("/symphonies/{symphony_id}/summary/live")
+@router.get("/symphonies/{symphony_id}/summary/live", response_model=SymphonySummary)
 def get_symphony_summary_live(
     symphony_id: str,
     live_pv: float = Query(..., description="Live symphony value"),
@@ -132,7 +142,7 @@ def get_symphony_summary_live(
 # Symphony backtest (cached)
 # ------------------------------------------------------------------
 
-@router.get("/symphonies/{symphony_id}/backtest")
+@router.get("/symphonies/{symphony_id}/backtest", response_model=SymphonyBacktestResponse)
 def get_symphony_backtest(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID for credentials"),
@@ -154,7 +164,7 @@ def get_symphony_backtest(
 # Symphony allocation history (live daily snapshots)
 # ------------------------------------------------------------------
 
-@router.get("/trade-preview")
+@router.get("/trade-preview", response_model=list[TradePreviewRow])
 def get_trade_preview(
     account_id: Optional[str] = Query(None, description="Sub-account ID, all:<cred>, or all"),
     db: Session = Depends(get_db),
@@ -168,7 +178,7 @@ def get_trade_preview(
     )
 
 
-@router.get("/symphonies/{symphony_id}/trade-preview")
+@router.get("/symphonies/{symphony_id}/trade-preview", response_model=SymphonyTradePreviewResponse)
 def get_symphony_trade_preview(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
@@ -184,7 +194,7 @@ def get_symphony_trade_preview(
     )
 
 
-@router.get("/symphonies/{symphony_id}/allocations")
+@router.get("/symphonies/{symphony_id}/allocations", response_model=dict[str, dict[str, float]])
 def get_symphony_allocations(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
@@ -202,7 +212,7 @@ def get_symphony_allocations(
 # Symphony benchmark (backtest as benchmark overlay)
 # ------------------------------------------------------------------
 
-@router.get("/symphony-benchmark/{symphony_id}")
+@router.get("/symphony-benchmark/{symphony_id}", response_model=SymphonyBenchmarkResponse)
 def get_symphony_benchmark(
     symphony_id: str,
     account_id: Optional[str] = Query(None, description="Account ID (used to find credentials)"),
