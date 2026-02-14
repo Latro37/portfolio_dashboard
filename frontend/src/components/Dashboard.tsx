@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { toPng } from "html-to-image";
 
 type Period = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
+const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
 export default function Dashboard() {
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
@@ -73,13 +74,11 @@ export default function Dashboard() {
       ? `all:${selectedCredential}`
       : selectedSubAccount || undefined;
 
-  const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"];
   const clampLabel = (s: string) => s.length > 21 ? s.slice(0, 19) + "\u2026" : s;
-  const pickColor = (current: BenchmarkEntry[]) => BENCH_COLORS.find((c) => !current.some((b) => b.color === c)) || BENCH_COLORS[0];
 
   const handleBenchmarkAdd = useCallback((ticker: string) => {
     if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
-    const color = pickColor(benchmarks);
+    const color = BENCH_COLORS.find((c) => !benchmarks.some((b) => b.color === c)) || BENCH_COLORS[0];
     const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
     setBenchmarks((prev) => [...prev, placeholder]);
     if (ticker.startsWith("symphony:")) {
@@ -420,7 +419,7 @@ export default function Dashboard() {
     try {
       await api.triggerSync(resolvedAccountId);
       await fetchData();
-    } catch (e) {
+    } catch {
       setError("Sync failed");
     } finally {
       setSyncing(false);

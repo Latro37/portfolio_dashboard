@@ -178,6 +178,7 @@ export function useFinnhubQuotes(
         connectWS();
       }
     }, 60_000);
+    const subscribedSymbolsSnapshot = subscribedSymbols.current;
 
     return () => {
       mountedRef.current = false;
@@ -185,7 +186,7 @@ export function useFinnhubQuotes(
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       // Unsubscribe and close
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        for (const sym of subscribedSymbols.current) {
+        for (const sym of subscribedSymbolsSnapshot) {
           try {
             wsRef.current.send(JSON.stringify({ type: "unsubscribe", symbol: sym }));
           } catch { /* ignore */ }
@@ -193,7 +194,7 @@ export function useFinnhubQuotes(
         wsRef.current.close();
       }
       wsRef.current = null;
-      subscribedSymbols.current.clear();
+      subscribedSymbolsSnapshot.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finnhubEnabled, symbolsKey]);

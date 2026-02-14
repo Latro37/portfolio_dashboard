@@ -27,10 +27,6 @@ function fmtPct(v: number) {
   return v >= 0 ? "+" + s : s;
 }
 
-function fmtDollar(v: number) {
-  return "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 function colorPct(v: number) {
   return v >= 0 ? "text-emerald-400" : "text-red-400";
 }

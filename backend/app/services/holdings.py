@@ -1,10 +1,18 @@
 """Reconstruct historical holdings by replaying trade-activity transactions."""
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, List
 
-import yfinance as yf
+from app.services.finnhub_market_data import (
+    FinnhubAccessError,
+    FinnhubError,
+    PolygonAccessError,
+    PolygonError,
+    PolygonNotConfiguredError,
+    get_splits,
+    get_splits_polygon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +36,52 @@ def _parse_date(date_str: str):
 
 
 def get_splits_by_date(symbols: List[str], since: str = "2020-01-01") -> Dict[str, List]:
-    """Fetch stock split history from yfinance.
+    """Fetch stock split history from Finnhub.
 
     Returns {date_str: [(symbol, ratio), ...]}.
     """
     splits_by_date: Dict[str, list] = {}
+    try:
+        since_date = date.fromisoformat(since[:10])
+    except Exception:
+        since_date = date(2020, 1, 1)
+    end_date = datetime.now().date()
+
+    finnhub_warning_emitted = False
+    polygon_warning_emitted = False
     for sym in symbols:
+        events: List[tuple[date, float]] = []
         try:
-            ticker = yf.Ticker(sym)
-            splits = ticker.splits
-            if splits is not None and len(splits) > 0:
-                recent = splits[splits.index >= since]
-                for dt, ratio in recent.items():
-                    ds = dt.strftime("%Y-%m-%d")
-                    splits_by_date.setdefault(ds, []).append((sym, float(ratio)))
-                    logger.info("Split: %s %.2f:1 on %s", sym, float(ratio), ds)
+            events = get_splits(sym, since_date, end_date)
+        except FinnhubAccessError as e:
+            if not finnhub_warning_emitted:
+                logger.warning("Finnhub split data is unavailable: %s", e)
+                finnhub_warning_emitted = True
+        except FinnhubError:
+            pass
         except Exception:
             pass
+
+        if not events:
+            try:
+                events = get_splits_polygon(sym, since_date, end_date)
+            except PolygonNotConfiguredError as e:
+                if not polygon_warning_emitted:
+                    logger.warning("Polygon split data is unavailable: %s", e)
+                    polygon_warning_emitted = True
+            except PolygonAccessError as e:
+                if not polygon_warning_emitted:
+                    logger.warning("Polygon split access denied: %s", e)
+                    polygon_warning_emitted = True
+            except PolygonError:
+                pass
+            except Exception:
+                pass
+
+        for dt, ratio in events:
+            ds = dt.strftime("%Y-%m-%d")
+            splits_by_date.setdefault(ds, []).append((sym, float(ratio)))
+            logger.info("Split: %s x%.6f on %s", sym, float(ratio), ds)
     return splits_by_date
 
 

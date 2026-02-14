@@ -11,6 +11,7 @@ import requests
 from app.config import get_settings, AccountCredentials
 
 logger = logging.getLogger(__name__)
+_DEFAULT_HTTP_TIMEOUT = 30
 
 # Map Composer account_type strings to friendly display names
 ACCOUNT_TYPE_DISPLAY = {
@@ -57,7 +58,7 @@ class ComposerClient:
 
     def _get_json(self, endpoint: str, params: dict = None) -> dict:
         url = f"{self.base_url}/{endpoint}"
-        resp = requests.get(url, headers=self.headers, params=params)
+        resp = requests.get(url, headers=self.headers, params=params, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error(
@@ -70,7 +71,7 @@ class ComposerClient:
     def _get_csv(self, endpoint: str, params: dict = None) -> str:
         url = f"{self.base_url}/{endpoint}"
         hdrs = {**self.headers, "accept": "text/csv"}
-        resp = requests.get(url, headers=hdrs, params=params)
+        resp = requests.get(url, headers=hdrs, params=params, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error(
@@ -349,7 +350,7 @@ class ComposerClient:
             "backtest_version": "v2",
             "slippage_percent": 0.0005,
             "spread_markup": 0.001,
-        })
+        }, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error(
@@ -379,7 +380,7 @@ class ComposerClient:
         body = {"send_segment_event": False}
         if account_uuids:
             body["account_uuids"] = account_uuids
-        resp = requests.post(url, headers=self.headers, json=body)
+        resp = requests.post(url, headers=self.headers, json=body, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error("RATE LIMITED (429) on POST dry-run — Retry-After: %s", retry_after)
@@ -399,7 +400,7 @@ class ComposerClient:
         body: Dict = {}
         if broker_account_uuid:
             body["broker_account_uuid"] = broker_account_uuid
-        resp = requests.post(url, headers=self.headers, json=body)
+        resp = requests.post(url, headers=self.headers, json=body, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error("RATE LIMITED (429) on POST trade-preview %s — Retry-After: %s", symphony_id, retry_after)
@@ -431,7 +432,7 @@ class ComposerClient:
         """
         url = f"{self._backtest_api_base}/api/v1/watchlist"
         try:
-            resp = requests.get(url, headers=self.headers)
+            resp = requests.get(url, headers=self.headers, timeout=_DEFAULT_HTTP_TIMEOUT)
             resp.raise_for_status()
             data = resp.json()
             items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
@@ -449,7 +450,7 @@ class ComposerClient:
         """
         url = f"{self._backtest_api_base}/api/v1/user/symphonies/drafts"
         try:
-            resp = requests.get(url, headers=self.headers)
+            resp = requests.get(url, headers=self.headers, timeout=_DEFAULT_HTTP_TIMEOUT)
             resp.raise_for_status()
             data = resp.json()
             items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))

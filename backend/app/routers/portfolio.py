@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db
 from app.models import (
@@ -21,14 +22,29 @@ from app.schemas import (
 )
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
+from app.services.finnhub_market_data import (
+    FinnhubAccessError,
+    FinnhubError,
+    get_daily_closes,
+    get_daily_closes_stooq,
+    get_latest_price,
+)
 from app.composer_client import ComposerClient
-from app.config import load_accounts, load_finnhub_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
+from app.config import load_accounts, load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
 
 # Simple in-memory sync lock
 _syncing = False
+
+
+def _parse_iso_date(value: str, field_name: str) -> date:
+    """Parse a YYYY-MM-DD date string or raise HTTP 400."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(400, f"Invalid {field_name}: expected YYYY-MM-DD")
 
 
 def _resolve_date_range(
@@ -38,10 +54,11 @@ def _resolve_date_range(
 ) -> tuple[Optional[date], Optional[date]]:
     """Convert period preset or custom range to (start, end) dates."""
     if start_date or end_date:
-        return (
-            date.fromisoformat(start_date) if start_date else None,
-            date.fromisoformat(end_date) if end_date else None,
-        )
+        start = _parse_iso_date(start_date, "start_date") if start_date else None
+        end = _parse_iso_date(end_date, "end_date") if end_date else None
+        if start and end and start > end:
+            raise HTTPException(400, "start_date cannot be after end_date")
+        return (start, end)
     if period and period != "ALL":
         today = date.today()
         offsets = {
@@ -613,7 +630,7 @@ def get_holdings(
     rows = []
     latest_date = None
     if target_date:
-        d = date.fromisoformat(target_date)
+        d = _parse_iso_date(target_date, "date")
         rows = base_query.filter(
             HoldingsHistory.date <= d
         ).order_by(HoldingsHistory.date.desc()).all()
@@ -789,6 +806,12 @@ def add_manual_cash_flow(
     db: Session = Depends(get_db),
 ):
     """The Composer API does not support automatic cash flow detection for certain account types (e.g. Roth IRAs). Manually add a dated deposit/withdrawal for accounts where reports fail."""
+    if body.account_id == "all" or body.account_id.startswith("all:"):
+        raise HTTPException(400, "account_id must be a specific sub-account UUID")
+
+    # Reuse account resolution for existence + test-mode visibility validation.
+    _resolve_account_ids(db, body.account_id)
+
     cf_type = body.type if body.type in ("deposit", "withdrawal") else "deposit"
     amount = abs(body.amount) if cf_type == "deposit" else -abs(body.amount)
 
@@ -892,6 +915,7 @@ def get_app_config():
     return {
         "finnhub_api_key": None,
         "finnhub_configured": load_finnhub_key() is not None,
+        "polygon_configured": load_polygon_key() is not None,
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
         "test_mode": is_test_mode(),
@@ -982,7 +1006,7 @@ async def upload_screenshot(request: Request):
 import math
 from datetime import datetime as _datetime
 
-_benchmark_cache: Dict[Tuple[str, str, str], Tuple[float, list]] = {}  # key -> (timestamp, data)
+_benchmark_cache: Dict[Tuple[str, str, str, str], Tuple[float, list]] = {}  # key -> (timestamp, data)
 _BENCHMARK_TTL = 3600  # 1 hour
 
 
@@ -995,17 +1019,31 @@ def get_benchmark_history(
     db: Session = Depends(get_db),
 ):
     """Fetch benchmark price history and compute TWR, drawdown, and MWR series."""
-    import yfinance as yf
     from app.services.metrics import compute_mwr
 
     ticker = ticker.strip().upper()
     if not ticker:
         raise HTTPException(400, "Ticker is required")
 
-    s_date = start_date or "2020-01-01"
-    # yfinance 'end' param is exclusive, so add 1 day to include today
-    e_date = end_date or str(date.today() + timedelta(days=1))
-    cache_key = (ticker, s_date, account_id or "")
+    if start_date:
+        start_dt = _parse_iso_date(start_date, "start_date")
+    else:
+        start_dt = date(2020, 1, 1)
+    if end_date:
+        end_dt = _parse_iso_date(end_date, "end_date")
+    else:
+        end_dt = date.today()
+    if start_dt > end_dt:
+        raise HTTPException(400, "start_date cannot be after end_date")
+
+    resolved_account_ids: List[str] = []
+    if account_id:
+        resolved_account_ids = _resolve_account_ids(db, account_id)
+
+    s_date = str(start_dt)
+    e_date = str(end_dt)
+    account_scope = ",".join(sorted(resolved_account_ids))
+    cache_key = (ticker, s_date, e_date, account_scope)
 
     # Check cache
     if cache_key in _benchmark_cache:
@@ -1013,25 +1051,30 @@ def get_benchmark_history(
         if time.time() - ts < _BENCHMARK_TTL:
             return {"ticker": ticker, "data": cached_data}
 
-    # Download from yfinance
-    closes: List[Tuple[date, float]] = []
-    try:
-        df = yf.download(ticker, start=s_date, end=e_date, progress=False)
-        if not df.empty:
-            for idx, row in df.iterrows():
-                d = idx.date() if hasattr(idx, "date") else idx
-                close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
-                if not math.isnan(close_val):
-                    closes.append((d, close_val))
-    except Exception as e:
-        logger.warning("yfinance download failed for %s: %s", ticker, e)
+    # Free historical source: use Stooq for daily history.
+    closes: List[Tuple[date, float]] = get_daily_closes_stooq(ticker, start_dt, end_dt)
 
-    # Fallback to DB benchmark_data if yfinance returned nothing
+    # Optional paid source: fallback to Finnhub candles if Stooq has no rows.
+    finnhub_error: Optional[str] = None
     if not closes:
-        s_dt = date.fromisoformat(s_date) if start_date else date(2020, 1, 1)
+        try:
+            closes = get_daily_closes(ticker, start_dt, end_dt)
+        except FinnhubAccessError as e:
+            finnhub_error = str(e)
+            logger.warning("Finnhub access denied for %s candles: %s", ticker, e)
+        except FinnhubError as e:
+            finnhub_error = str(e)
+            logger.warning("Finnhub candle request failed for %s: %s", ticker, e)
+
+    # Fallback to DB benchmark_data if external sources returned nothing.
+    if not closes:
         db_rows = (
             db.query(BenchmarkData)
-            .filter(BenchmarkData.symbol == ticker, BenchmarkData.date >= s_dt)
+            .filter(
+                BenchmarkData.symbol == ticker,
+                BenchmarkData.date >= start_dt,
+                BenchmarkData.date <= end_dt,
+            )
             .order_by(BenchmarkData.date)
             .all()
         )
@@ -1040,22 +1083,26 @@ def get_benchmark_history(
             logger.info("Benchmark %s: using %d rows from DB fallback", ticker, len(closes))
 
     if not closes:
+        if finnhub_error:
+            raise HTTPException(
+                502,
+                f"Finnhub benchmark data unavailable for '{ticker}': {finnhub_error}",
+            )
         raise HTTPException(400, f"No valid price data for '{ticker}'")
 
     closes.sort(key=lambda x: x[0])
 
     # Fill today's price if missing (handles pre-market / after-hours gap)
     today = date.today()
-    if closes[-1][0] < today:
+    if closes[-1][0] < today <= end_dt:
         try:
-            t = yf.Ticker(ticker)
-            live_price = t.fast_info.get("lastPrice") or t.fast_info.get("last_price")
+            live_price = get_latest_price(ticker)
             if live_price and not math.isnan(live_price):
                 closes.append((today, float(live_price)))
             else:
                 # Carry forward last close
                 closes.append((today, closes[-1][1]))
-        except Exception:
+        except FinnhubError:
             closes.append((today, closes[-1][1]))
 
     # Compute TWR (cumulative return from first date)
@@ -1075,11 +1122,11 @@ def get_benchmark_history(
 
     # Compute MWR series (simulate user's cash flows into the benchmark)
     mwr_series: List[float] = [0.0] * len(closes)
-    if account_id:
-        # Load external cash flows for this account
+    if resolved_account_ids:
+        # Load external cash flows for this account scope
         cf_query = db.query(CashFlow).filter(
-            CashFlow.account_id == account_id,
-            CashFlow.type.in_(["DEPOSIT", "WITHDRAWAL"]),
+            CashFlow.account_id.in_(resolved_account_ids),
+            func.lower(CashFlow.type).in_(["deposit", "withdrawal"]),
         ).order_by(CashFlow.date).all()
 
         ext_flows: Dict[date, float] = {}

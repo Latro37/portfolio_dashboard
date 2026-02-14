@@ -167,6 +167,27 @@ To see live price changes next to each holding (e.g. "+$1.23 (+0.5%)"):
 
 Without this key, the dashboard works normally — you just won't see real-time ticker badges.
 
+### Optional: Split Event Fallback (Free Polygon Key)
+
+Split events are used to reconstruct historical holdings quantities accurately.
+
+1. Go to [polygon.io](https://polygon.io/) and create a free account (or sign in).
+2. Open your dashboard: [polygon.io/dashboard](https://polygon.io/dashboard).
+3. Go to **API Keys** in the dashboard and copy your key.
+4. Add it to `config.json`:
+   ```json
+   {
+     "finnhub_api_key": "your-finnhub-key",
+     "polygon_api_key": "your-polygon-key",
+     "accounts": [ ... ]
+   }
+   ```
+5. Restart the backend (or rerun `python start.py`) so the new key is loaded.
+
+Provider order for split data is:
+- Finnhub split API (if your Finnhub plan includes it)
+- Polygon split API fallback (free key)
+
 ### Optional: Advanced Settings
 
 You can customize advanced settings by adding a `settings` block to your `config.json`:
@@ -432,7 +453,7 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 - **The backend only listens on localhost** (`127.0.0.1`). It is not accessible from other devices on your network.
 - **CORS is restricted** to `http://localhost:3000` — only the local frontend can make API requests to the backend.
 - **Finnhub API key is never sent to the browser.** All Finnhub requests (REST quotes and WebSocket streams) are proxied through the backend.
-- **All network traffic goes directly to Composer's API** (`api.composer.trade`) and optionally Finnhub (`finnhub.io`) for real-time quotes. This app does not send data to any other server.
+- **All network traffic goes directly to Composer's API** (`api.composer.trade`) and market-data providers used by enabled features: Finnhub (`finnhub.io`), Stooq (`stooq.com`) for historical benchmark candles, and optionally Polygon (`polygon.io`) for split-event fallback.
 - **No telemetry or analytics.** Nothing is phoned home.
 - **All data is stored locally** in a SQLite database file. Nothing is uploaded anywhere.
 - **The code is fully auditable.** Every file is plain-text source code you can review before running.

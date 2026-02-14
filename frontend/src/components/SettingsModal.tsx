@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Check, Loader2, Camera } from "lucide-react";
-import { api, AppConfig, ScreenshotConfig, AccountInfo } from "@/lib/api";
+import { api, ScreenshotConfig, AccountInfo } from "@/lib/api";
 import { METRIC_OPTIONS, DEFAULT_METRICS } from "./SnapshotView";
 
 const CHART_MODES = [
@@ -39,7 +39,6 @@ const defaultScreenshot: ScreenshotConfig = {
 };
 
 export function SettingsModal({ onClose }: Props) {
-  const [config, setConfig] = useState<AppConfig | null>(null);
   const [localPath, setLocalPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -60,7 +59,6 @@ export function SettingsModal({ onClose }: Props) {
 
   useEffect(() => {
     api.getConfig().then((cfg) => {
-      setConfig(cfg);
       setLocalPath(cfg.symphony_export?.local_path || "");
       if (cfg.screenshot) {
         setSs({ ...defaultScreenshot, ...cfg.screenshot });
