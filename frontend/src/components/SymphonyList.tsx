@@ -111,7 +111,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
                   <InfoTooltip text="Cumulative Return" />
                 </span>
               </th>
-              <th className="pb-2 font-medium text-right whitespace-nowrap">
+              <th className="pb-2 pr-3 font-medium text-right whitespace-nowrap">
                 <span className="inline-flex items-center gap-1 justify-end">
                   TWR
                   <InfoTooltip text="Time Weighted Return" />
@@ -158,7 +158,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
                 <td className={`py-2.5 pr-3 text-right whitespace-nowrap ${colorVal(s.cumulative_return_pct)}`}>
                   {fmtPct(s.cumulative_return_pct)}
                 </td>
-                <td className={`py-2.5 text-right whitespace-nowrap ${colorVal(s.time_weighted_return)}`}>
+                <td className={`py-2.5 pr-3 text-right whitespace-nowrap ${colorVal(s.time_weighted_return)}`}>
                   {fmtPct(s.time_weighted_return)}
                 </td>
               </tr>

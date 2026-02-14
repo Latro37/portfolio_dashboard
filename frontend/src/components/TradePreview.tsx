@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { api, TradePreviewItem } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
+import { isMarketOpen } from "@/lib/marketHours";
 
 interface PriceQuote {
   price: number;
@@ -53,7 +54,7 @@ export function TradePreview({ accountId, portfolioValue, onSymphonyClick, autoR
   const [priceQuotes, setPriceQuotes] = useState<Record<string, PriceQuote>>({});
 
   const fetchPrices = async (tickers: string[]) => {
-    if (!finnhubConfigured || tickers.length === 0) return;
+    if (!finnhubConfigured || tickers.length === 0 || !isMarketOpen()) return;
     const results: Record<string, PriceQuote> = {};
     try {
       const res = await fetch(

@@ -605,8 +605,25 @@ def get_holdings(
 
     # Fetch notional values from Composer holding-stats for market-value-based allocation
     # For single account, call the API; for aggregate, call each sub-account
+    # For __TEST__ accounts, derive values from stored allocation data
     notional_map = {}
+    test_ids = {a.id for a in db.query(Account).filter_by(credential_name="__TEST__").all()}
     for aid in ids:
+        if aid in test_ids:
+            # Compute market values from SymphonyAllocationHistory for test accounts
+            from app.models import SymphonyAllocationHistory
+            alloc_rows = (
+                db.query(SymphonyAllocationHistory)
+                .filter_by(account_id=aid)
+                .order_by(SymphonyAllocationHistory.date.desc())
+                .all()
+            )
+            if alloc_rows:
+                alloc_date = alloc_rows[0].date
+                for r in alloc_rows:
+                    if r.date == alloc_date and r.value > 0:
+                        notional_map[r.ticker] = notional_map.get(r.ticker, 0) + r.value
+            continue
         try:
             client = _get_client_for_account(db, aid)
             stats = client.get_holding_stats(aid)
@@ -811,7 +828,11 @@ def trigger_sync(
                 raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
             ids = [a.id for a in all_accts]
 
-        for aid in ids:
+        # Skip __TEST__ accounts (synthetic data, no real Composer credentials)
+        test_ids = {a.id for a in db.query(Account).filter_by(credential_name="__TEST__").all()}
+        sync_ids = [aid for aid in ids if aid not in test_ids]
+
+        for aid in sync_ids:
             client = _get_client_for_account(db, aid)
             state = get_sync_state(db, aid)
             if state.get("initial_backfill_done") == "true":
@@ -819,7 +840,7 @@ def trigger_sync(
             else:
                 full_backfill(db, client, aid)
             # Rate limit between accounts
-            if len(ids) > 1:
+            if len(sync_ids) > 1:
                 time.sleep(1)
 
         return {"status": "complete", "synced_accounts": len(ids)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useId } from "react";
 import { PerformancePoint, BenchmarkPoint, BenchmarkEntry, SymphonyCatalogItem, api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -67,6 +67,7 @@ export function PerformanceChart({
   onBenchmarkAdd,
   onBenchmarkRemove,
 }: Props) {
+  const _uid = useId().replace(/:/g, "");
   const [internalMode, setInternalMode] = useState<ChartMode>("portfolio");
   const mode = controlledMode ?? internalMode;
   const setMode = onChartModeChange ?? setInternalMode;
@@ -446,11 +447,11 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
-                <linearGradient id="pvGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`pvGrad${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
                   <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="depGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`depGrad${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#6366f1" stopOpacity={0.2} />
                   <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
                 </linearGradient>
@@ -477,7 +478,7 @@ export function PerformanceChart({
                   dataKey="net_deposits"
                   stroke="#6366f1"
                   strokeWidth={1.5}
-                  fill="url(#depGrad)"
+                  fill={`url(#depGrad${_uid})`}
                   dot={false}
                 />
               )}
@@ -487,7 +488,7 @@ export function PerformanceChart({
                   dataKey="portfolio_value"
                   stroke="#10b981"
                   strokeWidth={2}
-                  fill="url(#pvGrad)"
+                  fill={`url(#pvGrad${_uid})`}
                   dot={false}
                 />
               )}
@@ -497,13 +498,13 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
-                <linearGradient id="twrGradSplit" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`twrGradSplit${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
                   <stop offset={twrOffset} stopColor="#10b981" stopOpacity={0.05} />
                   <stop offset={twrOffset} stopColor="#ef4444" stopOpacity={0.15} />
                   <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
                 </linearGradient>
-                <linearGradient id="twrStrokeSplit" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`twrStrokeSplit${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset={twrOffset} stopColor="#10b981" />
                   <stop offset={twrOffset} stopColor="#ef4444" />
                 </linearGradient>
@@ -528,9 +529,9 @@ export function PerformanceChart({
               <Area
                 type="monotone"
                 dataKey="time_weighted_return"
-                stroke="url(#twrStrokeSplit)"
+                stroke={`url(#twrStrokeSplit${_uid})`}
                 strokeWidth={2}
-                fill="url(#twrGradSplit)"
+                fill={`url(#twrGradSplit${_uid})`}
                 dot={false}
               />
               {overlayKey && showOverlay && (
@@ -553,13 +554,13 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
-                <linearGradient id="mwrGradSplit" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`mwrGradSplit${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset={0} stopColor="#d946ef" stopOpacity={0.3} />
                   <stop offset={mwrOffset} stopColor="#d946ef" stopOpacity={0.05} />
                   <stop offset={mwrOffset} stopColor="#ef4444" stopOpacity={0.15} />
                   <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
                 </linearGradient>
-                <linearGradient id="mwrStrokeSplit" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`mwrStrokeSplit${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset={mwrOffset} stopColor="#d946ef" />
                   <stop offset={mwrOffset} stopColor="#ef4444" />
                 </linearGradient>
@@ -584,9 +585,9 @@ export function PerformanceChart({
               <Area
                 type="monotone"
                 dataKey="money_weighted_return"
-                stroke="url(#mwrStrokeSplit)"
+                stroke={`url(#mwrStrokeSplit${_uid})`}
                 strokeWidth={2}
-                fill="url(#mwrGradSplit)"
+                fill={`url(#mwrGradSplit${_uid})`}
                 dot={false}
               />
               {benchmarks.map((bench, i) => (
@@ -598,7 +599,7 @@ export function PerformanceChart({
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
-                <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={`ddGrad${_uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
                   <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
                 </linearGradient>
@@ -625,7 +626,7 @@ export function PerformanceChart({
                 dataKey="current_drawdown"
                 stroke="#ef4444"
                 strokeWidth={2}
-                fill="url(#ddGrad)"
+                fill={`url(#ddGrad${_uid})`}
                 baseValue={0}
                 dot={false}
               />
