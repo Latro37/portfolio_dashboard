@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   api,
@@ -10,6 +10,9 @@ import {
 } from "@/lib/api";
 import { isMarketOpen, isWithinTradingSession } from "@/lib/marketHours";
 import { SymphonyDetailPeriod } from "@/features/symphony-detail/types";
+import { useSymphonyBacktestState } from "@/features/symphony-detail/hooks/useSymphonyBacktestState";
+import { useSymphonyLivePerformanceState } from "@/features/symphony-detail/hooks/useSymphonyLivePerformanceState";
+import { useSymphonyTradePreviewState } from "@/features/symphony-detail/hooks/useSymphonyTradePreviewState";
 
 type Args = {
   symphony: SymphonyInfo;
@@ -38,75 +41,41 @@ export function useSymphonyDetailData({
   customStart,
   customEnd,
 }: Args): Result {
-  const [liveData, setLiveData] = useState<PerformancePoint[]>([]);
-  const [backtest, setBacktest] = useState<SymphonyBacktest | null>(null);
   const [liveSummary, setLiveSummary] = useState<SymphonySummary | null>(null);
-  const [liveAllocations, setLiveAllocations] = useState<
-    Record<string, Record<string, number>>
-  >({});
-  const [tradePreview, setTradePreview] = useState<SymphonyTradePreview | null>(
-    null,
+  const [liveAllocations, setLiveAllocations] = useState<Record<string, Record<string, number>>>(
+    {},
   );
-  const [tradePreviewRefreshedAt, setTradePreviewRefreshedAt] =
-    useState<Date | null>(null);
-  const [loadingLive, setLoadingLive] = useState(true);
-  const [loadingBacktest, setLoadingBacktest] = useState(true);
-  const [loadingTradePreview, setLoadingTradePreview] = useState(true);
-  const baseLiveDataRef = useRef<PerformancePoint[]>([]);
+
+  const {
+    liveData,
+    setLiveData,
+    baseLiveDataRef,
+    loadingLive,
+  } = useSymphonyLivePerformanceState({
+    symphonyId: symphony.id,
+    accountId: symphony.account_id,
+  });
+
+  const {
+    backtest,
+    loadingBacktest,
+    fetchBacktest,
+  } = useSymphonyBacktestState({
+    symphonyId: symphony.id,
+    accountId: symphony.account_id,
+  });
+
+  const {
+    tradePreview,
+    tradePreviewRefreshedAt,
+    loadingTradePreview,
+    fetchTradePreview,
+  } = useSymphonyTradePreviewState({
+    symphonyId: symphony.id,
+    accountId: symphony.account_id,
+  });
+
   const oosDate = backtest?.last_semantic_update_at?.slice(0, 10) || "";
-
-  useEffect(() => {
-    let active = true;
-    api
-      .getSymphonyPerformance(symphony.id, symphony.account_id)
-      .then((data) => {
-        if (!active) return;
-        setLiveData(data);
-        baseLiveDataRef.current = data;
-      })
-      .catch(() => {
-        if (!active) return;
-        setLiveData([]);
-        baseLiveDataRef.current = [];
-      })
-      .finally(() => {
-        if (active) setLoadingLive(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [symphony.id, symphony.account_id]);
-
-  const loadBacktest = useCallback(
-    (forceRefresh = false) =>
-      api
-        .getSymphonyBacktest(symphony.id, symphony.account_id, forceRefresh)
-        .then(setBacktest)
-        .catch(() => setBacktest(null)),
-    [symphony.id, symphony.account_id],
-  );
-
-  const fetchBacktest = useCallback(
-    async (forceRefresh = false) => {
-      setLoadingBacktest(true);
-      try {
-        await loadBacktest(forceRefresh);
-      } finally {
-        setLoadingBacktest(false);
-      }
-    },
-    [loadBacktest],
-  );
-
-  useEffect(() => {
-    let active = true;
-    loadBacktest().finally(() => {
-      if (active) setLoadingBacktest(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [loadBacktest]);
 
   useEffect(() => {
     api
@@ -115,39 +84,9 @@ export function useSymphonyDetailData({
       .catch(() => setLiveAllocations({}));
   }, [symphony.id, symphony.account_id]);
 
-  const loadTradePreview = useCallback(
-    () =>
-      api
-        .getSymphonyTradePreview(symphony.id, symphony.account_id)
-        .then((data) => {
-          setTradePreview(data);
-          setTradePreviewRefreshedAt(new Date());
-        })
-        .catch(() => setTradePreview(null)),
-    [symphony.id, symphony.account_id],
-  );
-
-  const fetchTradePreview = useCallback(async () => {
-    setLoadingTradePreview(true);
-    try {
-      await loadTradePreview();
-    } finally {
-      setLoadingTradePreview(false);
-    }
-  }, [loadTradePreview]);
-
-  useEffect(() => {
-    let active = true;
-    loadTradePreview().finally(() => {
-      if (active) setLoadingTradePreview(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [loadTradePreview]);
-
   const refreshLiveMetrics = useCallback(() => {
     if (!isMarketOpen()) return;
+
     const livePv = symphony.value;
     const base = baseLiveDataRef.current;
     const storedNetDeposits =
@@ -216,6 +155,8 @@ export function useSymphonyDetailData({
     customStart,
     customEnd,
     oosDate,
+    baseLiveDataRef,
+    setLiveData,
   ]);
 
   useEffect(() => {
