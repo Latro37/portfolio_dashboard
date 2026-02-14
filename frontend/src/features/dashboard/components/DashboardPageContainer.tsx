@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
 
 import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { DetailTabs } from "@/components/DetailTabs";
@@ -12,12 +11,14 @@ import { MetricCards } from "@/components/MetricCards";
 import { PerformanceChart } from "@/components/PerformanceChart";
 import { PortfolioHeader } from "@/components/PortfolioHeader";
 import { SettingsModal } from "@/components/SettingsModal";
-import { SnapshotView, DEFAULT_METRICS } from "@/components/SnapshotView";
 import { SymphonyDetail } from "@/components/SymphonyDetail";
 import { SymphonyList } from "@/components/SymphonyList";
 import { ToastContainer } from "@/components/Toast";
 import { TradePreview } from "@/components/TradePreview";
-import { Button } from "@/components/ui/button";
+import { DashboardErrorScreen } from "@/features/dashboard/components/DashboardErrorScreen";
+import { DashboardLiveToggleButton } from "@/features/dashboard/components/DashboardLiveToggleButton";
+import { DashboardLoadingScreen } from "@/features/dashboard/components/DashboardLoadingScreen";
+import { DashboardSnapshotRenderer } from "@/features/dashboard/components/DashboardSnapshotRenderer";
 import { useDashboardAccountScope } from "@/features/dashboard/hooks/useDashboardAccountScope";
 import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
 import { useDashboardBootstrap } from "@/features/dashboard/hooks/useDashboardBootstrap";
@@ -162,40 +163,17 @@ export default function DashboardPageContainer() {
     useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
 
   if (loading && !summary) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <DashboardLoadingScreen />;
   }
 
   if (error && !summary) {
-    const needsSync = error.includes("404") || error.includes("sync");
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-6 px-4 text-center">
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold">
-            {needsSync ? "No portfolio data yet" : "Something went wrong"}
-          </h2>
-          <p className="max-w-md text-sm text-muted-foreground">
-            {needsSync
-              ? isTestMode
-                ? "No test data was found. Seed the test database (basic/power profile), then reload."
-                : "Click the button below to fetch your portfolio history from Composer. This may take up to a minute on the first run."
-              : error}
-          </p>
-        </div>
-        {!isTestMode && (
-          <Button onClick={handleSync} disabled={syncing}>
-            {syncing ? (
-              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            {syncing ? "Syncing..." : "Initial Sync"}
-          </Button>
-        )}
-      </div>
+      <DashboardErrorScreen
+        error={error}
+        isTestMode={isTestMode}
+        syncing={syncing}
+        onSync={handleSync}
+      />
     );
   }
 
@@ -213,27 +191,10 @@ export default function DashboardPageContainer() {
           todayDollarChange={todayDollarChange}
           todayPctChange={todayPctChange}
           liveToggle={
-            <button
-              data-testid="toggle-live"
-              onClick={() => toggleLive(!liveEnabled)}
-              className="cursor-pointer flex items-center gap-2 rounded-full border border-border/50 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-              title={
-                liveEnabled
-                  ? "Live updates enabled - click to disable"
-                  : "Live updates disabled - click to enable"
-              }
-            >
-              <span
-                className={`inline-block h-2 w-2 rounded-full transition-colors ${
-                  liveEnabled
-                    ? "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]"
-                    : "bg-muted-foreground/40"
-                }`}
-              />
-              <span className={liveEnabled ? "text-foreground" : "text-muted-foreground"}>
-                Live
-              </span>
-            </button>
+            <DashboardLiveToggleButton
+              liveEnabled={liveEnabled}
+              onToggle={toggleLive}
+            />
           }
           accountSwitcher={
             accounts.length > 0 ? (
@@ -312,32 +273,14 @@ export default function DashboardPageContainer() {
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
-      {snapshotVisible && snapshotData && screenshotConfig && (
-        <div style={{ position: "fixed", left: "-9999px", top: 0, zIndex: -1 }}>
-          <SnapshotView
-            ref={snapshotRef}
-            data={snapshotData.perf}
-            summary={snapshotData.sum}
-            chartMode={
-              (screenshotConfig.chart_mode || "twr") as
-                | "portfolio"
-                | "twr"
-                | "mwr"
-                | "drawdown"
-            }
-            selectedMetrics={
-              screenshotConfig.metrics?.length
-                ? screenshotConfig.metrics
-                : DEFAULT_METRICS
-            }
-            hidePortfolioValue={screenshotConfig.hide_portfolio_value ?? false}
-            todayDollarChange={todayDollarChange}
-            todayPctChange={todayPctChange}
-            periodReturns={snapshotData.periodReturns}
-            benchmarks={snapshotData.benchmarks}
-          />
-        </div>
-      )}
+      <DashboardSnapshotRenderer
+        snapshotRef={snapshotRef}
+        snapshotVisible={snapshotVisible}
+        snapshotData={snapshotData}
+        screenshotConfig={screenshotConfig}
+        todayDollarChange={todayDollarChange}
+        todayPctChange={todayPctChange}
+      />
 
       <ToastContainer />
     </div>
