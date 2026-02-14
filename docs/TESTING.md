@@ -39,6 +39,7 @@ Always set:
 Backward-compatible aliases still work during migration:
 - `CPV_TEST_MODE`
 - `CPV_DATABASE_URL`
+- removal target: `CPV_*` aliases are planned for removal in the next major refactor cycle after Deferred Phase TQ-1.
 
 Account visibility behavior:
 - Test mode (`--test`): only `__TEST__` accounts are visible/usable.

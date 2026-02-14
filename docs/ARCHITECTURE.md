@@ -159,22 +159,28 @@ portfolio_dashboard/
 │   │   │   ├── layout.tsx         # App shell, fonts, metadata
 │   │   │   └── globals.css        # Tailwind base + dark theme variables
 │   │   ├── components/
-│   │   │   ├── Dashboard.tsx      # Main layout: header, chart, metrics, tabs
+│   │   │   ├── Dashboard.tsx      # Compatibility re-export -> features/dashboard/components/DashboardPageContainer
+│   │   │   ├── PerformanceChart.tsx# Compatibility re-export -> features/charting/components/PerformanceChartContainer
+│   │   │   ├── DetailTabs.tsx     # Compatibility re-export -> features/dashboard/components/DetailTabsContainer
+│   │   │   ├── TradePreview.tsx   # Compatibility re-export -> features/trade-preview/components/TradePreviewContainer
+│   │   │   ├── SettingsModal.tsx  # Compatibility re-export -> features/settings/components/SettingsModalContainer
+│   │   │   ├── SnapshotView.tsx   # Snapshot facade; delegates to features/dashboard/snapshot/*
 │   │   │   ├── PortfolioHeader.tsx# Portfolio value, sync button, account switcher
 │   │   │   ├── AccountSwitcher.tsx# Sub-account dropdown
-│   │   │   ├── PerformanceChart.tsx# Recharts area chart with period selector
 │   │   │   ├── MetricCards.tsx    # Key metric tiles (return, Sharpe, drawdown, etc.)
-│   │   │   ├── DetailTabs.tsx     # All Metrics / Transactions / Non-Trade Activity tabs
 │   │   │   ├── HoldingsPie.tsx    # Donut chart of current holdings
 │   │   │   ├── HoldingsList.tsx   # Holdings table with history navigation
 │   │   │   ├── SymphonyList.tsx   # Symphony cards grid
-│   │   │   ├── SymphonyDetail.tsx # Symphony modal: live/backtest charts + metrics
-│   │   │   ├── TradePreview.tsx   # Pending rebalance trades
+│   │   │   ├── SymphonyDetail.tsx # Compatibility re-export -> features/symphony-detail/components/SymphonyDetailContainer
 │   │   │   ├── MetricsGuide.tsx   # METRICS.md viewer overlay
-│   │   │   ├── SettingsModal.tsx  # Export path + daily snapshot config
-│   │   │   ├── SnapshotView.tsx   # Off-screen screenshot render (1200×900, 4:3)
 │   │   │   ├── Toast.tsx          # Lightweight toast notifications
 │   │   │   └── InfoTooltip.tsx    # Reusable tooltip component
+│   │   ├── features/
+│   │   │   ├── dashboard/         # Dashboard container/hooks + snapshot pipeline and DetailTabs container
+│   │   │   ├── charting/          # Shared chart adapters, controls, canvas, tooltip logic
+│   │   │   ├── settings/          # Settings modal container, state hook, option constants
+│   │   │   ├── trade-preview/     # Trade preview container, data hook, grouping utils
+│   │   │   └── symphony-detail/   # Symphony detail container, chart-model hooks, tab sections
 │   │   ├── hooks/
 │   │   │   ├── useAutoRefresh.ts  # Auto-refresh during market hours
 │   │   │   └── useFinnhubQuotes.ts # Real-time ticker prices via Finnhub WebSocket
@@ -191,6 +197,16 @@ portfolio_dashboard/
 ├── stop.py                        # Graceful shutdown + zombie process cleanup
 └── README.md
 ```
+
+## Contributor Placement Guide
+
+- Keep `backend/app/routers/*.py` thin: parse HTTP inputs, call services, return schema-backed responses.
+- Put account/date-window policy in shared seams (`backend/app/services/account_scope.py`, `backend/app/services/date_filters.py`) instead of duplicating in routers.
+- Keep backend read/aggregation orchestration in focused services (`portfolio_read.py`, `symphony_read.py`, `benchmark_read.py`, related `*_read.py` modules).
+- Put dashboard orchestration and side effects in `frontend/src/features/dashboard/hooks/*`; keep render components prop-driven where feasible.
+- Put symphony detail orchestration in `frontend/src/features/symphony-detail/hooks/*` and compose UI from feature components.
+- Treat `frontend/src/features/charting/*` as the single home for shared chart transforms, adapters, benchmark math, controls, and tooltip calculations.
+- Use `frontend/src/components/*` for stable shared UI and compatibility re-exports; avoid adding new business orchestration there.
 
 ## API Reference
 
@@ -370,29 +386,40 @@ erDiagram
 
 ```mermaid
 graph TD
-    Page["page.tsx"]
-    Page --> Dashboard
+    Page["app/page.tsx"] --> DashboardPageContainer
 
-    Dashboard --> PortfolioHeader
-    Dashboard --> PerformanceChart
-    Dashboard --> MetricCards
-    Dashboard --> HoldingsPie
-    Dashboard --> HoldingsList
-    Dashboard --> DetailTabs
-    Dashboard --> SymphonyList
-    Dashboard --> TradePreview
+    DashboardPageContainer --> PortfolioHeader
+    DashboardPageContainer --> PerformanceChartContainer
+    DashboardPageContainer --> MetricCards
+    DashboardPageContainer --> HoldingsPie
+    DashboardPageContainer --> HoldingsList
+    DashboardPageContainer --> DetailTabsContainer
+    DashboardPageContainer --> SymphonyList
+    DashboardPageContainer --> TradePreviewContainer
+    DashboardPageContainer --> DashboardSnapshotRenderer
 
     PortfolioHeader --> AccountSwitcher
+    DashboardSnapshotRenderer --> SnapshotView
+    SnapshotView --> SnapshotHeader
+    SnapshotView --> SnapshotChart
+    SnapshotView --> SnapshotBenchmarkLegend
+    SnapshotView --> SnapshotMetricCardsGrid
 
-    SymphonyList -->|click| SymphonyDetail
+    SymphonyList -->|click| SymphonyDetailContainer
+    SymphonyDetailContainer --> SymphonyHeaderSection
+    SymphonyDetailContainer --> PerformanceChartContainer
+    SymphonyDetailContainer --> SymphonyDetailTabs
+    SymphonyDetailContainer --> SymphonyTradePreviewSection
 
-    DetailTabs -->|tab: All Metrics| AllMetrics["Grouped metrics display"]
-    DetailTabs -->|tab: Transactions| TxTable["Paginated transaction table"]
-    DetailTabs -->|tab: Non-Trade Activity| CashFlowTable["Cash flow table + manual entry form"]
+    SymphonyDetailTabs -->|tab: Holdings| SymphonyLiveHoldingsSection
+    SymphonyDetailTabs -->|tab: Live metrics| SymphonyLiveMetricsSection
+    SymphonyDetailTabs -->|tab: Backtest| SymphonyBacktestChartPanel
+    SymphonyDetailTabs -->|tab: Historical allocations| HistoricalAllocationsTable
 
-    SymphonyDetail -->|tab: Live| LiveCharts["Performance + drawdown charts"]
-    SymphonyDetail -->|tab: Backtest| BacktestCharts["Backtest chart + metrics"]
-    SymphonyDetail --> Holdings["Current holdings table"]
+    SymphonyBacktestChartPanel --> SymphonyBacktestBenchmarkRow
+    SymphonyBacktestChartPanel --> SymphonyBacktestControls
+    SymphonyBacktestChartPanel --> BacktestMetricsSummary
+    SymphonyBacktestChartPanel --> SymphonyBacktestHoldingsSection
 ```
 
 ## Key Design Decisions
@@ -491,11 +518,11 @@ Files are saved locally as `<SymphonyName>/<SymphonyName>_<YYYY-MM-DD>.json`. Th
 
 A configurable screenshot feature that captures a clean portfolio snapshot image:
 
-1. **Automatic**: After the once-per-day post-close sync (4 PM ET), if enabled in settings, `Dashboard.tsx` renders an off-screen `SnapshotView` component and captures it via `html-to-image`.
+1. **Automatic**: After the once-per-day post-close sync (4 PM ET), if enabled in settings, `DashboardPageContainer.tsx` (via `usePostCloseSyncAndSnapshot`) renders an off-screen `SnapshotView` component and captures it via `html-to-image`.
 2. **Manual**: A camera button in `PortfolioHeader.tsx` triggers the same capture flow on demand.
 3. The captured PNG is POSTed to `POST /api/screenshot`, which saves it as `Snapshot_YYYY-MM-DD.png` in the configured folder.
 
-The snapshot layout is a fixed 1200×900px (4:3) dark card with:
+The snapshot layout is a fixed 1200x900px (4:3) dark card with:
 - Header (date, optional portfolio value + today's change)
 - One full-width chart (TWR / Portfolio Value / MWR / Drawdown — user-configurable)
 - Metric cards in a 4-column grid (user selects which metrics to include)
@@ -519,6 +546,7 @@ Legacy aliases remain supported temporarily:
 Resolution rule:
 - if both are set, `PD_*` values win.
 - using `CPV_*` alone logs a deprecation warning.
+- removal target: `CPV_*` aliases are scheduled for removal in the next major refactor cycle after Deferred Phase TQ-1.
 
 ## Deferred Phase TQ-1 (TanStack Query Migration)
 
