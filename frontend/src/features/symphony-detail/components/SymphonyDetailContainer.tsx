@@ -20,7 +20,11 @@ import {
 } from "@/lib/api";
 import { InfoTooltip, TWR_TOOLTIP_TEXT } from "@/components/InfoTooltip";
 import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
+import { BacktestMetricsSummary } from "@/features/symphony-detail/components/BacktestMetricsSummary";
 import { HistoricalAllocationsTable } from "@/features/symphony-detail/components/HistoricalAllocationsTable";
+import { SymphonyBacktestHoldingsSection } from "@/features/symphony-detail/components/SymphonyBacktestHoldingsSection";
+import { SymphonyLiveHoldingsSection } from "@/features/symphony-detail/components/SymphonyLiveHoldingsSection";
+import { SymphonyTradePreviewSection } from "@/features/symphony-detail/components/SymphonyTradePreviewSection";
 import { useSymphonyBenchmarkManager } from "@/features/symphony-detail/hooks/useSymphonyBenchmarkManager";
 import { useSymphonyDetailData } from "@/features/symphony-detail/hooks/useSymphonyDetailData";
 import {
@@ -999,244 +1003,26 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                   ))}
                 </div>
               )}
-
-              {/* Backtest stats summary */}
-              {filteredBacktestData.length >= 2 && (
-                <div className="mt-6">
-                  <h3 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                    Backtest Metrics
-                    {btMetrics.startDate && btMetrics.endDate && (
-                      <span className="ml-2 text-xs font-normal normal-case text-muted-foreground/60">
-                        {new Date(btMetrics.startDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                        {" — "}
-                        {new Date(btMetrics.endDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </span>
-                    )}
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6 text-xs">
-                    {btMetrics.cumReturn != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Cum. Return</span>
-                        <span className={`ml-1 font-medium ${colorVal(btMetrics.cumReturn)}`}>{(btMetrics.cumReturn * 100).toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {btMetrics.annualized != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Annualized</span>
-                        <span className={`ml-1 font-medium ${colorVal(btMetrics.annualized)}`}>{(btMetrics.annualized * 100).toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {btMetrics.sharpe != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Sharpe</span>
-                        <span className="ml-1 font-medium">{btMetrics.sharpe.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {btMetrics.sortino != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Sortino</span>
-                        <span className="ml-1 font-medium">{btMetrics.sortino.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {btMetrics.calmar != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Calmar</span>
-                        <span className="ml-1 font-medium">{btMetrics.calmar.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {btMetrics.maxDrawdown != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Max DD</span>
-                        <span className="ml-1 font-medium text-red-400">{(btMetrics.maxDrawdown * 100).toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {btMetrics.medianDrawdown != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Median DD</span>
-                        <span className="ml-1 font-medium text-red-400">{(btMetrics.medianDrawdown * 100).toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {btMetrics.longestDrawdownDays != null && btMetrics.longestDrawdownDays > 0 && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Longest DD</span>
-                        <span className="ml-1 font-medium">{btMetrics.longestDrawdownDays}d</span>
-                      </div>
-                    )}
-                    {btMetrics.medianDrawdownDays != null && btMetrics.medianDrawdownDays > 0 && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Median DD Length</span>
-                        <span className="ml-1 font-medium">{btMetrics.medianDrawdownDays}d</span>
-                      </div>
-                    )}
-                    {btMetrics.winRate != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Win Rate</span>
-                        <span className="ml-1 font-medium">{(btMetrics.winRate * 100).toFixed(1)}%</span>
-                      </div>
-                    )}
-                    {btMetrics.volatility != null && (
-                      <div className="rounded bg-muted/40 px-2 py-1.5">
-                        <span className="text-muted-foreground">Volatility</span>
-                        <span className="ml-1 font-medium">{(btMetrics.volatility * 100).toFixed(2)}%</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              <BacktestMetricsSummary btMetrics={btMetrics} show={filteredBacktestData.length >= 2} />
             </div>
           )}
 
-          {/* Current Holdings — Live */}
-          {tab === "live" && s.holdings.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Current Holdings (Live)</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
-                      <th className="pb-2 pr-3 font-medium">Ticker</th>
-                      <th className="pb-2 pr-3 font-medium text-right">Allocation</th>
-                      <th className="pb-2 pr-3 font-medium text-right">Value</th>
-                      <th className="pb-2 font-medium text-right">Today</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...s.holdings].sort((a, b) => b.value - a.value).map((h) => (
-                      <tr key={h.ticker} className="border-b border-border/30">
-                        <td className="py-2 pr-3 font-medium">{h.ticker}</td>
-                        <td className="py-2 pr-3 text-right">{h.allocation.toFixed(1)}%</td>
-                        <td className="py-2 pr-3 text-right">{fmtDollar(h.value)}</td>
-                        <td className={`py-2 text-right ${colorVal(h.last_percent_change)}`}>
-                          {fmtPct(h.last_percent_change)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          {tab === "live" && <SymphonyLiveHoldingsSection holdings={s.holdings} />}
+
+          {tab === "backtest" && (
+            <SymphonyBacktestHoldingsSection tdvmWeights={backtest?.tdvm_weights} />
           )}
 
-          {/* Current Holdings — Backtest (latest allocation from tdvm_weights) */}
-          {tab === "backtest" && backtest && (() => {
-            const w = backtest.tdvm_weights;
-            const entries = Object.entries(w);
-            if (!entries.length) return null;
-            // Find the latest day number across all tickers
-            let maxDay = -Infinity;
-            for (const [, dayMap] of entries) {
-              for (const d of Object.keys(dayMap)) {
-                const n = Number(d);
-                if (n > maxDay) maxDay = n;
-              }
-            }
-            // Collect allocations at the latest day
-            const holdings = entries
-              .map(([ticker, dayMap]) => ({ ticker, allocation: (dayMap[String(maxDay)] ?? 0) * 100 }))
-              .filter((h) => h.allocation > 0)
-              .sort((a, b) => b.allocation - a.allocation);
-            if (!holdings.length) return null;
-            return (
-              <div>
-                <h3 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  Latest Holdings (Backtest)
-                  <span className="ml-2 text-xs font-normal normal-case text-muted-foreground/60">{epochDayToDate(maxDay)}</span>
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
-                        <th className="pb-2 pr-3 font-medium">Ticker</th>
-                        <th className="pb-2 font-medium text-right">Allocation</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {holdings.map((h) => (
-                        <tr key={h.ticker} className="border-b border-border/30">
-                          <td className="py-2 pr-3 font-medium">{h.ticker}</td>
-                          <td className="py-2 text-right">{h.allocation.toFixed(1)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Trade Preview */}
           {tab === "live" && (
             <div ref={tradePreviewRef}>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  Next Automated Trade Preview
-                </h3>
-                <div className="flex items-center gap-3">
-                  {tradePreviewRefreshedAt && (
-                    <span className="text-xs text-muted-foreground">
-                      {tradePreviewRefreshedAt.toLocaleTimeString()}
-                    </span>
-                  )}
-                  <button
-                    onClick={fetchTradePreview}
-                    disabled={loadingTradePreview}
-                    className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                    title="Refresh trade preview"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${loadingTradePreview ? "animate-spin" : ""}`} />
-                  </button>
-                </div>
-              </div>
-              {loadingTradePreview && !tradePreview && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  Loading preview…
-                </div>
-              )}
-              {!loadingTradePreview && (!tradePreview || tradePreview.recommended_trades.length === 0) && (
-                <p className="text-sm text-muted-foreground">No upcoming trades.</p>
-              )}
-              {tradePreview && tradePreview.recommended_trades.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
-                        <th className="pb-2 pr-3 font-medium">Ticker</th>
-                        <th className="pb-2 pr-3 font-medium">Side</th>
-                        <th className="pb-2 pr-3 font-medium text-right">Shares</th>
-                        <th className="pb-2 pr-3 font-medium text-right">Est. Value</th>
-                        <th className="pb-2 pr-3 font-medium text-right">Price</th>
-                        <th className="pb-2 font-medium text-right">Weight Change</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tradePreview.recommended_trades.map((t, i) => (
-                        <tr key={`${t.ticker}-${t.side}-${i}`} className="border-b border-border/30">
-                          <td className="py-2 pr-3 font-medium">
-                            {t.ticker}
-                            {t.name && <span className="ml-1.5 text-xs text-muted-foreground">{t.name}</span>}
-                          </td>
-                          <td className={`py-2 pr-3 font-semibold ${t.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
-                            {t.side}
-                          </td>
-                          <td className="py-2 pr-3 text-right whitespace-nowrap">
-                            {Math.abs(t.share_change).toFixed(2)}
-                          </td>
-                          <td className={`py-2 pr-3 text-right whitespace-nowrap ${t.side === "BUY" ? "text-emerald-400" : "text-red-400"}`}>
-                            ${Math.abs(t.cash_change).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-2 pr-3 text-right whitespace-nowrap text-muted-foreground">
-                            ${t.average_price.toFixed(2)}
-                          </td>
-                          <td className="py-2 text-right whitespace-nowrap text-muted-foreground">
-                            {t.prev_weight.toFixed(1)}% → {t.next_weight.toFixed(1)}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <SymphonyTradePreviewSection
+                tradePreview={tradePreview}
+                tradePreviewRefreshedAt={tradePreviewRefreshedAt}
+                loadingTradePreview={loadingTradePreview}
+                onRefresh={() => {
+                  fetchTradePreview().catch(() => undefined);
+                }}
+              />
             </div>
           )}
 
@@ -1254,3 +1040,5 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     </div>
   );
 }
+
+
