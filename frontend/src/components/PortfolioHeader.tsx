@@ -9,6 +9,7 @@ interface Props {
   summary: Summary;
   onSync: () => void;
   syncing: boolean;
+  canSync?: boolean;
   onSettings?: () => void;
   onSnapshot?: () => void;
   onHelp?: () => void;
@@ -28,7 +29,7 @@ function fmtPct(v: number) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
-export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapshot, onHelp, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
+export function PortfolioHeader({ summary, onSync, syncing, canSync = true, onSettings, onSnapshot, onHelp, accountSwitcher, liveToggle, todayDollarChange, todayPctChange }: Props) {
   const totalPositive = summary.total_return_dollars >= 0;
   const totalPct = summary.cumulative_return_pct;
   const dayDollar = todayDollarChange ?? 0;
@@ -36,7 +37,7 @@ export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapsh
   const dayPositive = dayPct >= 0;
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div data-testid="header-portfolio" className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <p className="text-sm text-muted-foreground">Portfolio Value</p>
         <h1 className="text-4xl font-bold tracking-tight">
@@ -55,11 +56,13 @@ export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapsh
           {liveToggle}
           {/* Sync button */}
           <Button
+            data-testid="btn-sync-update"
             variant="outline"
             size="sm"
             onClick={onSync}
-            disabled={syncing}
+            disabled={syncing || !canSync}
             className="cursor-pointer gap-2"
+            title={!canSync ? "Sync is disabled in test mode" : "Sync portfolio data"}
           >
             <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             {syncing ? "Syncing" : "Update"}
@@ -91,6 +94,7 @@ export function PortfolioHeader({ summary, onSync, syncing, onSettings, onSnapsh
           {/* Settings button */}
           {onSettings && (
             <Button
+              data-testid="btn-settings"
               variant="ghost"
               size="icon"
               onClick={onSettings}

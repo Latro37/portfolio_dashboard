@@ -1,14 +1,11 @@
-"""Seed synthetic test data for a large-portfolio user profile.
+"""Seed synthetic test data for test-mode personas.
 
 Usage:
-    python -m scripts.seed_test_data          # seed data
-    python -m scripts.seed_test_data --purge  # remove all test data
-
-Generates ~100K rows of realistic data:
-  - 1 account (credential_name="__TEST__")
-  - 50 symphonies across 100 tickers
-  - 4 years of daily portfolio + metrics history
-  - Pre-built backtest cache per symphony
+    python -m scripts.seed_test_data                              # seed power profile
+    python -m scripts.seed_test_data --profile basic              # seed basic profile
+    python -m scripts.seed_test_data --profile power --seed 1234
+    python -m scripts.seed_test_data --profile power --end-date 2025-12-31
+    python -m scripts.seed_test_data --purge                      # remove all test data
 """
 
 import argparse
@@ -31,7 +28,7 @@ _BACKEND_DIR = os.path.dirname(_SCRIPT_DIR)
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from app.database import SessionLocal, init_db
+from app.database import SessionLocal, init_db, db_url as ACTIVE_DB_URL
 from app.models import (
     Account,
     CashFlow,
@@ -52,14 +49,37 @@ from app.models import (
 # ---------------------------------------------------------------------------
 TEST_CREDENTIAL = "__TEST__"
 TEST_ACCOUNT_ID = "test-account-001"
-TEST_DISPLAY_NAME = "Test: Large Portfolio"
+TEST_DISPLAY_NAME = "Test: Power Portfolio"
 META_PATH = os.path.join(_BACKEND_DIR, "data", "test_symphony_meta.json")
 
-NUM_SYMPHONIES = 50
-NUM_TICKERS = 100
-HISTORY_YEARS = 4
-TARGET_TOTAL_VALUE = 6_000_000
-STARTING_VALUE = 1_200_000
+PROFILE_CONFIGS: Dict[str, Dict[str, object]] = {
+    "basic": {
+        "display_name": "Test: Basic Portfolio",
+        "num_symphonies": 3,
+        "num_tickers": 12,
+        "history_days": 270,  # ~9 months
+        "target_total_value": 250_000.0,
+        "starting_value": 75_000.0,
+        "default_seed": 17,
+    },
+    "power": {
+        "display_name": "Test: Power Portfolio",
+        "num_symphonies": 25,
+        "num_tickers": 50,
+        "history_days": 730,  # 2 years
+        "target_total_value": 3_000_000.0,
+        "starting_value": 800_000.0,
+        "default_seed": 42,
+    },
+}
+
+# Active profile values (set by _apply_profile)
+NUM_SYMPHONIES = 25
+NUM_TICKERS = 50
+HISTORY_DAYS = 730
+TARGET_TOTAL_VALUE = 3_000_000.0
+STARTING_VALUE = 800_000.0
+DEFAULT_SEED = 42
 
 # Real-ish ticker pool (ETFs + large-cap stocks)
 TICKER_POOL = [
@@ -110,6 +130,43 @@ REBALANCE_FREQS = ["Daily", "Weekly", "Monthly", "Quarterly"]
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _apply_profile(profile: str):
+    """Apply profile config to module-level generation constants."""
+    global TEST_DISPLAY_NAME
+    global NUM_SYMPHONIES, NUM_TICKERS, HISTORY_DAYS
+    global TARGET_TOTAL_VALUE, STARTING_VALUE, DEFAULT_SEED
+
+    cfg = PROFILE_CONFIGS[profile]
+    TEST_DISPLAY_NAME = str(cfg["display_name"])
+    NUM_SYMPHONIES = int(cfg["num_symphonies"])
+    NUM_TICKERS = int(cfg["num_tickers"])
+    HISTORY_DAYS = int(cfg["history_days"])
+    TARGET_TOTAL_VALUE = float(cfg["target_total_value"])
+    STARTING_VALUE = float(cfg["starting_value"])
+    DEFAULT_SEED = int(cfg["default_seed"])
+
+
+def _parse_iso_date(date_str: str) -> date:
+    """Parse YYYY-MM-DD into a date for deterministic seeding."""
+    try:
+        return date.fromisoformat(date_str)
+    except ValueError as e:
+        raise ValueError(f"Invalid --end-date '{date_str}'. Use YYYY-MM-DD.") from e
+
+
+def _ensure_safe_target_db(force: bool):
+    """Prevent accidental writes to production DB unless explicitly forced."""
+    if force:
+        return
+    active = (ACTIVE_DB_URL or "").lower()
+    if "portfolio_test.db" in active or "_test" in active:
+        return
+    raise SystemExit(
+        "Refusing to seed/purge non-test database.\n"
+        f"Active DB URL: {ACTIVE_DB_URL}\n"
+        "Set CPV_DATABASE_URL=sqlite:///data/portfolio_test.db or pass --force."
+    )
 
 def trading_days(start: date, end: date) -> List[date]:
     """Generate list of weekday dates between start and end (inclusive)."""
@@ -286,11 +343,8 @@ def date_to_epoch_day(d: date) -> int:
 # ---------------------------------------------------------------------------
 
 def generate_symphony_specs() -> List[Dict]:
-    """Create specs for 50 symphonies with assigned tickers and target values."""
-    random.seed(42)
-    np.random.seed(42)
-
-    # Distribute 100 tickers across 50 symphonies
+    """Create symphony specs using the currently selected profile."""
+    # Use NUM_TICKERS from active profile and current RNG state from generate_data().
     tickers = TICKER_POOL[:NUM_TICKERS]
     random.shuffle(tickers)
 
@@ -300,14 +354,15 @@ def generate_symphony_specs() -> List[Dict]:
     raw_sizes = raw_sizes / raw_sizes.sum()
 
     for i in range(NUM_SYMPHONIES):
-        # Each symphony gets 2-50 tickers
-        if i < 3:
-            # A few large symphonies with up to 50 tickers
-            n_tickers = random.randint(35, 50)
+        # Each symphony gets a realistic breadth based on selected profile size.
+        if NUM_TICKERS <= 15:
+            n_tickers = random.randint(2, min(8, NUM_TICKERS))
+        elif i < 3:
+            n_tickers = random.randint(20, min(35, NUM_TICKERS))
         elif i < 10:
-            n_tickers = random.randint(10, 30)
+            n_tickers = random.randint(8, min(20, NUM_TICKERS))
         else:
-            n_tickers = random.randint(2, 15)
+            n_tickers = random.randint(2, min(12, NUM_TICKERS))
 
         # Assign tickers (with overlap allowed across symphonies)
         sym_tickers = random.sample(tickers, min(n_tickers, len(tickers)))
@@ -326,31 +381,40 @@ def generate_symphony_specs() -> List[Dict]:
     return specs
 
 
-def generate_data():
+def generate_data(seed: int | None = None, end_date: date | None = None):
     """Generate all synthetic data and insert into DB."""
-    random.seed(42)
-    np.random.seed(42)
+    if seed is None:
+        seed = DEFAULT_SEED
+    random.seed(seed)
+    np.random.seed(seed)
 
     print("Generating synthetic test data...")
+    print(f"  Seed: {seed}")
 
-    # Date range: 4 years back from today
-    end_dt = date.today() - timedelta(days=1)
-    start_dt = end_dt - timedelta(days=HISTORY_YEARS * 365)
+    # Date range controlled by profile size; optional fixed end date for reproducibility.
+    end_dt = end_date or (date.today() - timedelta(days=1))
+    start_dt = end_dt - timedelta(days=HISTORY_DAYS)
     days = trading_days(start_dt, end_dt)
     n_days = len(days)
     print(f"  Date range: {start_dt} to {end_dt} ({n_days} trading days)")
 
     # Symphony specs
     specs = generate_symphony_specs()
+    # Sparse global contribution calendar: every ~2 weeks (10 trading days).
+    global_contrib_dates = {d for i, d in enumerate(days) if i > 0 and i % 10 == 0}
+    # Stagger onboarding only on the same sparse cadence across the first ~6 months.
+    onboarding_cutoff_idx = min(len(days), 126)  # ~6 months of trading days
+    onboarding_dates = [days[i] for i in range(0, onboarding_cutoff_idx, 10)]
+    if not onboarding_dates:
+        onboarding_dates = [days[0]]
 
     # Normalize size weights to sum to target value
     total_weight = sum(s["size_weight"] for s in specs)
-    for s in specs:
+    for i, s in enumerate(specs):
         s["target_value"] = TARGET_TOTAL_VALUE * s["size_weight"] / total_weight
         s["start_value"] = STARTING_VALUE * s["size_weight"] / total_weight
-        # Invested since: stagger over the first 6 months
-        offset_days = random.randint(0, 180)
-        s["invested_since"] = str(start_dt + timedelta(days=offset_days))
+        # Ensure at least one symphony starts at the first date; others are staggered.
+        s["invested_since"] = str(onboarding_dates[0] if i == 0 else random.choice(onboarding_dates))
 
     # ------------------------------------------------------------------
     # Generate per-symphony daily data
@@ -366,37 +430,44 @@ def generate_data():
 
         target = spec["target_value"]
 
-        # Daily returns with positive drift (ensures most symphonies are profitable)
+        # Choose a realistic lifetime return target first, then anchor the path
+        # so day-1 value equals deposits and final value hits the target.
+        cum_return_target = random.uniform(0.15, 0.50)
+        total_deposits = target / (1 + cum_return_target)
+
+        # Split: ~60% initial funding, remainder in sparse periodic deposits.
+        initial_pct = random.uniform(0.50, 0.70)
+        initial_deposit = total_deposits * initial_pct
+        remaining_deposits = total_deposits - initial_deposit
+
+        # Daily returns with positive drift.
         mean_ret = random.uniform(0.0003, 0.0008)
         std_ret = random.uniform(0.008, 0.016)
         rets = random_walk(n, mean=mean_ret, std=std_ret,
                            regime_prob=0.015, regime_mean=-0.005, regime_std=0.02)
         rets[0] = 0.0
 
-        # Build values from returns (no deposits yet, pure growth from $1)
         growth = np.cumprod(1 + rets)
-        # Scale so final value = target
-        values = growth * (target / growth[-1])
+        desired_final_growth = target / max(initial_deposit, 1e-9)
+        drift_adjust = np.exp(np.linspace(
+            0.0, math.log(desired_final_growth / max(growth[-1], 1e-9)), n
+        ))
+        values = initial_deposit * growth * drift_adjust
 
-        # Create deposit schedule that gives a realistic cumulative return (15-50%)
-        cum_return_target = random.uniform(0.15, 0.50)
-        total_deposits = target / (1 + cum_return_target)
-
-        # Split: ~60% initial, ~40% monthly contributions
-        initial_pct = random.uniform(0.50, 0.70)
-        initial_deposit = total_deposits * initial_pct
-        remaining_deposits = total_deposits - initial_deposit
-
-        # Count months for monthly deposit sizing
-        n_months = max(1, int(n / 21))  # ~21 trading days per month
-        monthly_deposit = remaining_deposits / n_months if n_months > 0 else 0
+        # Keep returns consistent with the anchored value path.
+        rets = np.zeros(n)
+        rets[1:] = values[1:] / values[:-1] - 1.0
 
         # Build deposit array and net_deps
         deposit_events = np.zeros(n)
         deposit_events[0] = initial_deposit
-        for j in range(1, n):
-            if sym_days[j].day <= 3 and sym_days[j - 1].day > 3:
-                deposit_events[j] = monthly_deposit
+        if n > 1 and remaining_deposits > 0:
+            # Sparse cadence: biweekly at most (shared account-level schedule).
+            contrib_indices = [j for j, d in enumerate(sym_days) if d in global_contrib_dates]
+            if not contrib_indices:
+                contrib_indices = [n - 1]
+            periodic_deposit = remaining_deposits / len(contrib_indices)
+            deposit_events[contrib_indices] = periodic_deposit
         net_deps = np.cumsum(deposit_events)
 
         # Use original growth returns directly — they represent the true
@@ -536,10 +607,12 @@ def generate_data():
         n = len(sd["days"])
         # Daily divergence: uniform 5-25 bps with random sign
         bps_range = random.uniform(5, 25)  # bps magnitude for this symphony
-        daily_drift = np.random.normal(0, bps_range / 10000, n)
-        daily_drift[0] = 0.0
-        # Apply cumulative drift to values
-        cum_drift = np.cumprod(1 + daily_drift)
+        sigma = bps_range / 10000
+        # Log-space noise centered at 0 avoids persistent down-bias from
+        # multiplicative arithmetic-return compounding.
+        log_drift = np.random.normal(0, sigma, n)
+        log_drift[0] = 0.0
+        cum_drift = np.exp(np.cumsum(log_drift))
         sd["values"] = sd["values"] * cum_drift
         # Recompute daily returns for the diverged live series
         new_rets = np.zeros(n)
@@ -759,7 +832,6 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
     db.query(CashFlow).filter_by(account_id=TEST_ACCOUNT_ID).delete()
     monthly_deposit = TARGET_TOTAL_VALUE * 0.005  # ~$30K/month total
     current_d = days[0]
-    cf_id = 1
     while current_d <= days[-1]:
         db.add(CashFlow(
             account_id=TEST_ACCOUNT_ID,
@@ -778,10 +850,39 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
             current_d += timedelta(days=1)
     db.flush()
 
-    # 5. HoldingsHistory (latest date, 100 tickers)
+    # 5. Transactions (enough volume for pagination in power profile)
+    print("  Inserting Transactions...")
+    db.query(Transaction).filter_by(account_id=TEST_ACCOUNT_ID).delete()
+    all_tickers = TICKER_POOL[:NUM_TICKERS]
+    tx_target = max(20, min(250, NUM_SYMPHONIES * 8))
+    if NUM_SYMPHONIES >= 20:
+        tx_target = max(tx_target, 120)
+    for i in range(tx_target):
+        # Spread orders across the available timeline with slight day jitter.
+        base_idx = int(i * (len(days) - 1) / max(tx_target - 1, 1))
+        jitter = random.randint(-2, 2)
+        day_idx = max(0, min(len(days) - 1, base_idx + jitter))
+        tx_date = days[day_idx]
+
+        action = "buy" if random.random() < 0.55 else "sell"
+        quantity = round(random.uniform(1, 250), 4)
+        price = round(random.uniform(10, 600), 2)
+        total_amount = round(quantity * price, 2)
+        db.add(Transaction(
+            account_id=TEST_ACCOUNT_ID,
+            date=tx_date,
+            symbol=random.choice(all_tickers),
+            action=action,
+            quantity=quantity,
+            price=price,
+            total_amount=total_amount,
+            order_id=f"test-order-{date_to_epoch_day(tx_date)}-{i:05d}",
+        ))
+    db.flush()
+
+    # 6. HoldingsHistory (latest date, profile-sized ticker set)
     print("  Inserting HoldingsHistory...")
     db.query(HoldingsHistory).filter_by(account_id=TEST_ACCOUNT_ID).delete()
-    all_tickers = TICKER_POOL[:NUM_TICKERS]
     latest_date = days[-1]
     for t in all_tickers:
         db.add(HoldingsHistory(
@@ -792,7 +893,7 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
         ))
     db.flush()
 
-    # 6. SymphonyDailyPortfolio + SymphonyDailyMetrics
+    # 7. SymphonyDailyPortfolio + SymphonyDailyMetrics
     print("  Inserting SymphonyDailyPortfolio + SymphonyDailyMetrics (this may take a moment)...")
     batch_count = 0
     for spec in specs:
@@ -823,7 +924,7 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
     db.flush()
     print(f"  Total symphony daily rows: {batch_count * 2}")
 
-    # 7. SymphonyAllocationHistory (latest date per symphony)
+    # 8. SymphonyAllocationHistory (latest date per symphony)
     print("  Inserting SymphonyAllocationHistory...")
     db.query(SymphonyAllocationHistory).filter_by(account_id=TEST_ACCOUNT_ID).delete()
     for spec in specs:
@@ -845,7 +946,7 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
             ))
     db.flush()
 
-    # 8. SymphonyBacktestCache
+    # 9. SymphonyBacktestCache
     print("  Inserting SymphonyBacktestCache...")
     for spec in specs:
         sid = spec["symphony_id"]
@@ -872,7 +973,7 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
             db.add(SymphonyBacktestCache(symphony_id=sid, **fields))
     db.flush()
 
-    # 9. SymphonyCatalogEntry
+    # 10. SymphonyCatalogEntry
     print("  Inserting SymphonyCatalogEntry...")
     for spec in specs:
         existing_cat = db.query(SymphonyCatalogEntry).filter_by(symphony_id=spec["symphony_id"]).first()
@@ -891,7 +992,7 @@ def _insert_all(db, specs, days, acct_values, acct_net_deps, acct_returns,
             ))
     db.flush()
 
-    # 10. SyncState
+    # 11. SyncState
     print("  Inserting SyncState...")
     db.merge(SyncState(account_id=TEST_ACCOUNT_ID, key="initial_backfill_done", value="true"))
     db.merge(SyncState(account_id=TEST_ACCOUNT_ID, key="last_sync_date", value=str(days[-1])))
@@ -1007,8 +1108,23 @@ def purge_test_data():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Seed or purge synthetic test data")
+    parser.add_argument("--profile", choices=sorted(PROFILE_CONFIGS.keys()), default="power",
+                        help="Synthetic persona profile to seed (default: power)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Override deterministic random seed")
+    parser.add_argument("--end-date", default=None,
+                        help="Optional fixed end date (YYYY-MM-DD) for deterministic timelines")
     parser.add_argument("--purge", action="store_true", help="Remove all test data")
+    parser.add_argument("--force", action="store_true",
+                        help="Allow operations on non-test DB (disabled by default)")
     args = parser.parse_args()
+
+    _apply_profile(args.profile)
+    _ensure_safe_target_db(args.force)
+
+    end_dt = None
+    if args.end_date:
+        end_dt = _parse_iso_date(args.end_date)
 
     init_db()
 
@@ -1017,4 +1133,4 @@ if __name__ == "__main__":
     else:
         # Purge first to avoid duplicates
         purge_test_data()
-        generate_data()
+        generate_data(seed=args.seed, end_date=end_dt)

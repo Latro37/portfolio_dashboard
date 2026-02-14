@@ -1,7 +1,7 @@
 """One-command launcher for Composer Portfolio Visualizer.
 
 Starts both the Python backend (FastAPI) and the Next.js frontend.
-Usage: python start.py
+Usage: python start.py [--test]
 """
 
 import os
@@ -139,18 +139,35 @@ def open_browser_when_ready(url, timeout=30):
 # ------------------------------------------------------------------
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Composer Portfolio Visualizer launcher")
+    parser.add_argument("--test", action="store_true", help="Enable __TEST__ demo account with synthetic data")
+    args = parser.parse_args()
+
     check_prerequisites()
     install_deps()
 
     print("=" * 50)
     print("  Composer Portfolio Visualizer")
+    if args.test:
+        print("  (Test mode enabled)")
     print("=" * 50)
+
+    # Build env for backend — propagate test mode flag
+    backend_env = os.environ.copy()
+    if args.test:
+        backend_env["CPV_TEST_MODE"] = "1"
+        backend_env["CPV_DATABASE_URL"] = "sqlite:///data/portfolio_test.db"
+    else:
+        backend_env.pop("CPV_TEST_MODE", None)
+        backend_env.pop("CPV_DATABASE_URL", None)
 
     # Start backend
     print("\nStarting backend...")
     backend = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
         cwd=BACKEND_DIR,
+        env=backend_env,
     )
     processes.append(backend)
 

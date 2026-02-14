@@ -22,7 +22,7 @@ from app.schemas import (
 from app.services.sync import full_backfill, incremental_update, get_sync_state, set_sync_state
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.composer_client import ComposerClient
-from app.config import load_accounts, load_finnhub_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config
+from app.config import load_accounts, load_finnhub_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -70,21 +70,43 @@ def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
     - "all" → every sub-account across all credentials
     - "all:<credential_name>" → all sub-accounts for that credential
     """
+    test_mode = is_test_mode()
     if account_id == "all":
-        accts = db.query(Account).all()
+        query = db.query(Account)
+        if test_mode:
+            query = query.filter(Account.credential_name == "__TEST__")
+        else:
+            query = query.filter(Account.credential_name != "__TEST__")
+        accts = query.all()
         if not accts:
             raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
         return [a.id for a in accts]
     if account_id and account_id.startswith("all:"):
         cred_name = account_id[4:]
+        if test_mode and cred_name != "__TEST__":
+            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
+        if not test_mode and cred_name == "__TEST__":
+            raise HTTPException(404, "Test mode is not enabled")
         accts = db.query(Account).filter_by(credential_name=cred_name).all()
         if not accts:
             raise HTTPException(404, f"No sub-accounts found for credential '{cred_name}'")
         return [a.id for a in accts]
     if account_id:
+        acct = db.query(Account).filter_by(id=account_id).first()
+        if not acct:
+            raise HTTPException(404, f"Account {account_id} not found")
+        if test_mode and acct.credential_name != "__TEST__":
+            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
+        if not test_mode and acct.credential_name == "__TEST__":
+            raise HTTPException(404, "Test mode is not enabled")
         return [account_id]
     # Default: first discovered account
-    first = db.query(Account).first()
+    query = db.query(Account)
+    if test_mode:
+        query = query.filter(Account.credential_name == "__TEST__")
+    else:
+        query = query.filter(Account.credential_name != "__TEST__")
+    first = query.first()
     if not first:
         raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
     return [first.id]
@@ -109,7 +131,12 @@ def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
 @router.get("/accounts", response_model=List[AccountInfo])
 def list_accounts(db: Session = Depends(get_db)):
     """List all discovered Composer sub-accounts."""
-    rows = db.query(Account).order_by(Account.credential_name, Account.account_type).all()
+    query = db.query(Account)
+    if is_test_mode():
+        query = query.filter(Account.credential_name == "__TEST__")
+    else:
+        query = query.filter(Account.credential_name != "__TEST__")
+    rows = query.order_by(Account.credential_name, Account.account_type).all()
     return [
         AccountInfo(
             id=r.id,
@@ -822,15 +849,14 @@ def trigger_sync(
         if account_id:
             ids = _resolve_account_ids(db, account_id)
         else:
-            # Sync all discovered accounts
-            all_accts = db.query(Account).all()
-            if not all_accts:
-                raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
-            ids = [a.id for a in all_accts]
+            # Sync all visible accounts for the current mode.
+            ids = _resolve_account_ids(db, "all")
 
         # Skip __TEST__ accounts (synthetic data, no real Composer credentials)
         test_ids = {a.id for a in db.query(Account).filter_by(credential_name="__TEST__").all()}
         sync_ids = [aid for aid in ids if aid not in test_ids]
+        if not sync_ids:
+            return {"status": "skipped", "synced_accounts": 0, "reason": "No sync-eligible accounts"}
 
         for aid in sync_ids:
             client = _get_client_for_account(db, aid)
@@ -843,7 +869,7 @@ def trigger_sync(
             if len(sync_ids) > 1:
                 time.sleep(1)
 
-        return {"status": "complete", "synced_accounts": len(ids)}
+        return {"status": "complete", "synced_accounts": len(sync_ids)}
     except HTTPException:
         raise
     except Exception as e:
@@ -868,6 +894,7 @@ def get_app_config():
         "finnhub_configured": load_finnhub_key() is not None,
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
+        "test_mode": is_test_mode(),
     }
 
 

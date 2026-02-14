@@ -44,6 +44,7 @@ export function AccountSwitcher({
       {credentialNames.length > 1 && (
         <div className="relative">
           <select
+            data-testid="select-credential"
             value={selectedCredential}
             onChange={(e) => onCredentialChange(e.target.value)}
             className="appearance-none rounded-md border border-border bg-muted px-3 py-1.5 pr-8 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -63,6 +64,7 @@ export function AccountSwitcher({
       {!isGlobalAll && (
         <div className="relative">
           <select
+            data-testid="select-subaccount"
             value={selectedSubAccount}
             onChange={(e) => onSubAccountChange(e.target.value)}
             className="appearance-none rounded-md border border-border bg-muted px-3 py-1.5 pr-8 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"

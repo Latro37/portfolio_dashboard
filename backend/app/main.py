@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, SessionLocal
 from app.routers import portfolio, health, symphonies
-from app.config import load_accounts
+from app.config import load_accounts, is_test_mode
 from app.composer_client import ComposerClient
 from app.models import Account
 
@@ -68,7 +68,10 @@ async def lifespan(app: FastAPI):
     """Create DB tables and discover accounts on startup."""
     init_db()
     try:
-        _discover_accounts()
+        if is_test_mode():
+            logger.info("Test mode active: skipping real account discovery")
+        else:
+            _discover_accounts()
     except FileNotFoundError as e:
         logger.warning("Account discovery skipped: %s", e)
     except Exception as e:

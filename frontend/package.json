@@ -6,7 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test tests/e2e",
+    "test:e2e:basic": "playwright test tests/e2e --grep-invert @power",
+    "test:e2e:power": "playwright test tests/e2e",
+    "test:e2e:headed": "playwright test tests/e2e --headed",
+    "test:visual": "playwright test tests/visual",
+    "test:visual:update": "playwright test tests/visual --update-snapshots"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
@@ -25,6 +31,7 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

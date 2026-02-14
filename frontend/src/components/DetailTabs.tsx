@@ -70,8 +70,8 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
     <Card className="border-border/50">
       <Tabs defaultValue="transactions">
         <TabsList className="mx-4 mt-4">
-          <TabsTrigger value="transactions">Transactions</TabsTrigger>
-          <TabsTrigger value="cashflows">Non-Trade Activity</TabsTrigger>
+          <TabsTrigger data-testid="tab-transactions" value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger data-testid="tab-cashflows" value="cashflows">Non-Trade Activity</TabsTrigger>
         </TabsList>
 
         {/* Transactions */}
