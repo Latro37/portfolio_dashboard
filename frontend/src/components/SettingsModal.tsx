@@ -1,154 +1,43 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { X, FolderOpen, Check, Loader2, Camera } from "lucide-react";
-import { api, ScreenshotConfig, AccountInfo } from "@/lib/api";
-import { METRIC_OPTIONS, DEFAULT_METRICS } from "./SnapshotView";
-
-const CHART_MODES = [
-  { value: "twr", label: "TWR" },
-  { value: "portfolio", label: "Portfolio Value" },
-  { value: "mwr", label: "MWR" },
-  { value: "drawdown", label: "Drawdown" },
-];
-
-const PERIOD_OPTIONS = [
-  { value: "1W", label: "1 Week" },
-  { value: "1M", label: "1 Month" },
-  { value: "3M", label: "3 Months" },
-  { value: "YTD", label: "Year to Date" },
-  { value: "1Y", label: "1 Year" },
-  { value: "ALL", label: "All Time" },
-  { value: "custom", label: "Custom Start Date" },
-];
+import { useSettingsModalState } from "@/features/settings/hooks/useSettingsModalState";
+import { CHART_MODES, PERIOD_OPTIONS } from "@/features/settings/options";
+import { METRIC_OPTIONS } from "./SnapshotView";
 
 interface Props {
   onClose: () => void;
 }
 
-const defaultScreenshot: ScreenshotConfig = {
-  enabled: false,
-  local_path: "",
-  account_id: "",
-  chart_mode: "twr",
-  period: "ALL",
-  custom_start: "",
-  hide_portfolio_value: false,
-  metrics: [...DEFAULT_METRICS],
-  benchmarks: [],
-};
-
 export function SettingsModal({ onClose }: Props) {
-  const [localPath, setLocalPath] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-
-  // Screenshot config state
-  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
-  const [ss, setSs] = useState<ScreenshotConfig>({ ...defaultScreenshot });
-  const [ssSaving, setSsSaving] = useState(false);
-  const [ssSaved, setSsSaved] = useState(false);
-  const [ssError, setSsError] = useState("");
-  const [todayDollarAutoDisabled, setTodayDollarAutoDisabled] = useState(false);
+  const {
+    localPath,
+    setLocalPath,
+    saving,
+    saved,
+    setSaved,
+    error,
+    setError,
+    handleSave,
+    ss,
+    setSs,
+    ssSaving,
+    ssSaved,
+    setSsSaved,
+    ssError,
+    handleSaveScreenshot,
+    todayDollarAutoDisabled,
+    setTodayDollarAutoDisabled,
+    toggleMetric,
+    accountOptions,
+  } = useSettingsModalState();
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
   }, []);
 
-  useEffect(() => {
-    api.getConfig().then((cfg) => {
-      setLocalPath(cfg.symphony_export?.local_path || "");
-      if (cfg.screenshot) {
-        setSs({ ...defaultScreenshot, ...cfg.screenshot });
-      }
-    }).catch(() => {});
-    api.getAccounts().then(setAccounts).catch(() => {});
-  }, []);
-
-  const handleSave = async () => {
-    if (!localPath.trim()) {
-      setError("Path cannot be empty");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    try {
-      await api.saveSymphonyExportPath(localPath.trim());
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      setError("Failed to save export path");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveScreenshot = async () => {
-    if (ss.enabled && !ss.local_path.trim()) {
-      setSsError("Save folder is required when enabled");
-      return;
-    }
-    setSsSaving(true);
-    setSsError("");
-    setSsSaved(false);
-    try {
-      await api.saveScreenshotConfig({ ...ss, local_path: ss.local_path.trim() });
-      setSsSaved(true);
-      setTimeout(() => setSsSaved(false), 2000);
-    } catch {
-      setSsError("Failed to save screenshot settings");
-    } finally {
-      setSsSaving(false);
-    }
-  };
-
-  const toggleMetric = (key: string) => {
-    if (key === "today_dollar" && todayDollarAutoDisabled) {
-      setTodayDollarAutoDisabled(false);
-    }
-    setSs((prev) => {
-      const has = prev.metrics.includes(key);
-      return {
-        ...prev,
-        metrics: has
-          ? prev.metrics.filter((m) => m !== key)
-          : [...prev.metrics, key],
-      };
-    });
-    setSsSaved(false);
-  };
-
-  // Build account options matching dashboard's AccountSwitcher
-  const credentialNames = [...new Set(accounts.map((a) => a.credential_name))];
-  const typeLabel: Record<string, string> = {
-    INDIVIDUAL: "Taxable",
-    IRA_ROTH: "Roth IRA",
-    ROTH_IRA: "Roth IRA",
-    IRA_TRADITIONAL: "Traditional IRA",
-    TRADITIONAL_IRA: "Traditional IRA",
-    BUSINESS: "Business",
-  };
-
-  const accountOptions: { value: string; label: string }[] = [];
-  if (accounts.length > 1) {
-    accountOptions.push({ value: "all", label: "All Accounts" });
-  }
-  for (const cred of credentialNames) {
-    const subs = accounts.filter((a) => a.credential_name === cred);
-    if (subs.length > 1) {
-      accountOptions.push({ value: `all:${cred}`, label: `${cred} — All` });
-    }
-    for (const sub of subs) {
-      const tl = typeLabel[sub.account_type] || sub.account_type;
-      accountOptions.push({
-        value: sub.id,
-        label: credentialNames.length > 1 ? `${cred}: ${tl}` : tl,
-      });
-    }
-  }
 
   return (
     <div
@@ -432,3 +321,4 @@ export function SettingsModal({ onClose }: Props) {
     </div>
   );
 }
+
