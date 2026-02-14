@@ -12,9 +12,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     Account, SymphonyAllocationHistory,
-    SymphonyDailyPortfolio, SymphonyDailyMetrics, SymphonyCatalogEntry,
+    SymphonyDailyMetrics,
 )
-import requests
 
 from app.composer_client import ComposerClient
 from app.config import load_accounts
@@ -26,6 +25,10 @@ from app.services.symphony_read import (
     get_symphony_performance_data,
     get_symphony_summary_data,
     get_symphony_summary_live_data,
+)
+from app.services.symphony_trade_preview import (
+    get_symphony_trade_preview_data,
+    get_trade_preview_data,
 )
 from app.market_hours import is_within_trading_session
 import time
@@ -187,142 +190,6 @@ def _list_symphonies_test(db: Session, account_id: str, account_name: str, store
     return result
 
 
-def _generate_test_trade_preview(db: Session, aid_list: List[str], acct_names: dict) -> List[Dict]:
-    """Generate synthetic aggregate trade preview for __TEST__ accounts."""
-    import random as _rnd
-    _rnd.seed()  # don't use fixed seed â€” vary each call
-    results = []
-    for aid in aid_list:
-        # Get symphonies with their allocations
-        alloc_rows = (
-            db.query(SymphonyAllocationHistory)
-            .filter_by(account_id=aid)
-            .order_by(SymphonyAllocationHistory.date.desc())
-            .all()
-        )
-        if not alloc_rows:
-            continue
-        alloc_date = alloc_rows[0].date
-        # Group by symphony
-        sym_allocs: dict = {}
-        for r in alloc_rows:
-            if r.date != alloc_date:
-                continue
-            sym_allocs.setdefault(r.symphony_id, []).append(r)
-
-        # Pick ~30% of symphonies to have trades
-        sym_ids = list(sym_allocs.keys())
-        n_trade_syms = max(3, len(sym_ids) // 3)
-        trade_syms = _rnd.sample(sym_ids, min(n_trade_syms, len(sym_ids)))
-
-        # Get symphony names from catalog
-        cat_entries = {c.symphony_id: c.name for c in db.query(SymphonyCatalogEntry).filter(
-            SymphonyCatalogEntry.symphony_id.in_(trade_syms)
-        ).all()}
-
-        acct_name = acct_names.get(aid, aid)
-        for sid in trade_syms:
-            allocs = sym_allocs.get(sid, [])
-            if len(allocs) < 2:
-                continue
-            # Pick 1-3 tickers to trade per symphony
-            n_trades = _rnd.randint(1, min(3, len(allocs)))
-            trade_allocs = _rnd.sample(allocs, n_trades)
-            for a in trade_allocs:
-                side = _rnd.choice(["BUY", "SELL"])
-                notional = round(_rnd.uniform(200, 5000) * (1 if side == "BUY" else -1), 2)
-                prev_w = a.allocation_pct / 100
-                shift = _rnd.uniform(0.005, 0.03) * (1 if side == "BUY" else -1)
-                next_w = max(0, prev_w + shift)
-                results.append({
-                    "symphony_id": sid,
-                    "symphony_name": cat_entries.get(sid, sid),
-                    "account_id": aid,
-                    "account_name": acct_name,
-                    "ticker": a.ticker,
-                    "notional": abs(notional),
-                    "quantity": round(abs(notional) / _rnd.uniform(20, 400), 4),
-                    "prev_value": round(a.value, 2),
-                    "prev_weight": round(prev_w * 100, 2),
-                    "next_weight": round(next_w * 100, 2),
-                    "side": side,
-                })
-    return results
-
-
-def _generate_test_symphony_trade_preview(db: Session, symphony_id: str, account_id: str) -> Dict:
-    """Generate synthetic per-symphony trade preview for __TEST__ accounts."""
-    import random as _rnd
-    _rnd.seed()
-
-    # Get allocations for this symphony
-    alloc_rows = (
-        db.query(SymphonyAllocationHistory)
-        .filter_by(account_id=account_id, symphony_id=symphony_id)
-        .order_by(SymphonyAllocationHistory.date.desc())
-        .all()
-    )
-
-    cat = db.query(SymphonyCatalogEntry).filter_by(symphony_id=symphony_id).first()
-    sym_name = cat.name if cat else symphony_id
-
-    # Get symphony value
-    latest = (
-        db.query(SymphonyDailyPortfolio)
-        .filter_by(account_id=account_id, symphony_id=symphony_id)
-        .order_by(SymphonyDailyPortfolio.date.desc())
-        .first()
-    )
-    sym_value = latest.portfolio_value if latest else 0
-
-    if not alloc_rows:
-        return {
-            "symphony_id": symphony_id,
-            "symphony_name": sym_name,
-            "rebalanced": False,
-            "next_rebalance_after": "",
-            "symphony_value": round(sym_value, 2),
-            "recommended_trades": [],
-        }
-
-    alloc_date = alloc_rows[0].date
-    allocs = [r for r in alloc_rows if r.date == alloc_date and r.value > 0]
-
-    # Generate trades for ~30% of holdings
-    n_trades = max(1, len(allocs) // 3)
-    trade_allocs = _rnd.sample(allocs, min(n_trades, len(allocs)))
-
-    trades = []
-    for a in trade_allocs:
-        side = _rnd.choice(["BUY", "SELL"])
-        price = round(_rnd.uniform(20, 400), 2)
-        share_change = round(_rnd.uniform(1, 50), 2)
-        cash_change = round(share_change * price * (-1 if side == "BUY" else 1), 2)
-        prev_w = a.allocation_pct / 100
-        shift = _rnd.uniform(0.005, 0.03) * (1 if side == "BUY" else -1)
-        next_w = max(0, prev_w + shift)
-        trades.append({
-            "ticker": a.ticker,
-            "name": None,
-            "side": side,
-            "share_change": share_change if side == "BUY" else -share_change,
-            "cash_change": cash_change,
-            "average_price": price,
-            "prev_value": round(a.value, 2),
-            "prev_weight": round(prev_w * 100, 2),
-            "next_weight": round(next_w * 100, 2),
-        })
-
-    return {
-        "symphony_id": symphony_id,
-        "symphony_name": sym_name,
-        "rebalanced": False,
-        "next_rebalance_after": "",
-        "symphony_value": round(sym_value, 2),
-        "recommended_trades": trades,
-    }
-
-
 # ------------------------------------------------------------------
 # Symphony catalog (name search for benchmarks)
 # ------------------------------------------------------------------
@@ -435,70 +302,12 @@ def get_trade_preview(
     db: Session = Depends(get_db),
 ):
     """Aggregate trade preview across all symphonies for selected accounts."""
-    ids = resolve_account_ids(db, account_id)
-    acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
-
-    # Group account IDs by credential so we make one dry-run call per credential
-    accts = db.query(Account).filter(Account.id.in_(ids)).all()
-    cred_to_ids: dict[str, list[str]] = {}
-    cred_to_client: dict[str, ComposerClient] = {}
-    for a in accts:
-        cred_to_ids.setdefault(a.credential_name, []).append(a.id)
-        if a.credential_name not in cred_to_client:
-            try:
-                cred_to_client[a.credential_name] = _get_client_for_account(db, a.id)
-            except Exception:
-                pass
-
-    results = []
-    for cred_name, aid_list in cred_to_ids.items():
-        # __TEST__ accounts: generate synthetic trade preview from DB
-        if cred_name == TEST_CREDENTIAL:
-            results.extend(_generate_test_trade_preview(db, aid_list, acct_names))
-            continue
-        client = cred_to_client.get(cred_name)
-        if not client:
-            continue
-        try:
-            dry_run_data = client.dry_run(account_uuids=aid_list)
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 400:
-                body = e.response.json() if e.response.text else {}
-                errors = body.get("errors", [])
-                if any(err.get("code") == "dry-run-markets-closed" for err in errors):
-                    logger.info("Markets closed â€” skipping dry-run for credential %s", cred_name)
-                    continue
-            logger.warning("Dry-run failed for credential %s: %s", cred_name, e)
-            continue
-        except Exception as e:
-            logger.warning("Dry-run failed for credential %s: %s", cred_name, e)
-            continue
-
-        for acct_result in dry_run_data:
-            broker_uuid = acct_result.get("broker_account_uuid", "")
-            acct_name = acct_names.get(broker_uuid, acct_result.get("account_name", broker_uuid))
-            dry_run_result = acct_result.get("dry_run_result", {})
-
-            for sym_id, sym_data in dry_run_result.items():
-                trades = sym_data.get("recommended_trades", [])
-                if not trades:
-                    continue
-                for t in trades:
-                    results.append({
-                        "symphony_id": sym_id,
-                        "symphony_name": sym_data.get("symphony_name", "Unknown"),
-                        "account_id": broker_uuid,
-                        "account_name": acct_name,
-                        "ticker": t.get("ticker", ""),
-                        "notional": round(t.get("notional", 0), 2),
-                        "quantity": round(t.get("quantity", 0), 4),
-                        "prev_value": round(t.get("prev_value", 0), 2),
-                        "prev_weight": round(t.get("prev_weight", 0) * 100, 2),
-                        "next_weight": round(t.get("next_weight", 0) * 100, 2),
-                        "side": "BUY" if t.get("notional", 0) >= 0 else "SELL",
-                    })
-
-    return results
+    return get_trade_preview_data(
+        db=db,
+        account_id=account_id,
+        get_client_for_account_fn=_get_client_for_account,
+        test_credential=TEST_CREDENTIAL,
+    )
 
 
 @router.get("/symphonies/{symphony_id}/trade-preview")
@@ -508,56 +317,13 @@ def get_symphony_trade_preview(
     db: Session = Depends(get_db),
 ):
     """Get trade preview for a single symphony."""
-    # __TEST__ bypass
-    acct = db.query(Account).filter_by(id=account_id).first()
-    if acct and acct.credential_name == TEST_CREDENTIAL:
-        return _generate_test_symphony_trade_preview(db, symphony_id, account_id)
-
-    client = _get_client_for_account(db, account_id)
-    try:
-        data = client.get_trade_preview(symphony_id, broker_account_uuid=account_id)
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 400:
-            body = e.response.json() if e.response.text else {}
-            errors = body.get("errors", [])
-            if any(err.get("code") == "dry-run-markets-closed" for err in errors):
-                logger.info("Markets closed â€” returning empty trade preview for %s", symphony_id)
-                return {
-                    "symphony_id": symphony_id,
-                    "symphony_name": "",
-                    "rebalanced": False,
-                    "next_rebalance_after": "",
-                    "symphony_value": 0,
-                    "recommended_trades": [],
-                    "markets_closed": True,
-                }
-        raise HTTPException(500, f"Trade preview failed: {e}")
-    except Exception as e:
-        raise HTTPException(500, f"Trade preview failed: {e}")
-
-    trades = []
-    for t in data.get("recommended_trades", []):
-        side = t.get("side", "BUY" if t.get("cash_change", 0) < 0 else "SELL")
-        trades.append({
-            "ticker": t.get("symbol", ""),
-            "name": t.get("name"),
-            "side": side,
-            "share_change": round(t.get("share_change", 0), 4),
-            "cash_change": round(t.get("cash_change", 0), 2),
-            "average_price": round(t.get("average_price", 0), 2),
-            "prev_value": round(t.get("prev_value", 0), 2),
-            "prev_weight": round(t.get("prev_weight", 0) * 100, 2),
-            "next_weight": round(t.get("next_weight", 0) * 100, 2),
-        })
-
-    return {
-        "symphony_id": symphony_id,
-        "symphony_name": data.get("symphony_name", ""),
-        "rebalanced": data.get("rebalanced", False),
-        "next_rebalance_after": data.get("next_rebalance_after", ""),
-        "symphony_value": round(data.get("symphony_value", 0), 2),
-        "recommended_trades": trades,
-    }
+    return get_symphony_trade_preview_data(
+        db=db,
+        symphony_id=symphony_id,
+        account_id=account_id,
+        get_client_for_account_fn=_get_client_for_account,
+        test_credential=TEST_CREDENTIAL,
+    )
 
 
 @router.get("/symphonies/{symphony_id}/allocations")
