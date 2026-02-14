@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { AccountSwitcher } from "@/components/AccountSwitcher";
@@ -18,19 +18,18 @@ import { SymphonyList } from "@/components/SymphonyList";
 import { ToastContainer, showToast } from "@/components/Toast";
 import { TradePreview } from "@/components/TradePreview";
 import { Button } from "@/components/ui/button";
+import { useDashboardAccountScope } from "@/features/dashboard/hooks/useDashboardAccountScope";
 import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
+import { useDashboardBootstrap } from "@/features/dashboard/hooks/useDashboardBootstrap";
 import { useDashboardData } from "@/features/dashboard/hooks/useDashboardData";
 import { useDashboardLiveOverlay } from "@/features/dashboard/hooks/useDashboardLiveOverlay";
 import { usePostCloseSyncAndSnapshot } from "@/features/dashboard/hooks/usePostCloseSyncAndSnapshot";
 import type { DashboardPeriod } from "@/features/dashboard/types";
 import { summarizeSymphonyDailyChange } from "@/features/dashboard/utils";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
-import { api, AccountInfo, ScreenshotConfig, SymphonyInfo } from "@/lib/api";
+import { api, SymphonyInfo } from "@/lib/api";
 
 export default function DashboardPageContainer() {
-  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
-  const [selectedCredential, setSelectedCredential] = useState("");
-  const [selectedSubAccount, setSelectedSubAccount] = useState("");
   const [period, setPeriod] = useState<DashboardPeriod>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -51,18 +50,25 @@ export default function DashboardPageContainer() {
     }
     return true;
   });
-  const [finnhubConfigured, setFinnhubConfigured] = useState(false);
-  const [isTestMode, setIsTestMode] = useState(false);
-  const [screenshotConfig, setScreenshotConfig] = useState<ScreenshotConfig | null>(
-    null,
-  );
+  const {
+    accounts,
+    selectedCredential,
+    selectedSubAccount,
+    finnhubConfigured,
+    isTestMode,
+    screenshotConfig,
+    setScreenshotConfig,
+    setSelectedCredential,
+    setSelectedSubAccount,
+  } = useDashboardBootstrap();
 
-  const resolvedAccountId =
-    selectedCredential === "__all__"
-      ? "all"
-      : selectedSubAccount === "all" && selectedCredential
-        ? `all:${selectedCredential}`
-        : selectedSubAccount || undefined;
+  const resolvedAccountId = useMemo(() => {
+    if (selectedCredential === "__all__") return "all";
+    if (selectedSubAccount === "all" && selectedCredential) {
+      return `all:${selectedCredential}`;
+    }
+    return selectedSubAccount || undefined;
+  }, [selectedCredential, selectedSubAccount]);
 
   const {
     summary,
@@ -121,46 +127,16 @@ export default function DashboardPageContainer() {
   const { benchmarks, handleBenchmarkAdd, handleBenchmarkRemove } =
     useBenchmarkManager(resolvedAccountId);
 
-  useEffect(() => {
-    let active = true;
-
-    api
-      .getConfig()
-      .then((cfg) => {
-        if (!active) return;
-        setFinnhubConfigured(cfg.finnhub_configured ?? !!cfg.finnhub_api_key);
-        setIsTestMode(cfg.test_mode === true);
-        if (cfg.screenshot) setScreenshotConfig(cfg.screenshot);
-      })
-      .catch(() => undefined);
-
-    api
-      .getAccounts()
-      .then((loadedAccounts) => {
-        if (!active) return;
-        setAccounts(loadedAccounts);
-        if (loadedAccounts.length === 0) return;
-
-        const preferredCredential = loadedAccounts.some(
-          (account) => account.credential_name === "__TEST__",
-        )
-          ? "__TEST__"
-          : loadedAccounts[0].credential_name;
-
-        setSelectedCredential(preferredCredential);
-        const subAccounts = loadedAccounts.filter(
-          (account) => account.credential_name === preferredCredential,
-        );
-        setSelectedSubAccount(
-          subAccounts.length > 1 ? "all" : subAccounts[0]?.id || "",
-        );
-      })
-      .catch(() => undefined);
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { showAccountColumn, handleCredentialChange, handleSubAccountChange } =
+    useDashboardAccountScope({
+      accounts,
+      selectedCredential,
+      selectedSubAccount,
+      setSelectedCredential,
+      setSelectedSubAccount,
+      resetForAccountChange,
+      setLoading,
+    });
 
   const holdingSymbols = (holdings?.holdings ?? [])
     .filter((holding) => holding.market_value > 0.01)
@@ -172,30 +148,6 @@ export default function DashboardPageContainer() {
 
   const { todayDollarChange, todayPctChange, totalValue: symphonyTotalValue } =
     useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
-
-  const handleCredentialChange = useCallback(
-    (credentialName: string) => {
-      setSelectedCredential(credentialName);
-      if (credentialName === "__all__") {
-        setSelectedSubAccount("all");
-      } else {
-        const subAccounts = accounts.filter(
-          (account) => account.credential_name === credentialName,
-        );
-        setSelectedSubAccount(subAccounts.length > 1 ? "all" : subAccounts[0]?.id || "");
-      }
-      resetForAccountChange();
-    },
-    [accounts, resetForAccountChange],
-  );
-
-  const handleSubAccountChange = useCallback(
-    (accountId: string) => {
-      setSelectedSubAccount(accountId);
-      setLoading(true);
-    },
-    [setLoading],
-  );
 
   const toggleLive = useCallback(
     (enabled: boolean) => {
@@ -343,7 +295,7 @@ export default function DashboardPageContainer() {
 
         <SymphonyList
           symphonies={symphonies}
-          showAccountColumn={selectedCredential === "__all__" || selectedSubAccount === "all"}
+          showAccountColumn={showAccountColumn}
           onSelect={(symphony) => {
             setSelectedSymphony(symphony);
             setSymphonyScrollTo(undefined);
