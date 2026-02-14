@@ -18,12 +18,14 @@ import {
   PerformancePoint,
   SymphonyInfo,
 } from "@/lib/api";
-import { InfoTooltip, TWR_TOOLTIP_TEXT } from "@/components/InfoTooltip";
 import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
 import { BacktestMetricsSummary } from "@/features/symphony-detail/components/BacktestMetricsSummary";
 import { HistoricalAllocationsTable } from "@/features/symphony-detail/components/HistoricalAllocationsTable";
 import { SymphonyBacktestHoldingsSection } from "@/features/symphony-detail/components/SymphonyBacktestHoldingsSection";
+import { SymphonyDetailTabs } from "@/features/symphony-detail/components/SymphonyDetailTabs";
+import { SymphonyHeaderSection } from "@/features/symphony-detail/components/SymphonyHeaderSection";
 import { SymphonyLiveHoldingsSection } from "@/features/symphony-detail/components/SymphonyLiveHoldingsSection";
+import { SymphonyLiveMetricsSection } from "@/features/symphony-detail/components/SymphonyLiveMetricsSection";
 import { SymphonyTradePreviewSection } from "@/features/symphony-detail/components/SymphonyTradePreviewSection";
 import { useSymphonyBenchmarkManager } from "@/features/symphony-detail/hooks/useSymphonyBenchmarkManager";
 import { useSymphonyDetailData } from "@/features/symphony-detail/hooks/useSymphonyDetailData";
@@ -33,11 +35,7 @@ import {
   SymphonyDetailTab,
 } from "@/features/symphony-detail/types";
 import {
-  colorVal,
   epochDayToDate,
-  fmtDollar,
-  fmtPct,
-  fmtSignedDollar,
   formatPctAxis,
   isWeekday,
   makeDateFormatter,
@@ -153,28 +151,6 @@ function backtestOverlayTooltip(
   }
 
   return BacktestOverlayTooltipContent;
-}
-
-// --- Metric card ---
-function Metric({ label, value, color, subValue, tooltip, valueTooltip, subValueColor, subValueTooltip, subValueLarge }: { label: string; value: string; color?: string; subValue?: string; tooltip?: string; valueTooltip?: string; subValueColor?: string; subValueTooltip?: string; subValueLarge?: boolean }) {
-  return (
-    <div className="rounded-lg bg-muted/50 p-3">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-        {label}
-        {tooltip && <InfoTooltip text={tooltip} />}
-      </div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums flex items-center gap-1 ${color || "text-foreground"}`}>
-        {value}
-        {valueTooltip && <InfoTooltip text={valueTooltip} />}
-      </div>
-      {subValue && (
-        <div className={`${subValueLarge ? "mt-0.5 text-lg font-semibold" : "text-xs"} tabular-nums flex items-center gap-1 ${subValueColor || color || "text-muted-foreground"}`}>
-          {subValue}
-          {subValueTooltip && <InfoTooltip text={subValueTooltip} />}
-        </div>
-      )}
-    </div>
-  );
 }
 
 type Period = SymphonyDetailPeriod;
@@ -599,98 +575,18 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
         </button>
 
         <div className="p-6 space-y-6">
-          {/* Header */}
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="h-3.5 w-3.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-              <h2 className="text-xl font-bold">{s.name}</h2>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>Invested since {s.invested_since}</span>
-              {s.rebalance_frequency && <span>Rebalance: {s.rebalance_frequency}</span>}
-              {s.last_rebalance_on && <span>Last rebalance: {new Date(s.last_rebalance_on).toLocaleDateString()}</span>}
-              <span className="text-muted-foreground/60">{s.account_name}</span>
-            </div>
-          </div>
+          <SymphonyHeaderSection symphony={s} />
 
-          {/* Live Metrics */}
-          <div>
-            <h3 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Live Metrics
-              {liveMetrics.startDate && liveMetrics.endDate && (
-                <span className="ml-2 text-xs font-normal normal-case text-muted-foreground/60">
-                  {new Date(liveMetrics.startDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                  {" — "}
-                  {new Date(liveMetrics.endDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                </span>
-              )}
-            </h3>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <Metric label="Current Value" value={fmtDollar(s.value)} />
-              <Metric
-                label="Today's Change"
-                value={fmtPct(s.last_percent_change)}
-                color={colorVal(s.last_percent_change)}
-                subValue={fmtSignedDollar(s.last_dollar_change)}
-              />
-              <Metric
-                label="TWR"
-                value={liveMetrics.twr != null ? fmtPct(liveMetrics.twr) : "—"}
-                color={liveMetrics.twr != null ? colorVal(liveMetrics.twr) : "text-muted-foreground"}
-                tooltip={TWR_TOOLTIP_TEXT}
-              />
-              <Metric label="Annualized" value={liveMetrics.annualized != null ? fmtPct(liveMetrics.annualized) : "—"} color={colorVal(liveMetrics.annualized ?? 0)} />
-              <Metric label="Sortino" value={liveMetrics.sortino != null ? liveMetrics.sortino.toFixed(2) : "—"} />
-              <Metric label="Max Drawdown" value={liveMetrics.maxDrawdown != null ? fmtPct(liveMetrics.maxDrawdown) : "—"} color="text-red-400" valueTooltip={liveMetrics.maxDrawdownDate ? new Date(liveMetrics.maxDrawdownDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined} />
-              <Metric label="Profit" value={liveMetrics.totalReturn != null ? fmtSignedDollar(liveMetrics.totalReturn) : "—"} color={colorVal(liveMetrics.totalReturn ?? 0)} />
-              <Metric label="Cum. Return" value={liveMetrics.cumReturn != null ? fmtPct(liveMetrics.cumReturn) : "—"} color={colorVal(liveMetrics.cumReturn ?? 0)} />
-              <Metric label="MWR" value={liveMetrics.mwr != null ? fmtPct(liveMetrics.mwr) : "—"} color={colorVal(liveMetrics.mwr ?? 0)} tooltip="Money Weighted Return measures your actual return accounting for when and how much money you deposited or withdrew." />
-              <Metric label="Win Rate" value={liveMetrics.winRate != null ? liveMetrics.winRate.toFixed(1) + "%" : "—"} />
-              <Metric label="Calmar" value={liveMetrics.calmar != null ? liveMetrics.calmar.toFixed(2) : "—"} />
-              <Metric
-                label="Best / Worst Day"
-                value={liveMetrics.bestDay != null ? fmtPct(liveMetrics.bestDay) : "—"}
-                color="text-emerald-400"
-                valueTooltip={liveMetrics.bestDayDate ? new Date(liveMetrics.bestDayDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined}
-                subValue={liveMetrics.worstDay != null ? fmtPct(liveMetrics.worstDay) : "—"}
-                subValueLarge
-                subValueColor="text-red-400"
-                subValueTooltip={liveMetrics.worstDayDate ? new Date(liveMetrics.worstDayDate + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : undefined}
-              />
-            </div>
-          </div>
+          <SymphonyLiveMetricsSection symphony={s} liveMetrics={liveMetrics} />
 
-          {/* Tabs: Live / Backtest */}
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg bg-muted p-0.5 w-fit">
-              <button
-                onClick={() => setTab("live")}
-                className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                  tab === "live" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Live Performance
-              </button>
-              <button
-                onClick={() => setTab("backtest")}
-                className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                  tab === "backtest" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Backtest
-              </button>
-            </div>
-            {tab === "backtest" && (
-              <button
-                onClick={() => fetchBacktest(true)}
-                disabled={loadingBacktest}
-                className="cursor-pointer rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                title="Refresh backtest (force recompute)"
-              >
-                <RefreshCw className={`h-4 w-4 ${loadingBacktest ? "animate-spin" : ""}`} />
-              </button>
-            )}
-          </div>
+          <SymphonyDetailTabs
+            tab={tab}
+            onTabChange={setTab}
+            loadingBacktest={loadingBacktest}
+            onRefreshBacktest={() => {
+              fetchBacktest(true).catch(() => undefined);
+            }}
+          />
 
           {/* Chart area */}
           {tab === "live" ? (
@@ -1040,5 +936,6 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     </div>
   );
 }
+
 
 
