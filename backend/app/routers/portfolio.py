@@ -1,4 +1,4 @@
-﻿"""Portfolio API routes."""
+"""Portfolio API routes."""
 
 import logging
 import time
@@ -24,12 +24,12 @@ from app.services.finnhub_market_data import (
     get_latest_price,
 )
 from app.services.account_scope import resolve_account_ids
+from app.services.account_clients import get_client_for_account
 from app.services.date_filters import parse_iso_date
 from app.services.benchmark_read import get_benchmark_history_data
 from app.services.portfolio_live_overlay import get_portfolio_live_summary_data
 from app.services.portfolio_read import get_portfolio_performance_data, get_portfolio_summary_data
-from app.composer_client import ComposerClient
-from app.config import load_accounts, load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
+from app.config import load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -45,18 +45,6 @@ def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
         account_id,
         no_accounts_message="No accounts discovered. Check config.json and restart.",
     )
-
-
-def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
-    """Build a ComposerClient with the right credentials for a given sub-account."""
-    acct = db.query(Account).filter_by(id=account_id).first()
-    if not acct:
-        raise HTTPException(404, f"Account {account_id} not found")
-    accounts_creds = load_accounts()
-    for creds in accounts_creds:
-        if creds.name == acct.credential_name:
-            return ComposerClient.from_credentials(creds)
-    raise HTTPException(500, f"No credentials found for credential name '{acct.credential_name}'")
 
 
 # ------------------------------------------------------------------
@@ -214,7 +202,7 @@ def get_holdings(
                         notional_map[r.ticker] = notional_map.get(r.ticker, 0) + r.value
             continue
         try:
-            client = _get_client_for_account(db, aid)
+            client = get_client_for_account(db, aid)
             stats = client.get_holding_stats(aid)
             for h in stats.get("holdings", []):
                 sym = h.get("symbol", "")
@@ -232,7 +220,7 @@ def get_holdings(
             holdings_by_symbol[r.symbol] = {"symbol": r.symbol, "quantity": r.quantity}
 
     if holdings_by_symbol:
-        # Have stored history â€” merge with notional values
+        # Have stored history — merge with notional values
         holdings = []
         for sym, h in holdings_by_symbol.items():
             market_value = notional_map.get(sym, 0.0)
@@ -242,7 +230,7 @@ def get_holdings(
                 "market_value": round(market_value, 2),
             })
     elif notional_map:
-        # No stored history but API returned holding stats â€” use API data directly
+        # No stored history but API returned holding stats — use API data directly
         holdings = [
             {"symbol": sym, "quantity": 0, "market_value": round(val, 2)}
             for sym, val in notional_map.items()
@@ -371,7 +359,7 @@ def add_manual_cash_flow(
 
     # Recalculate portfolio history net_deposits and metrics for this account
     try:
-        client = _get_client_for_account(db, body.account_id)
+        client = get_client_for_account(db, body.account_id)
         from app.services.sync import _sync_portfolio_history, _recompute_metrics
         _sync_portfolio_history(db, client, body.account_id)
         _recompute_metrics(db, body.account_id)
@@ -427,7 +415,7 @@ def trigger_sync(
             return {"status": "skipped", "synced_accounts": 0, "reason": "No sync-eligible accounts"}
 
         for aid in sync_ids:
-            client = _get_client_for_account(db, aid)
+            client = get_client_for_account(db, aid)
             state = get_sync_state(db, aid)
             if state.get("initial_backfill_done") == "true":
                 incremental_update(db, client, aid)
@@ -567,4 +555,5 @@ def get_benchmark_history(
         get_daily_closes_fn=get_daily_closes,
         get_latest_price_fn=get_latest_price,
     )
+
 

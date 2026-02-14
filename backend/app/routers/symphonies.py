@@ -1,18 +1,13 @@
-﻿"""Symphony API routes."""
+"""Symphony API routes."""
 
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import (
-    Account,
-)
-
-from app.composer_client import ComposerClient
-from app.config import load_accounts
+from app.services.account_clients import get_client_for_account
 from app.services.backtest_cache import get_symphony_backtest_data
 from app.services.symphony_allocations_read import get_symphony_allocations_data
 from app.services.symphony_benchmark_read import get_symphony_benchmark_data
@@ -35,18 +30,6 @@ router = APIRouter(prefix="/api", tags=["symphonies"])
 
 TEST_CREDENTIAL = "__TEST__"
 
-
-def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
-    """Build a ComposerClient with the right credentials for a given sub-account."""
-    acct = db.query(Account).filter_by(id=account_id).first()
-    if not acct:
-        raise HTTPException(404, f"Account {account_id} not found")
-    accounts_creds = load_accounts()
-    for creds in accounts_creds:
-        if creds.name == acct.credential_name:
-            return ComposerClient.from_credentials(creds)
-    raise HTTPException(500, f"No credentials found for credential name '{acct.credential_name}'")
-
 # ------------------------------------------------------------------
 # List symphonies
 # ------------------------------------------------------------------
@@ -60,7 +43,7 @@ def list_symphonies(
     return get_symphonies_list_data(
         db=db,
         account_id=account_id,
-        get_client_for_account_fn=_get_client_for_account,
+        get_client_for_account_fn=get_client_for_account,
         test_credential=TEST_CREDENTIAL,
     )
 
@@ -93,7 +76,7 @@ def get_symphony_performance(
         db=db,
         symphony_id=symphony_id,
         account_id=account_id,
-        get_client_for_account_fn=_get_client_for_account,
+        get_client_for_account_fn=get_client_for_account,
     )
 
 
@@ -162,7 +145,7 @@ def get_symphony_backtest(
         symphony_id=symphony_id,
         account_id=account_id,
         force_refresh=force_refresh,
-        get_client_for_account_fn=_get_client_for_account,
+        get_client_for_account_fn=get_client_for_account,
         test_credential=TEST_CREDENTIAL,
     )
 
@@ -180,7 +163,7 @@ def get_trade_preview(
     return get_trade_preview_data(
         db=db,
         account_id=account_id,
-        get_client_for_account_fn=_get_client_for_account,
+        get_client_for_account_fn=get_client_for_account,
         test_credential=TEST_CREDENTIAL,
     )
 
@@ -196,7 +179,7 @@ def get_symphony_trade_preview(
         db=db,
         symphony_id=symphony_id,
         account_id=account_id,
-        get_client_for_account_fn=_get_client_for_account,
+        get_client_for_account_fn=get_client_for_account,
         test_credential=TEST_CREDENTIAL,
     )
 
@@ -231,4 +214,5 @@ def get_symphony_benchmark(
         symphony_id=symphony_id,
         account_id=account_id,
     )
+
 
