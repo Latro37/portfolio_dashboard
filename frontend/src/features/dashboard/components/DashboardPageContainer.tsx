@@ -3,18 +3,16 @@
 import { useMemo, useState } from "react";
 
 import { AccountSwitcher } from "@/components/AccountSwitcher";
-import { DetailTabs } from "@/components/DetailTabs";
 import { HelpModal } from "@/components/HelpModal";
 import { HoldingsList } from "@/components/HoldingsList";
 import { HoldingsPie } from "@/components/HoldingsPie";
 import { MetricCards } from "@/components/MetricCards";
 import { PerformanceChart } from "@/components/PerformanceChart";
 import { PortfolioHeader } from "@/components/PortfolioHeader";
-import { SettingsModal } from "@/components/SettingsModal";
 import { SymphonyDetail } from "@/components/SymphonyDetail";
 import { SymphonyList } from "@/components/SymphonyList";
 import { ToastContainer } from "@/components/Toast";
-import { TradePreview } from "@/components/TradePreview";
+import { DetailTabs } from "@/features/dashboard/components/DetailTabsContainer";
 import { DashboardErrorScreen } from "@/features/dashboard/components/DashboardErrorScreen";
 import { DashboardLiveToggleButton } from "@/features/dashboard/components/DashboardLiveToggleButton";
 import { DashboardLoadingScreen } from "@/features/dashboard/components/DashboardLoadingScreen";
@@ -31,6 +29,8 @@ import { useDashboardSymphonySelection } from "@/features/dashboard/hooks/useDas
 import { useDashboardSyncAction } from "@/features/dashboard/hooks/useDashboardSyncAction";
 import type { DashboardPeriod } from "@/features/dashboard/types";
 import { summarizeSymphonyDailyChange } from "@/features/dashboard/utils";
+import { SettingsModal } from "@/features/settings/components/SettingsModalContainer";
+import { TradePreview } from "@/features/trade-preview/components/TradePreviewContainer";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
 
 export default function DashboardPageContainer() {
