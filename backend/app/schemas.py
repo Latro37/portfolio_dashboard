@@ -23,12 +23,52 @@ class ManualCashFlowRequest(BaseModel):
     description: str = ""
 
 
+class ManualCashFlowResponse(BaseModel):
+    status: str
+    date: str
+    type: str
+    amount: float
+
+
 # --- Sync ---
 class SyncStatus(BaseModel):
     status: str  # idle / syncing / error
     last_sync_date: Optional[str] = None
     initial_backfill_done: bool = False
     message: str = ""
+
+
+class SyncTriggerResponse(BaseModel):
+    status: str
+    synced_accounts: Optional[int] = None
+    reason: Optional[str] = None
+
+
+class SymphonyExportConfig(BaseModel):
+    local_path: str = ""
+
+
+class AppConfigResponse(BaseModel):
+    finnhub_api_key: Optional[str] = None
+    finnhub_configured: bool
+    polygon_configured: bool
+    symphony_export: Optional[SymphonyExportConfig] = None
+    screenshot: Optional[Dict[str, Any]] = None
+    test_mode: bool
+
+
+class SaveSymphonyExportResponse(BaseModel):
+    ok: bool
+    local_path: str
+
+
+class OkResponse(BaseModel):
+    ok: bool
+
+
+class ScreenshotUploadResponse(BaseModel):
+    ok: bool
+    path: str
 
 
 # --- Portfolio ---
