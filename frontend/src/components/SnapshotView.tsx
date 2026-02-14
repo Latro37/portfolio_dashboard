@@ -2,6 +2,8 @@
 
 import { forwardRef } from "react";
 import { Summary, PerformancePoint, BenchmarkPoint } from "@/lib/api";
+import { adaptSnapshotChart } from "@/features/charting/snapshotChartAdapter";
+import { calcGradientOffset } from "@/features/charting/transforms";
 import {
   AreaChart,
   Area,
@@ -128,43 +130,9 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
     { data, summary, chartMode, selectedMetrics, hidePortfolioValue, todayDollarChange, todayPctChange, periodReturns, benchmarks = [] },
     ref,
   ) {
-    const rawTradingData = data.filter((pt) => {
-      const day = new Date(pt.date + "T00:00").getDay();
-      return day !== 0 && day !== 6;
-    });
-
-    // Merge benchmark data into trading data by date (mirrors PerformanceChart logic)
-    const tradingData = (() => {
-      if (!benchmarks.length || !rawTradingData.length) return rawTradingData;
-      const benchStates = benchmarks.map((b) => {
-        const map = new Map<string, BenchmarkPoint>(b.data.map((pt) => [pt.date, pt]));
-        // Find baseGrowth from the first matching trading date (not just the first date)
-        let baseGrowth: number | null = null;
-        for (const pt of rawTradingData) {
-          const bp = map.get(pt.date);
-          if (bp != null) { baseGrowth = 1 + bp.return_pct / 100; break; }
-        }
-        return { map, baseGrowth: baseGrowth ?? 1, ticker: b.ticker, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined };
-      });
-      return rawTradingData.map((pt) => {
-        const merged: Record<string, unknown> = { ...pt };
-        benchStates.forEach((bs) => {
-          const bpt = bs.map.get(pt.date);
-          if (bpt != null) {
-            const rebasedReturn = bs.baseGrowth !== 0 ? ((1 + bpt.return_pct / 100) / bs.baseGrowth - 1) * 100 : 0;
-            const growth = 1 + rebasedReturn / 100;
-            bs.peak = Math.max(bs.peak, growth);
-            bs.lastReturn = rebasedReturn;
-            bs.lastDd = bs.peak > 0 ? (growth / bs.peak - 1) * 100 : 0;
-          }
-          merged[`bench_${bs.ticker}`] = bs.lastReturn;
-          merged[`bench_${bs.ticker}_dd`] = bs.lastDd;
-        });
-        return merged as PerformancePoint & Record<string, number>;
-      });
-    })();
-
-    const hasData = tradingData.length > 0;
+    const dataset = adaptSnapshotChart(data, benchmarks);
+    const tradingData = dataset.points as (PerformancePoint & Record<string, number>)[];
+    const hasData = dataset.hasData;
     const todayStr = new Date().toLocaleDateString("en-US", {
       month: "long",
       day: "numeric",
@@ -194,19 +162,8 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
       "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
     const formatPctAxis = (v: number) => v.toFixed(1) + "%";
 
-    // Gradient offset for split coloring
-    const calcGradientOffset = (key: keyof PerformancePoint) => {
-      if (!hasData) return 0.5;
-      const vals = tradingData.map((d) => Number(d[key]));
-      const max = Math.max(...vals);
-      const min = Math.min(...vals);
-      if (max <= 0) return 0;
-      if (min >= 0) return 1;
-      return max / (max - min);
-    };
-
-    const twrOffset = calcGradientOffset("time_weighted_return");
-    const mwrOffset = calcGradientOffset("money_weighted_return");
+    const twrOffset = calcGradientOffset(tradingData, "time_weighted_return");
+    const mwrOffset = calcGradientOffset(tradingData, "money_weighted_return");
 
     // Build metric cards
     const metricCards: { label: string; value: string; color: string }[] = [];

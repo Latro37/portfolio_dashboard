@@ -141,3 +141,6 @@ class PerformancePoint(BaseModel):
     net_deposits: float
     cumulative_return_pct: float
     daily_return_pct: float
+    time_weighted_return: float
+    money_weighted_return: float
+    current_drawdown: float

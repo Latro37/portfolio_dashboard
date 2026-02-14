@@ -1,8 +1,8 @@
-"""Portfolio API routes."""
+﻿"""Portfolio API routes."""
 
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -29,6 +29,8 @@ from app.services.finnhub_market_data import (
     get_daily_closes_stooq,
     get_latest_price,
 )
+from app.services.account_scope import resolve_account_ids
+from app.services.date_filters import parse_iso_date, resolve_date_range
 from app.composer_client import ComposerClient
 from app.config import load_accounts, load_finnhub_key, load_polygon_key, load_symphony_export_config, save_symphony_export_path, load_screenshot_config, save_screenshot_config, is_test_mode
 
@@ -39,94 +41,13 @@ router = APIRouter(prefix="/api", tags=["portfolio"])
 _syncing = False
 
 
-def _parse_iso_date(value: str, field_name: str) -> date:
-    """Parse a YYYY-MM-DD date string or raise HTTP 400."""
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(400, f"Invalid {field_name}: expected YYYY-MM-DD")
-
-
-def _resolve_date_range(
-    period: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> tuple[Optional[date], Optional[date]]:
-    """Convert period preset or custom range to (start, end) dates."""
-    if start_date or end_date:
-        start = _parse_iso_date(start_date, "start_date") if start_date else None
-        end = _parse_iso_date(end_date, "end_date") if end_date else None
-        if start and end and start > end:
-            raise HTTPException(400, "start_date cannot be after end_date")
-        return (start, end)
-    if period and period != "ALL":
-        today = date.today()
-        offsets = {
-            "1D": timedelta(days=1),
-            "1W": timedelta(weeks=1),
-            "1M": timedelta(days=30),
-            "3M": timedelta(days=90),
-            "1Y": timedelta(days=365),
-        }
-        if period == "YTD":
-            return (date(today.year, 1, 1), None)
-        if period in offsets:
-            return (today - offsets[period], None)
-    return (None, None)
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
 def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
-    """Resolve an account_id param to a list of sub-account IDs.
-
-    - None → first discovered sub-account (backward compat)
-    - specific UUID → [that UUID]
-    - "all" → every sub-account across all credentials
-    - "all:<credential_name>" → all sub-accounts for that credential
-    """
-    test_mode = is_test_mode()
-    if account_id == "all":
-        query = db.query(Account)
-        if test_mode:
-            query = query.filter(Account.credential_name == "__TEST__")
-        else:
-            query = query.filter(Account.credential_name != "__TEST__")
-        accts = query.all()
-        if not accts:
-            raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
-        return [a.id for a in accts]
-    if account_id and account_id.startswith("all:"):
-        cred_name = account_id[4:]
-        if test_mode and cred_name != "__TEST__":
-            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
-        if not test_mode and cred_name == "__TEST__":
-            raise HTTPException(404, "Test mode is not enabled")
-        accts = db.query(Account).filter_by(credential_name=cred_name).all()
-        if not accts:
-            raise HTTPException(404, f"No sub-accounts found for credential '{cred_name}'")
-        return [a.id for a in accts]
-    if account_id:
-        acct = db.query(Account).filter_by(id=account_id).first()
-        if not acct:
-            raise HTTPException(404, f"Account {account_id} not found")
-        if test_mode and acct.credential_name != "__TEST__":
-            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
-        if not test_mode and acct.credential_name == "__TEST__":
-            raise HTTPException(404, "Test mode is not enabled")
-        return [account_id]
-    # Default: first discovered account
-    query = db.query(Account)
-    if test_mode:
-        query = query.filter(Account.credential_name == "__TEST__")
-    else:
-        query = query.filter(Account.credential_name != "__TEST__")
-    first = query.first()
-    if not first:
-        raise HTTPException(404, "No accounts discovered. Check config.json and restart.")
-    return [first.id]
+    """Portfolio-scoped account resolution with existing error-message parity."""
+    return resolve_account_ids(
+        db,
+        account_id,
+        no_accounts_message="No accounts discovered. Check config.json and restart.",
+    )
 
 
 def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
@@ -182,7 +103,7 @@ def get_summary(
     from collections import defaultdict
 
     ids = _resolve_account_ids(db, account_id)
-    date_start, date_end = _resolve_date_range(period, start_date, end_date)
+    date_start, date_end = resolve_date_range(period, start_date, end_date)
 
     latest_portfolio = db.query(DailyPortfolio).filter(
         DailyPortfolio.account_id.in_(ids)
@@ -314,11 +235,11 @@ def get_summary(
 # ------------------------------------------------------------------
 
 # In-memory cache for the daily series to avoid re-querying DB every 60s
-_live_cache: dict = {}  # key: (account_ids_tuple, period, start, end) → {ts, data}
+_live_cache: dict = {}  # key: (account_ids_tuple, period, start, end) â†’ {ts, data}
 _LIVE_CACHE_TTL = 120  # seconds
 
 
-@router.get("/summary/live")
+@router.get("/summary/live", response_model=PortfolioSummary)
 def get_summary_live(
     live_pv: float = Query(..., description="Live portfolio value from symphony data"),
     live_nd: float = Query(..., description="Live net deposits from symphony data"),
@@ -333,7 +254,7 @@ def get_summary_live(
     from app.config import get_settings
 
     ids = _resolve_account_ids(db, account_id)
-    date_start, date_end = _resolve_date_range(period, start_date, end_date)
+    date_start, date_end = resolve_date_range(period, start_date, end_date)
     today = date.today()
 
     cache_key = (tuple(sorted(ids)), period, start_date, end_date)
@@ -434,7 +355,7 @@ def get_summary_live(
         raise HTTPException(404, "Could not compute live metrics.")
 
     # For best/worst day dates we need the full metrics series (use compute_all_metrics)
-    # But that's expensive — for live updates, skip date lookups and reuse cached dates
+    # But that's expensive â€” for live updates, skip date lookups and reuse cached dates
     # The live response uses the same shape but without best/worst day dates
     return {
         "portfolio_value": round(live_pv, 2),
@@ -475,7 +396,7 @@ def get_summary_live(
 # Performance
 # ------------------------------------------------------------------
 
-@router.get("/performance")
+@router.get("/performance", response_model=List[PerformancePoint])
 def get_performance(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
     period: Optional[str] = Query(None, description="1D,1W,1M,3M,YTD,1Y,ALL"),
@@ -494,7 +415,7 @@ def get_performance(
     ).order_by(DailyPortfolio.date)
 
     # Apply date filtering
-    d_start, d_end = _resolve_date_range(period, start_date, end_date)
+    d_start, d_end = resolve_date_range(period, start_date, end_date)
     if d_start:
         query = query.filter(DailyPortfolio.date >= d_start)
     if d_end:
@@ -630,7 +551,7 @@ def get_holdings(
     rows = []
     latest_date = None
     if target_date:
-        d = _parse_iso_date(target_date, "date")
+        d = parse_iso_date(target_date, "date")
         rows = base_query.filter(
             HoldingsHistory.date <= d
         ).order_by(HoldingsHistory.date.desc()).all()
@@ -687,7 +608,7 @@ def get_holdings(
             holdings_by_symbol[r.symbol] = {"symbol": r.symbol, "quantity": r.quantity}
 
     if holdings_by_symbol:
-        # Have stored history — merge with notional values
+        # Have stored history â€” merge with notional values
         holdings = []
         for sym, h in holdings_by_symbol.items():
             market_value = notional_map.get(sym, 0.0)
@@ -697,7 +618,7 @@ def get_holdings(
                 "market_value": round(market_value, 2),
             })
     elif notional_map:
-        # No stored history but API returned holding stats — use API data directly
+        # No stored history but API returned holding stats â€” use API data directly
         holdings = [
             {"symbol": sym, "quantity": 0, "market_value": round(val, 2)}
             for sym, val in notional_map.items()
@@ -1026,11 +947,11 @@ def get_benchmark_history(
         raise HTTPException(400, "Ticker is required")
 
     if start_date:
-        start_dt = _parse_iso_date(start_date, "start_date")
+        start_dt = parse_iso_date(start_date, "start_date")
     else:
         start_dt = date(2020, 1, 1)
     if end_date:
-        end_dt = _parse_iso_date(end_date, "end_date")
+        end_dt = parse_iso_date(end_date, "end_date")
     else:
         end_dt = date.today()
     if start_dt > end_dt:
@@ -1170,3 +1091,6 @@ def get_benchmark_history(
 
     _benchmark_cache[cache_key] = (time.time(), result)
     return {"ticker": ticker, "data": result}
+
+
+

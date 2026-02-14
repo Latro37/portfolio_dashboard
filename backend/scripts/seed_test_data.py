@@ -165,7 +165,7 @@ def _ensure_safe_target_db(force: bool):
     raise SystemExit(
         "Refusing to seed/purge non-test database.\n"
         f"Active DB URL: {ACTIVE_DB_URL}\n"
-        "Set CPV_DATABASE_URL=sqlite:///data/portfolio_test.db or pass --force."
+        "Set PD_DATABASE_URL=sqlite:///data/portfolio_test.db (or CPV_DATABASE_URL alias) or pass --force."
     )
 
 def trading_days(start: date, end: date) -> List[date]:

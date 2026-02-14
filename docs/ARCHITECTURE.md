@@ -129,7 +129,7 @@ sequenceDiagram
 ## Project Structure
 
 ```
-composer_portfolio_visualizer/
+portfolio_dashboard/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                # FastAPI app, CORS, lifespan (account discovery)
@@ -505,3 +505,36 @@ Configuration is stored in `config.json` under the `screenshot` key and managed 
 ### Schema Migrations
 
 SQLite doesn't support full ALTER TABLE operations. The app uses a lightweight migration system in `database.py` that checks for missing columns on startup and adds them via `ALTER TABLE ADD COLUMN`. New columns are registered in the `_MIGRATIONS` list.
+
+## Environment Variable Migration
+
+Preferred test/local env vars:
+- `PD_TEST_MODE`
+- `PD_DATABASE_URL`
+
+Legacy aliases remain supported temporarily:
+- `CPV_TEST_MODE`
+- `CPV_DATABASE_URL`
+
+Resolution rule:
+- if both are set, `PD_*` values win.
+- using `CPV_*` alone logs a deprecation warning.
+
+## Deferred Phase TQ-1 (TanStack Query Migration)
+
+This phase is intentionally deferred and tracked here to avoid loss of intent.
+
+Entry criteria:
+1. Refactor gates complete (backend seams, charting extraction, naming migration).
+2. No open critical regressions from the current refactor cycle.
+3. API contract tests remain green.
+
+Scope:
+1. Migrate frontend server-state calls from ad-hoc fetch orchestration to TanStack Query.
+2. Define canonical query keys and invalidation rules for sync/mutation flows.
+3. Standardize loading, retry, stale-time, and background refresh behavior.
+
+Exit criteria:
+1. Dashboard and symphony detail server-state reads are query-based.
+2. Mutation paths invalidate affected queries deterministically.
+3. Unit + E2E + visual suites remain green with no added flakiness.

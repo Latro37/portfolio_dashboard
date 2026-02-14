@@ -1,4 +1,4 @@
-"""Symphony API routes."""
+﻿"""Symphony API routes."""
 
 import json
 import logging
@@ -17,9 +17,11 @@ from app.models import (
 import requests
 
 from app.composer_client import ComposerClient
-from app.config import load_accounts, get_settings, is_test_mode
+from app.config import load_accounts, get_settings
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.services.symphony_export import export_single_symphony
+from app.services.account_scope import resolve_account_ids
+from app.services.date_filters import parse_iso_date
 from app.market_hours import is_within_trading_session
 import time
 
@@ -31,14 +33,6 @@ router = APIRouter(prefix="/api", tags=["symphonies"])
 CACHE_TTL_HOURS = 24
 TEST_CREDENTIAL = "__TEST__"
 _TEST_META_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "test_symphony_meta.json")
-
-
-def _parse_iso_date(value: str, field_name: str) -> date:
-    """Parse a YYYY-MM-DD date string or raise HTTP 400."""
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(400, f"Invalid {field_name}: expected YYYY-MM-DD")
 
 
 def _compute_backtest_summary(dvm_capital: Dict, first_day: int, last_market_day: int) -> Dict:
@@ -105,50 +99,6 @@ def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
             return ComposerClient.from_credentials(creds)
     raise HTTPException(500, f"No credentials found for credential name '{acct.credential_name}'")
 
-
-def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
-    """Resolve account_id param to list of sub-account IDs (same logic as portfolio router)."""
-    test_mode = is_test_mode()
-    if account_id == "all":
-        query = db.query(Account)
-        if test_mode:
-            query = query.filter(Account.credential_name == "__TEST__")
-        else:
-            query = query.filter(Account.credential_name != "__TEST__")
-        accts = query.all()
-        if not accts:
-            raise HTTPException(404, "No accounts discovered.")
-        return [a.id for a in accts]
-    if account_id and account_id.startswith("all:"):
-        cred_name = account_id[4:]
-        if test_mode and cred_name != "__TEST__":
-            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
-        if not test_mode and cred_name == "__TEST__":
-            raise HTTPException(404, "Test mode is not enabled")
-        accts = db.query(Account).filter_by(credential_name=cred_name).all()
-        if not accts:
-            raise HTTPException(404, f"No sub-accounts found for credential '{cred_name}'")
-        return [a.id for a in accts]
-    if account_id:
-        acct = db.query(Account).filter_by(id=account_id).first()
-        if not acct:
-            raise HTTPException(404, f"Account {account_id} not found")
-        if test_mode and acct.credential_name != "__TEST__":
-            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
-        if not test_mode and acct.credential_name == "__TEST__":
-            raise HTTPException(404, "Test mode is not enabled")
-        return [account_id]
-    query = db.query(Account)
-    if test_mode:
-        query = query.filter(Account.credential_name == "__TEST__")
-    else:
-        query = query.filter(Account.credential_name != "__TEST__")
-    first = query.first()
-    if not first:
-        raise HTTPException(404, "No accounts discovered.")
-    return [first.id]
-
-
 # ------------------------------------------------------------------
 # List symphonies
 # ------------------------------------------------------------------
@@ -159,7 +109,7 @@ def list_symphonies(
     db: Session = Depends(get_db),
 ):
     """List active symphonies across one or more sub-accounts."""
-    ids = _resolve_account_ids(db, account_id)
+    ids = resolve_account_ids(db, account_id)
     acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
 
     # Pre-load stored TWR from our own metrics (authoritative, not Composer API)
@@ -291,7 +241,7 @@ def _list_symphonies_test(db: Session, account_id: str, account_name: str, store
 def _generate_test_trade_preview(db: Session, aid_list: List[str], acct_names: dict) -> List[Dict]:
     """Generate synthetic aggregate trade preview for __TEST__ accounts."""
     import random as _rnd
-    _rnd.seed()  # don't use fixed seed — vary each call
+    _rnd.seed()  # don't use fixed seed â€” vary each call
     results = []
     for aid in aid_list:
         # Get symphonies with their allocations
@@ -531,7 +481,7 @@ def get_symphony_performance(
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
     db: Session = Depends(get_db),
 ):
-    """Get daily value history for a symphony — reads from DB (pre-computed)."""
+    """Get daily value history for a symphony â€” reads from DB (pre-computed)."""
     # Read from stored symphony data
     rows = (
         db.query(SymphonyDailyPortfolio, SymphonyDailyMetrics)
@@ -587,8 +537,8 @@ def get_symphony_summary(
 
     # Apply date filters: custom dates take precedence over period presets
     if start_date or end_date:
-        sd = _parse_iso_date(start_date, "start_date") if start_date else None
-        ed = _parse_iso_date(end_date, "end_date") if end_date else None
+        sd = parse_iso_date(start_date, "start_date") if start_date else None
+        ed = parse_iso_date(end_date, "end_date") if end_date else None
         if sd and ed and sd > ed:
             raise HTTPException(400, "start_date cannot be after end_date")
         rows = [r for r in rows if (sd is None or r.date >= sd) and (ed is None or r.date <= ed)]
@@ -659,7 +609,7 @@ def get_symphony_summary(
 # Live Symphony Summary (intraday overlay)
 # ------------------------------------------------------------------
 
-_sym_live_cache: dict = {}  # key: (symphony_id, account_id, period, start, end) → {ts, data}
+_sym_live_cache: dict = {}  # key: (symphony_id, account_id, period, start, end) â†’ {ts, data}
 _SYM_LIVE_CACHE_TTL = 120  # seconds
 
 
@@ -693,8 +643,8 @@ def get_symphony_summary_live(
             raise HTTPException(404, "No stored data for this symphony.")
 
         if start_date or end_date:
-            sd = _parse_iso_date(start_date, "start_date") if start_date else None
-            ed = _parse_iso_date(end_date, "end_date") if end_date else None
+            sd = parse_iso_date(start_date, "start_date") if start_date else None
+            ed = parse_iso_date(end_date, "end_date") if end_date else None
             if sd and ed and sd > ed:
                 raise HTTPException(400, "start_date cannot be after end_date")
             rows = [r for r in rows if (sd is None or r.date >= sd) and (ed is None or r.date <= ed)]
@@ -868,7 +818,7 @@ def get_symphony_backtest(
     if not force_refresh:
         cached = db.query(SymphonyBacktestCache).filter_by(symphony_id=symphony_id).first()
         if cached and cached.cached_at > datetime.utcnow() - timedelta(hours=CACHE_TTL_HOURS):
-            # Lightweight version check — detect symphony edits
+            # Lightweight version check â€” detect symphony edits
             stale = False
             try:
                 versions = client.get_symphony_versions(symphony_id)
@@ -883,7 +833,7 @@ def get_symphony_backtest(
                 pass  # on failure, serve cache
 
             if stale:
-                # Symphony was edited — trigger export of latest version
+                # Symphony was edited â€” trigger export of latest version
                 try:
                     # Look up symphony name from stats
                     sym_stats = client.get_symphony_stats(account_id)
@@ -928,7 +878,7 @@ def get_symphony_backtest(
     semantic_ts = data.get("last_semantic_update_at", "")
 
     # Pre-compute summary metrics from backtest series
-    # dvm_capital is {symphony_id: {day_offset: value}} — extract the inner series
+    # dvm_capital is {symphony_id: {day_offset: value}} â€” extract the inner series
     dvm_series = {}
     if dvm_capital:
         first_key = next(iter(dvm_capital))
@@ -980,7 +930,7 @@ def get_trade_preview(
     db: Session = Depends(get_db),
 ):
     """Aggregate trade preview across all symphonies for selected accounts."""
-    ids = _resolve_account_ids(db, account_id)
+    ids = resolve_account_ids(db, account_id)
     acct_names = {a.id: a.display_name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
 
     # Group account IDs by credential so we make one dry-run call per credential
@@ -1011,7 +961,7 @@ def get_trade_preview(
                 body = e.response.json() if e.response.text else {}
                 errors = body.get("errors", [])
                 if any(err.get("code") == "dry-run-markets-closed" for err in errors):
-                    logger.info("Markets closed — skipping dry-run for credential %s", cred_name)
+                    logger.info("Markets closed â€” skipping dry-run for credential %s", cred_name)
                     continue
             logger.warning("Dry-run failed for credential %s: %s", cred_name, e)
             continue
@@ -1066,7 +1016,7 @@ def get_symphony_trade_preview(
             body = e.response.json() if e.response.text else {}
             errors = body.get("errors", [])
             if any(err.get("code") == "dry-run-markets-closed" for err in errors):
-                logger.info("Markets closed — returning empty trade preview for %s", symphony_id)
+                logger.info("Markets closed â€” returning empty trade preview for %s", symphony_id)
                 return {
                     "symphony_id": symphony_id,
                     "symphony_name": "",
@@ -1194,7 +1144,7 @@ def get_symphony_benchmark(
     if backtest_data is None:
         raise HTTPException(404, f"Symphony '{symphony_id}' not found or backtest failed: {last_error}")
 
-    # Extract symphony name — try stats, then top-level, then score endpoint
+    # Extract symphony name â€” try stats, then top-level, then score endpoint
     stats = backtest_data.get("stats", {})
     symphony_name = stats.get("name", "") or backtest_data.get("name", "")
     if not symphony_name:
@@ -1209,7 +1159,7 @@ def get_symphony_benchmark(
     if not dvm_capital:
         raise HTTPException(400, "No backtest data available for this symphony")
 
-    # dvm_capital is {symphony_id: {day_offset: value}} — extract inner series
+    # dvm_capital is {symphony_id: {day_offset: value}} â€” extract inner series
     first_key = next(iter(dvm_capital))
     series = dvm_capital[first_key] if isinstance(dvm_capital[first_key], dict) else dvm_capital
 
@@ -1249,3 +1199,4 @@ def get_symphony_benchmark(
     response = {"name": symphony_name, "ticker": symphony_name, "data": result_data}
     _symphony_bench_cache[symphony_id] = (time.time(), response)
     return response
+

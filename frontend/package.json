@@ -12,7 +12,9 @@
     "test:e2e:power": "playwright test tests/e2e",
     "test:e2e:headed": "playwright test tests/e2e --headed",
     "test:visual": "playwright test tests/visual",
-    "test:visual:update": "playwright test tests/visual --update-snapshots"
+    "test:visual:update": "playwright test tests/visual --update-snapshots",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
@@ -40,6 +42,7 @@
     "eslint-config-next": "16.1.6",
     "shadcn": "^3.8.4",
     "tailwindcss": "^4",
+    "vitest": "^2.1.8",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5"
   }

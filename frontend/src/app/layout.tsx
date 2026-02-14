@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Composer Portfolio Visualizer",
-  description: "Portfolio tracker and analytics dashboard for Composer",
+  title: "Portfolio Dashboard",
+  description: "Portfolio tracker and analytics dashboard",
 };
 
 export default function RootLayout({

@@ -1,6 +1,6 @@
 # Portfolio Metrics Reference
 
-This document defines every metric calculated in the Composer Portfolio Visualizer and explains the underlying math.
+This document defines every metric calculated in Portfolio Dashboard and explains the underlying math.
 
 ---
 

@@ -1,4 +1,4 @@
-# Composer Portfolio Visualizer
+# Portfolio Dashboard
 
 A local dashboard for tracking, analyzing, and benchmarking your [Composer](https://www.composer.trade/) portfolio.
 
