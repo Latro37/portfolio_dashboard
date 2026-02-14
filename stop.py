@@ -3,13 +3,13 @@
 Kills the backend (uvicorn/python on port 8000), frontend (node/next on port 3000),
 and any zombie child processes left behind.
 
-Usage: python stop.py
+Usage: python stop.py [--help]
 """
 
+import argparse
 import os
-import sys
-import subprocess
 import signal
+import subprocess
 
 
 def get_pids_on_port(port: int) -> list[int]:
@@ -194,5 +194,13 @@ def main():
     print(f"\nDone. {total} process(es) stopped.")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Stop Portfolio Dashboard backend/frontend and orphan worker processes."
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    parse_args()
     main()
