@@ -27,6 +27,7 @@ type OverlayRendererArgs = {
   overlayColor: string;
   primaryKey: string;
   primaryLabel: string;
+  primaryLabelWhenOverlay?: string;
   overlayKey?: string;
   overlayLabel: string;
   benchmarkSuffix: string;
@@ -75,6 +76,7 @@ export function createOverlayTooltipRenderer({
   overlayColor,
   primaryKey,
   primaryLabel,
+  primaryLabelWhenOverlay,
   overlayKey,
   overlayLabel,
   benchmarkSuffix,
@@ -124,7 +126,9 @@ export function createOverlayTooltipRenderer({
         {primaryValue != null && (
           <div>
             <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
-              {showOverlay && overlayKey ? "Live" : primaryLabel} :{" "}
+              {showOverlay && overlayKey
+                ? (primaryLabelWhenOverlay || "Live")
+                : primaryLabel} :{" "}
               {formatters.formatPct(primaryValue)}
             </p>
             {!multiLine && primaryDayDelta != null && (

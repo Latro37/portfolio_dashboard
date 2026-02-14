@@ -12,19 +12,9 @@ import {
 } from "recharts";
 
 import { BenchmarkEntry } from "@/lib/api";
+import { createOverlayTooltipRenderer } from "@/features/charting/performanceChartTooltips";
 import type { ChartMode } from "@/features/charting/types";
-import { formatPctAxis, toFiniteNumber } from "@/features/symphony-detail/utils";
-
-type TooltipEntry = {
-  dataKey?: string | number;
-  value?: number | string | ReadonlyArray<number | string>;
-};
-
-type ChartTooltipProps = {
-  active?: boolean;
-  payload?: ReadonlyArray<TooltipEntry>;
-  label?: string | number;
-};
+import { formatPctAxis } from "@/features/symphony-detail/utils";
 
 type BacktestChartPoint = {
   date: string;
@@ -33,119 +23,6 @@ type BacktestChartPoint = {
   drawdown: number;
   [key: string]: number | string | null | undefined;
 };
-
-const deltaColor = (delta: number) => (delta >= 0 ? "#10b981" : "#ef4444");
-const formatDelta = (delta: number) => (delta >= 0 ? "+" : "") + formatPctAxis(delta);
-
-function backtestOverlayTooltip(
-  primaryKey: string,
-  primaryLabel: string,
-  overlayKey: string,
-  overlayLabel: string,
-  showOverlay: boolean,
-  formatDate: (d: string) => string,
-  chartData: BacktestChartPoint[],
-  benchSuffix: string,
-  activeBenchmarks: BenchmarkEntry[],
-) {
-  function BacktestOverlayTooltipContent({
-    active,
-    payload,
-    label,
-  }: ChartTooltipProps) {
-    if (!active || !payload?.length || label == null) return null;
-
-    const labelText = String(label);
-    const idx = chartData.findIndex((point) => point.date === labelText);
-    const prev = idx > 0 ? chartData[idx - 1] : null;
-    const primaryEntry = payload.find((entry) => entry.dataKey === primaryKey);
-    const overlayEntry = payload.find((entry) => entry.dataKey === overlayKey);
-    const primaryVal = toFiniteNumber(primaryEntry?.value);
-    const overlayVal = toFiniteNumber(overlayEntry?.value);
-    const hasBoth = primaryVal != null && overlayVal != null;
-    const delta = hasBoth ? primaryVal - overlayVal : null;
-    const prevPrimary = prev ? toFiniteNumber(prev[primaryKey]) : null;
-    const dailyDelta = primaryVal != null && prevPrimary != null ? primaryVal - prevPrimary : null;
-    const dailyDeltaColor = dailyDelta != null ? deltaColor(dailyDelta) : "#71717a";
-    const totalDeltaColor = delta != null ? deltaColor(delta) : "#71717a";
-    const hasBenchmark = activeBenchmarks.length > 0;
-    const singleBenchmark = activeBenchmarks.length === 1;
-
-    return (
-      <div
-        key={labelText}
-        style={{
-          backgroundColor: "#18181b",
-          border: "1px solid #27272a",
-          borderRadius: 8,
-          fontSize: 13,
-          padding: "10px 14px",
-        }}
-      >
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{formatDate(labelText)}</p>
-        {primaryVal != null && (
-          <div>
-            <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
-              {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(primaryVal)}
-            </p>
-            {!showOverlay && !hasBenchmark && dailyDelta != null && (
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 11,
-                  lineHeight: 1.4,
-                  color: dailyDeltaColor,
-                }}
-              >
-                Δ to Prev. Day: {formatDelta(dailyDelta)}
-              </p>
-            )}
-          </div>
-        )}
-        {showOverlay && overlayVal != null && (
-          <div>
-            <p style={{ margin: 0, lineHeight: 1.6, color: "#f59e0b" }}>
-              {overlayLabel} : {formatPctAxis(overlayVal)}
-            </p>
-          </div>
-        )}
-        {showOverlay && delta != null && (
-          <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: totalDeltaColor }}>
-            Δ: {formatDelta(delta)}
-          </p>
-        )}
-        {activeBenchmarks.map((benchmark, i) => {
-          const benchmarkEntry = payload.find(
-            (entry) => entry.dataKey === `bench_${i}_${benchSuffix}`,
-          );
-          const benchmarkValue = toFiniteNumber(benchmarkEntry?.value);
-          if (benchmarkValue == null) return null;
-          return (
-            <div key={benchmark.ticker}>
-              <p style={{ margin: 0, lineHeight: 1.6, color: benchmark.color }}>
-                {benchmark.label} : {formatPctAxis(benchmarkValue)}
-              </p>
-              {singleBenchmark && primaryVal != null && (
-                <p
-                  style={{
-                    margin: 0,
-                    lineHeight: 1.6,
-                    marginTop: 2,
-                    color: primaryVal - benchmarkValue >= 0 ? "#10b981" : "#ef4444",
-                  }}
-                >
-                  Δ: {formatDelta(primaryVal - benchmarkValue)}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return BacktestOverlayTooltipContent;
-}
 
 type Props = {
   chartMode: ChartMode;
@@ -186,6 +63,36 @@ export function SymphonyBacktestChartPanel({
     );
   }
 
+  const tooltipFormatters = {
+    formatDate: btFormatDate,
+    formatValue: formatPctAxis,
+    formatPct: formatPctAxis,
+  };
+  const sharedTooltipArgs = {
+    tradingData: mergedBacktestData,
+    benchmarks,
+    singleBenchmark: benchmarks.length === 1,
+    showOverlay: showLiveOverlay,
+    overlayColor: "#f59e0b",
+    overlayLabel: "Live",
+    primaryLabelWhenOverlay: "Backtest",
+    formatters: tooltipFormatters,
+  };
+  const backtestTwrTooltip = createOverlayTooltipRenderer({
+    ...sharedTooltipArgs,
+    primaryKey: "twr",
+    primaryLabel: "Return",
+    overlayKey: "liveTwr",
+    benchmarkSuffix: "return",
+  });
+  const backtestDrawdownTooltip = createOverlayTooltipRenderer({
+    ...sharedTooltipArgs,
+    primaryKey: "drawdown",
+    primaryLabel: "Drawdown",
+    overlayKey: "liveDrawdown",
+    benchmarkSuffix: "drawdown",
+  });
+
   if (chartMode !== "drawdown") {
     return (
       <>
@@ -219,19 +126,7 @@ export function SymphonyBacktestChartPanel({
               width={70}
             />
             <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-            <Tooltip
-              content={backtestOverlayTooltip(
-                "twr",
-                "Return",
-                "liveTwr",
-                "Live",
-                showLiveOverlay,
-                btFormatDate,
-                mergedBacktestData,
-                "return",
-                benchmarks,
-              )}
-            />
+            <Tooltip content={backtestTwrTooltip} />
             <Area
               type="monotone"
               dataKey="twr"
@@ -313,19 +208,7 @@ export function SymphonyBacktestChartPanel({
             width={70}
           />
           <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-          <Tooltip
-            content={backtestOverlayTooltip(
-              "drawdown",
-              "Drawdown",
-              "liveDrawdown",
-              "Live",
-              showLiveOverlay,
-              btFormatDate,
-              mergedBacktestData,
-              "drawdown",
-              benchmarks,
-            )}
-          />
+          <Tooltip content={backtestDrawdownTooltip} />
           <Area
             type="monotone"
             dataKey="drawdown"
