@@ -3,6 +3,8 @@
 import { useId, useMemo, useState } from "react";
 import { BenchmarkEntry, PerformancePoint } from "@/lib/api";
 import { BenchmarkSelectorRow } from "@/features/charting/BenchmarkSelectorRow";
+import { PerformanceChartControlsRow } from "@/features/charting/PerformanceChartControlsRow";
+import { PerformanceChartLegendRows } from "@/features/charting/PerformanceChartLegendRows";
 import { useBenchmarkCatalog } from "@/features/charting/hooks/useBenchmarkCatalog";
 import { adaptPortfolioChart } from "@/features/charting/portfolioChartAdapter";
 import {
@@ -49,8 +51,6 @@ interface Props {
   onBenchmarkAdd?: (ticker: string) => void;
   onBenchmarkRemove?: (ticker: string) => void;
 }
-
-const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
 
 export function PerformanceChart({
   data,
@@ -178,112 +178,20 @@ export function PerformanceChart({
   return (
     <Card data-testid="chart-performance" className="border-border/50">
       <CardContent className="pt-6">
-        {/* Controls row */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          {/* Chart mode toggle */}
-          <div className="flex rounded-lg bg-muted p-0.5">
-            <button
-              onClick={() => setMode("portfolio")}
-              className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === "portfolio"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {portfolioLabel || "Portfolio Value"}
-            </button>
-            <button
-              onClick={() => setMode("twr")}
-              className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === "twr"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              TWR
-            </button>
-            {!hideMWR && (
-              <button
-                onClick={() => setMode("mwr")}
-                className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  mode === "mwr"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                MWR
-              </button>
-            )}
-            <button
-              onClick={() => setMode("drawdown")}
-              className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === "drawdown"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Drawdown
-            </button>
-          </div>
-
-          {!hidePeriodControls && (
-            <>
-              <div className="h-5 w-px bg-border/50" />
-
-              {/* Period pills */}
-              <div className="flex rounded-lg bg-muted p-0.5">
-                {PERIODS.map((p) => (
-                  <button
-                    key={p}
-                    data-testid={`period-${p}`}
-                    onClick={() => {
-                      onPeriodChange(p);
-                      onStartDateChange("");
-                      onEndDateChange("");
-                    }}
-                    className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                      period === p && !isCustomRange
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-
-              <div className="h-5 w-px bg-border/50" />
-
-              {/* Date pickers */}
-              <div className="flex items-center gap-2 text-xs">
-                <input
-                  type="date"
-                  value={displayStart}
-                  onChange={(e) => onStartDateChange(e.target.value)}
-                  className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
-                />
-                <span className="text-muted-foreground">to</span>
-                <input
-                  type="date"
-                  value={displayEnd}
-                  onChange={(e) => onEndDateChange(e.target.value)}
-                  className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30"
-                />
-                {isCustomRange && (
-                  <button
-                    onClick={() => {
-                      onStartDateChange("");
-                      onEndDateChange("");
-                    }}
-                    className="cursor-pointer text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+        <PerformanceChartControlsRow
+          mode={mode}
+          setMode={setMode}
+          portfolioLabel={portfolioLabel}
+          hideMWR={hideMWR}
+          hidePeriodControls={hidePeriodControls}
+          period={period}
+          isCustomRange={isCustomRange}
+          displayStart={displayStart}
+          displayEnd={displayEnd}
+          onPeriodChange={onPeriodChange}
+          onStartDateChange={onStartDateChange}
+          onEndDateChange={onEndDateChange}
+        />
 
         {/* Chart */}
         {!hasData ? (
@@ -495,52 +403,29 @@ export function PerformanceChart({
           </ResponsiveContainer>
         )}
 
-        {/* Portfolio/Deposits legend below chart */}
-        {(mode === "twr" || mode === "drawdown") && hasData && onOverlayToggle && (overlayKey || drawdownOverlayKey) && (
-          <div className="mt-3 flex items-center justify-center gap-4">
-            <button
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium cursor-default ${
-                mode === "drawdown" ? "text-red-400" : "text-emerald-400"
-              }`}
-            >
-              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: mode === "drawdown" ? "#ef4444" : "#10b981" }} />
-              Live
-            </button>
-            <button
-              onClick={() => onOverlayToggle(!showOverlay)}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                showOverlay ? "text-indigo-400" : "text-muted-foreground/40 line-through"
-              }`}
-            >
-              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showOverlay ? overlayColor : "#71717a" }} />
-              {overlayLabel || "Overlay"}
-            </button>
-          </div>
-        )}
-        {mode === "portfolio" && hasData && (
-          <div className="mt-3 flex items-center justify-center gap-4">
-            <button
-              onClick={() => { if (showDeposits) setShowPortfolio(!showPortfolio); }}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                showPortfolio ? "text-emerald-400" : "text-muted-foreground/40 line-through"
-              }`}
-            >
-              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showPortfolio ? "#10b981" : "#71717a" }} />
-              Portfolio
-            </button>
-            <button
-              onClick={() => { if (showPortfolio) setShowDeposits(!showDeposits); }}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                showDeposits ? "text-indigo-400" : "text-muted-foreground/40 line-through"
-              }`}
-            >
-              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showDeposits ? "#6366f1" : "#71717a" }} />
-              Deposits
-            </button>
-          </div>
-        )}
+        <PerformanceChartLegendRows
+          mode={mode}
+          hasData={hasData}
+          showOverlay={showOverlay}
+          overlayColor={overlayColor}
+          overlayLabel={overlayLabel}
+          overlayAvailable={Boolean(overlayKey || drawdownOverlayKey)}
+          onOverlayToggle={onOverlayToggle}
+          showPortfolio={showPortfolio}
+          showDeposits={showDeposits}
+          onTogglePortfolio={() => {
+            if (showDeposits) {
+              setShowPortfolio(!showPortfolio);
+            }
+          }}
+          onToggleDeposits={() => {
+            if (showPortfolio) {
+              setShowDeposits(!showDeposits);
+            }
+          }}
+        />
 
-        {/* Benchmark toggle row — hidden in Portfolio mode */}
+        {/* Benchmark toggle row - hidden in Portfolio mode */}
         {mode !== "portfolio" && hasData && onBenchmarkAdd && (
           <BenchmarkSelectorRow
             benchmarks={benchmarks}
