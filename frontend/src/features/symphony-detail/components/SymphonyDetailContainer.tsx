@@ -3,23 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import {
-  AreaChart,
-  Area,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from "recharts";
-import {
-  BenchmarkEntry,
   BenchmarkPoint,
   PerformancePoint,
   SymphonyInfo,
 } from "@/lib/api";
 import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
 import { SymphonyBacktestControls } from "@/features/symphony-detail/components/SymphonyBacktestControls";
+import { SymphonyBacktestChartPanel } from "@/features/symphony-detail/components/SymphonyBacktestChartPanel";
 import { BacktestMetricsSummary } from "@/features/symphony-detail/components/BacktestMetricsSummary";
 import { HistoricalAllocationsTable } from "@/features/symphony-detail/components/HistoricalAllocationsTable";
 import { SymphonyBacktestHoldingsSection } from "@/features/symphony-detail/components/SymphonyBacktestHoldingsSection";
@@ -36,11 +26,9 @@ import {
 } from "@/features/symphony-detail/types";
 import {
   epochDayToDate,
-  formatPctAxis,
   isWeekday,
   makeDateFormatter,
   periodStartDate,
-  toFiniteNumber,
 } from "@/features/symphony-detail/utils";
 
 interface Props {
@@ -48,17 +36,6 @@ interface Props {
   onClose: () => void;
   scrollToSection?: "trade-preview";
 }
-
-type TooltipEntry = {
-  dataKey?: string | number;
-  value?: number | string | ReadonlyArray<number | string>;
-};
-
-type ChartTooltipProps = {
-  active?: boolean;
-  payload?: ReadonlyArray<TooltipEntry>;
-  label?: string | number;
-};
 
 type BacktestChartPoint = {
   date: string;
@@ -71,87 +48,6 @@ type BacktestChartPoint = {
 type LiveChartPoint = PerformancePoint & {
   [key: string]: number | string | null | undefined;
 };
-
-// Custom tooltip for backtest chart with overlay delta + prev day delta (backtest is baseline)
-const btDCol = (d: number) => (d >= 0 ? "#10b981" : "#ef4444");
-const btFmtDelta = (d: number) => (d >= 0 ? "+" : "") + formatPctAxis(d);
-
-function backtestOverlayTooltip(
-  primaryKey: string, primaryLabel: string,
-  oKey: string, oLabel: string,
-  showOverlay: boolean,
-  fmtDate: (d: string) => string,
-  chartData: BacktestChartPoint[],
-  benchSuffix: string,
-  activeBenchmarks: BenchmarkEntry[],
-) {
-  function BacktestOverlayTooltipContent({ active, payload, label }: ChartTooltipProps) {
-    if (!active || !payload?.length || label == null) return null;
-
-    const labelText = String(label);
-    const idx = chartData.findIndex((d) => d.date === labelText);
-    const prev = idx > 0 ? chartData[idx - 1] : null;
-    const primaryEntry = payload.find((p) => p.dataKey === primaryKey);
-    const overlayEntry = payload.find((p) => p.dataKey === oKey);
-    const pVal = toFiniteNumber(primaryEntry?.value);
-    const oVal = toFiniteNumber(overlayEntry?.value);
-    const hasBoth = pVal != null && oVal != null;
-    const delta = hasBoth ? pVal - oVal : null;
-    const pPrev = prev ? toFiniteNumber(prev[primaryKey]) : null;
-    const pDayD = pVal != null && pPrev != null ? pVal - pPrev : null;
-    const pDC = pDayD != null ? btDCol(pDayD) : "#71717a";
-    const dDC = delta != null ? btDCol(delta) : "#71717a";
-    const hasBench = activeBenchmarks.length > 0;
-    const singleBench = activeBenchmarks.length === 1;
-
-    return (
-      <div key={labelText} style={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 8, fontSize: 13, padding: "10px 14px" }}>
-        <p style={{ margin: "0 0 4px", color: "#e4e4e7" }}>{fmtDate(labelText)}</p>
-        {pVal != null && (
-          <div>
-            <p style={{ margin: 0, lineHeight: 1.6, color: "#e4e4e7" }}>
-              {showOverlay ? "Backtest" : primaryLabel} : {formatPctAxis(pVal)}
-            </p>
-            {!showOverlay && !hasBench && pDayD != null && (
-              <p key={`bpd-${pDC}`} style={{ margin: 0, fontSize: 11, lineHeight: 1.4, color: pDC }}>Delta to Prev. Day: {btFmtDelta(pDayD)}</p>
-            )}
-          </div>
-        )}
-        {showOverlay && oVal != null && (
-          <div>
-            <p style={{ margin: 0, lineHeight: 1.6, color: "#f59e0b" }}>
-              {oLabel} : {formatPctAxis(oVal)}
-            </p>
-          </div>
-        )}
-        {showOverlay && delta != null && (
-          <p key={`bdl-${dDC}`} style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: dDC }}>
-            Delta : {btFmtDelta(delta)}
-          </p>
-        )}
-        {activeBenchmarks.map((bench, i) => {
-          const bEntry = payload.find((p) => p.dataKey === `bench_${i}_${benchSuffix}`);
-          const bVal = toFiniteNumber(bEntry?.value);
-          if (bVal == null) return null;
-          return (
-            <div key={bench.ticker}>
-              <p style={{ margin: 0, lineHeight: 1.6, color: bench.color }}>
-                {bench.label} : {formatPctAxis(bVal)}
-              </p>
-              {singleBench && pVal != null && (
-                <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: (pVal - bVal) >= 0 ? "#10b981" : "#ef4444" }}>
-                  Delta : {btFmtDelta(pVal - bVal)}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return BacktestOverlayTooltipContent;
-}
 
 type Period = SymphonyDetailPeriod;
 type Tab = SymphonyDetailTab;
@@ -637,101 +533,17 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 }}
               />
 
-              {loadingBacktest ? (
-                <div className="flex h-[280px] items-center justify-center">
-                  <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : !filteredBacktestData.length ? (
-                <div className="flex h-[280px] items-center justify-center text-sm text-muted-foreground">
-                  No backtest data available
-                </div>
-              ) : null}
-              {chartMode !== "drawdown" && filteredBacktestData.length > 0 && !loadingBacktest && (
-                <>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <AreaChart data={mergedBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                      <defs>
-                        <linearGradient id="btTwrGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
-                          <stop offset={backtestTwrOffset} stopColor="#10b981" stopOpacity={0.05} />
-                          <stop offset={backtestTwrOffset} stopColor="#ef4444" stopOpacity={0.15} />
-                          <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
-                        </linearGradient>
-                        <linearGradient id="btTwrStroke" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset={backtestTwrOffset} stopColor="#10b981" />
-                          <stop offset={backtestTwrOffset} stopColor="#ef4444" />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-                      <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                      <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("twr", "Return", "liveTwr", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "return", benchmarks)} />
-                      <Area type="monotone" dataKey="twr" stroke="url(#btTwrStroke)" strokeWidth={2} fill="url(#btTwrGrad)" dot={false} />
-                      {showLiveOverlay && (
-                        <Line type="monotone" dataKey="liveTwr" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-                      )}
-                      {benchmarks.map((bench, i) => (
-                        <Line key={`bt-bench-twr-${i}`} type="monotone" dataKey={`bench_${i}_return`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-                      ))}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <div className="mt-3 flex items-center justify-center gap-4">
-                    <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-emerald-400 cursor-default">
-                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: "#10b981" }} />
-                      Backtest
-                    </button>
-                    <button
-                      onClick={() => setShowLiveOverlay(!showLiveOverlay)}
-                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                        showLiveOverlay ? "text-amber-400" : "text-muted-foreground/40 line-through"
-                      }`}
-                    >
-                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showLiveOverlay ? "#f59e0b" : "#71717a" }} />
-                      Live
-                    </button>
-                  </div>
-                </>
-              )}
-              {chartMode === "drawdown" && filteredBacktestData.length > 0 && (
-                <>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <AreaChart data={mergedBacktestData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                      <defs>
-                        <linearGradient id="btDdGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
-                          <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="date" tickFormatter={btFormatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-                      <YAxis tickFormatter={formatPctAxis} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                      <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Tooltip content={backtestOverlayTooltip("drawdown", "Drawdown", "liveDrawdown", "Live", showLiveOverlay, btFormatDate, mergedBacktestData, "drawdown", benchmarks)} />
-                      <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#btDdGrad)" baseValue={0} dot={false} />
-                      {showLiveOverlay && (
-                        <Line type="monotone" dataKey="liveDrawdown" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-                      )}
-                      {benchmarks.map((bench, i) => (
-                        <Line key={`bt-bench-dd-${i}`} type="monotone" dataKey={`bench_${i}_drawdown`} stroke={bench.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
-                      ))}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <div className="mt-3 flex items-center justify-center gap-4">
-                    <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-red-400 cursor-default">
-                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: "#ef4444" }} />
-                      Backtest
-                    </button>
-                    <button
-                      onClick={() => setShowLiveOverlay(!showLiveOverlay)}
-                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                        showLiveOverlay ? "text-amber-400" : "text-muted-foreground/40 line-through"
-                      }`}
-                    >
-                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: showLiveOverlay ? "#f59e0b" : "#71717a" }} />
-                      Live
-                    </button>
-                  </div>
-                </>
-              )}
+              <SymphonyBacktestChartPanel
+                chartMode={chartMode}
+                loadingBacktest={loadingBacktest}
+                filteredBacktestData={filteredBacktestData}
+                mergedBacktestData={mergedBacktestData}
+                btFormatDate={btFormatDate}
+                backtestTwrOffset={backtestTwrOffset}
+                showLiveOverlay={showLiveOverlay}
+                onToggleLiveOverlay={() => setShowLiveOverlay(!showLiveOverlay)}
+                benchmarks={benchmarks}
+              />
 
               <BacktestMetricsSummary btMetrics={btMetrics} show={filteredBacktestData.length >= 2} />
             </div>

@@ -256,7 +256,7 @@ export function SymphonyBacktestControls({
                   className="cursor-pointer rounded-md bg-muted/50 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
                   title="Refresh symphony list"
                 >
-                  ↻
+                  R
                 </button>
               </form>
               {catalogDropdownOpen && catalogMatches.length > 0 && (
@@ -308,7 +308,7 @@ export function SymphonyBacktestControls({
                   !isLightColor(benchmark.color) ? benchBtnStyle(benchmark.color) : undefined
                 }
               >
-                {benchmark.label} ×
+                {benchmark.label} x
               </button>
             ))}
         </div>
