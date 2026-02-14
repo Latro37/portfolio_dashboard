@@ -1,4 +1,4 @@
-import { DEFAULT_METRICS } from "@/components/SnapshotView";
+import { DEFAULT_METRICS } from "@/features/dashboard/snapshot/metricCards";
 import type { ScreenshotConfig } from "@/lib/api";
 
 export const CHART_MODES = [
