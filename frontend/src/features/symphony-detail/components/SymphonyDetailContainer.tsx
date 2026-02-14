@@ -2,11 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
-import {
-  BenchmarkPoint,
-  PerformancePoint,
-  SymphonyInfo,
-} from "@/lib/api";
+import { SymphonyInfo } from "@/lib/api";
 import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
 import { SymphonyBacktestControls } from "@/features/symphony-detail/components/SymphonyBacktestControls";
 import { SymphonyBacktestChartPanel } from "@/features/symphony-detail/components/SymphonyBacktestChartPanel";
@@ -19,35 +15,18 @@ import { SymphonyLiveHoldingsSection } from "@/features/symphony-detail/componen
 import { SymphonyLiveMetricsSection } from "@/features/symphony-detail/components/SymphonyLiveMetricsSection";
 import { SymphonyTradePreviewSection } from "@/features/symphony-detail/components/SymphonyTradePreviewSection";
 import { useSymphonyBenchmarkManager } from "@/features/symphony-detail/hooks/useSymphonyBenchmarkManager";
+import { useSymphonyChartModels } from "@/features/symphony-detail/hooks/useSymphonyChartModels";
 import { useSymphonyDetailData } from "@/features/symphony-detail/hooks/useSymphonyDetailData";
 import {
   SymphonyDetailPeriod,
   SymphonyDetailTab,
 } from "@/features/symphony-detail/types";
-import {
-  epochDayToDate,
-  isWeekday,
-  makeDateFormatter,
-  periodStartDate,
-} from "@/features/symphony-detail/utils";
 
 interface Props {
   symphony: SymphonyInfo;
   onClose: () => void;
   scrollToSection?: "trade-preview";
 }
-
-type BacktestChartPoint = {
-  date: string;
-  value: number;
-  twr: number;
-  drawdown: number;
-  [key: string]: number | string | null | undefined;
-};
-
-type LiveChartPoint = PerformancePoint & {
-  [key: string]: number | string | null | undefined;
-};
 
 type Period = SymphonyDetailPeriod;
 type Tab = SymphonyDetailTab;
@@ -119,326 +98,25 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
   const handleBenchmarkRemove = removeBenchmark;
   const setBtCustomInput = setCustomInputVisible;
   const setBtCustomTickerInput = setCustomTickerInput;
-  // Filter live data by period/custom dates (client-side, data already fetched as ALL)
-  const filteredLiveData = useMemo(() => {
-    if (!liveData.length) return [];
-    const start = customStart || (period === "OOS" ? oosDate : periodStartDate(period));
-    const end = customEnd || "";
-    if (!start && !end) return liveData.filter((pt) => isWeekday(pt.date));
-    return liveData.filter((pt) => {
-      if (!isWeekday(pt.date)) return false;
-      if (start && pt.date < start) return false;
-      if (end && pt.date > end) return false;
-      return true;
-    });
-  }, [liveData, period, customStart, customEnd, oosDate]);
 
-  // Compute backtest chart data
-  const backtestChartData = useMemo<BacktestChartPoint[]>(() => {
-    if (!backtest) return [];
-    const dvm = backtest.dvm_capital;
-    // dvm_capital is {symphony_id: {day_number: value}}
-    const symKeys = Object.keys(dvm);
-    if (!symKeys.length) return [];
-    const series = dvm[symKeys[0]];
-    const dayNums = Object.keys(series).map(Number).sort((a, b) => a - b);
-    if (!dayNums.length) return [];
-
-    let twr = 1;
-    let peak = 0;
-    return dayNums.map((day, i) => {
-      const val = series[String(day)];
-      const prev = i > 0 ? series[String(dayNums[i - 1])] : val;
-      const dailyRet = prev > 0 ? (val - prev) / prev : 0;
-      if (i > 0) twr *= 1 + dailyRet;
-      const twrPct = (twr - 1) * 100;
-      peak = Math.max(peak, val);
-      const drawdown = peak > 0 ? ((val - peak) / peak) * 100 : 0;
-      return {
-        date: epochDayToDate(day),
-        value: val,
-        twr: twrPct,
-        drawdown,
-      };
-    });
-  }, [backtest]);
-
-  // TWR gradient offset helper
-  const calcTwrOffset = (data: { twr: number }[]) => {
-    if (!data.length) return 0.5;
-    const vals = data.map((d) => d.twr);
-    const max = Math.max(...vals);
-    const min = Math.min(...vals);
-    if (max <= 0) return 0;
-    if (min >= 0) return 1;
-    return max / (max - min);
-  };
-
-  // Filter backtest data by period/custom dates (client-side)
-  const filteredBacktestData = useMemo<BacktestChartPoint[]>(() => {
-    if (!backtestChartData.length) return [];
-    const start = customStart || (period === "OOS" ? oosDate : periodStartDate(period));
-    const end = customEnd || "";
-    if (!start && !end) return backtestChartData.filter((pt) => isWeekday(pt.date));
-    const filtered = backtestChartData.filter((pt) => {
-      if (!isWeekday(pt.date)) return false;
-      if (start && pt.date < start) return false;
-      if (end && pt.date > end) return false;
-      return true;
-    });
-    // Recompute TWR and drawdown relative to the filtered window
-    if (!filtered.length) return [];
-    let twr = 1;
-    let peak = filtered[0].value;
-    return filtered.map((pt, i) => {
-      if (i > 0) {
-        const prev = filtered[i - 1].value;
-        const dailyRet = prev > 0 ? (pt.value - prev) / prev : 0;
-        twr *= 1 + dailyRet;
-      }
-      peak = Math.max(peak, pt.value);
-      return {
-        ...pt,
-        twr: (twr - 1) * 100,
-        drawdown: peak > 0 ? ((pt.value - peak) / peak) * 100 : 0,
-      };
-    });
-  }, [backtestChartData, period, customStart, customEnd, oosDate]);
-
-  const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
-  const btFormatDate = makeDateFormatter(filteredBacktestData);
-
-  // Overlay data: merge backtest TWR onto live data and vice versa by date.
-  // The overlay is rebased multiplicatively so it starts at 0% on the first
-  // overlapping date: rebased = ((1+twr)/(1+baseTwr) - 1) * 100.
-  // This ensures both series are on the same scale.
-  const mergedLiveData = useMemo<LiveChartPoint[]>(() => {
-    if (!filteredLiveData.length) return filteredLiveData as LiveChartPoint[];
-
-    // Rebase live TWR to start at 0% from the first visible date
-    const liveBaseFactor = 1 + filteredLiveData[0].time_weighted_return / 100;
-
-    const btByDate: Record<string, number> = {};
-    const btDdByDate: Record<string, number> = {};
-    for (const pt of filteredBacktestData) {
-      btByDate[pt.date] = pt.twr;
-      btDdByDate[pt.date] = pt.drawdown;
-    }
-    // Find the backtest growth factor at the first overlapping live date
-    let btBaseFactor: number | null = null;
-    for (const pt of filteredLiveData) {
-      if (btByDate[pt.date] != null) { btBaseFactor = 1 + btByDate[pt.date] / 100; break; }
-    }
-
-    // Compute rebased live drawdown from rebased TWR (tracks peak within visible window)
-    let peakGrowth = 1;
-    return filteredLiveData.map((pt): LiveChartPoint => {
-      const rebasedTwr = liveBaseFactor !== 0
-        ? ((1 + pt.time_weighted_return / 100) / liveBaseFactor - 1) * 100
-        : pt.time_weighted_return;
-      const growth = 1 + rebasedTwr / 100;
-      peakGrowth = Math.max(peakGrowth, growth);
-      const rebasedDd = peakGrowth > 0 ? (growth / peakGrowth - 1) * 100 : 0;
-      return {
-        ...pt,
-        time_weighted_return: rebasedTwr,
-        current_drawdown: rebasedDd,
-        backtestTwr: btByDate[pt.date] != null && btBaseFactor != null && btBaseFactor !== 0
-          ? ((1 + btByDate[pt.date] / 100) / btBaseFactor - 1) * 100
-          : null,
-        backtestDrawdown: btDdByDate[pt.date] ?? null,
-      };
-    });
-  }, [filteredLiveData, filteredBacktestData]);
-
-  const mergedBacktestData = useMemo<BacktestChartPoint[]>(() => {
-    if (!filteredBacktestData.length) return filteredBacktestData;
-    const liveByDate: Record<string, number> = {};
-    for (const pt of filteredLiveData) liveByDate[pt.date] = pt.time_weighted_return;
-    // Find the live growth factor at the first overlapping backtest date
-    let baseFactor: number | null = null;
-    for (const pt of filteredBacktestData) {
-      if (liveByDate[pt.date] != null) { baseFactor = 1 + liveByDate[pt.date] / 100; break; }
-    }
-
-    // Compute live drawdown from rebased live TWR for overlay
-    const liveDdByDate: Record<string, number> = {};
-    if (baseFactor != null && baseFactor !== 0) {
-      let peakGrowth = 1;
-      for (const pt of filteredLiveData) {
-        const rebasedTwr = ((1 + pt.time_weighted_return / 100) / baseFactor - 1) * 100;
-        const growth = 1 + rebasedTwr / 100;
-        peakGrowth = Math.max(peakGrowth, growth);
-        liveDdByDate[pt.date] = peakGrowth > 0 ? (growth / peakGrowth - 1) * 100 : 0;
-      }
-    }
-
-    // Merge benchmark data into backtest chart (supports multiple benchmarks)
-    const benchStates = benchmarks.filter((b) => b.data.length > 0).map((bench) => {
-      const map = new Map(bench.data.map((bp: BenchmarkPoint) => [bp.date, bp]));
-      let baseGrowth: number | null = null;
-      for (const pt of filteredBacktestData) {
-        const bp = map.get(pt.date);
-        if (bp != null) { baseGrowth = 1 + bp.return_pct / 100; break; }
-      }
-      return { map, baseGrowth: baseGrowth ?? 1, peak: 1, lastReturn: undefined as number | undefined, lastDd: undefined as number | undefined };
-    });
-
-    return filteredBacktestData.map((pt) => {
-      const merged: BacktestChartPoint = {
-        ...pt,
-        liveTwr: liveByDate[pt.date] != null && baseFactor != null && baseFactor !== 0
-          ? ((1 + liveByDate[pt.date] / 100) / baseFactor - 1) * 100
-          : null,
-        liveDrawdown: liveDdByDate[pt.date] ?? null,
-      };
-      benchStates.forEach((bs, i) => {
-        const bPt = bs.map.get(pt.date);
-        if (bPt != null && bs.baseGrowth !== 0) {
-          bs.lastReturn = ((1 + bPt.return_pct / 100) / bs.baseGrowth - 1) * 100;
-          const growth = 1 + bs.lastReturn / 100;
-          bs.peak = Math.max(bs.peak, growth);
-          bs.lastDd = bs.peak > 0 ? (growth / bs.peak - 1) * 100 : 0;
-        }
-        merged[`bench_${i}_return`] = bs.lastReturn;
-        merged[`bench_${i}_drawdown`] = bs.lastDd;
-      });
-      return merged;
-    });
-  }, [filteredBacktestData, filteredLiveData, benchmarks]);
-
-  // Live metrics: values from backend /summary, date lookups from client-side data
-  const liveMetrics = useMemo(() => {
-    const empty = { sharpe: null as number | null, sortino: null as number | null, maxDrawdown: null as number | null, maxDrawdownDate: "", annualized: null as number | null, calmar: null as number | null, winRate: null as number | null, bestDay: null as number | null, worstDay: null as number | null, bestDayDate: "", worstDayDate: "", cumReturn: null as number | null, twr: null as number | null, mwr: null as number | null, totalReturn: null as number | null, startDate: "", endDate: "" };
-    if (!liveSummary) return empty;
-
-    // Date lookups from client-side data (backend doesn't track which date has best/worst)
-    let bestDayDate = "", worstDayDate = "", maxDrawdownDate = "";
-    if (filteredLiveData.length >= 2) {
-      const pts = filteredLiveData.slice(1);
-      let bestDay = -Infinity, worstDay = Infinity;
-      for (const pt of pts) {
-        if (pt.daily_return_pct > bestDay) { bestDay = pt.daily_return_pct; bestDayDate = pt.date; }
-        if (pt.daily_return_pct < worstDay) { worstDay = pt.daily_return_pct; worstDayDate = pt.date; }
-      }
-      // Find date of max drawdown using deposit-adjusted equity curve (TWR)
-      let equity = 1;
-      let eqPeak = 1;
-      let maxDd = 0;
-      for (let j = 0; j < filteredLiveData.length; j++) {
-        if (j > 0) {
-          const r = filteredLiveData[j].daily_return_pct / 100;
-          equity *= (1 + r);
-        }
-        if (equity > eqPeak) eqPeak = equity;
-        const dd = eqPeak > 0 ? (equity / eqPeak - 1) : 0;
-        if (dd < maxDd) { maxDd = dd; maxDrawdownDate = filteredLiveData[j].date; }
-      }
-    }
-
-    return {
-      sharpe: liveSummary.sharpe_ratio,
-      sortino: liveSummary.sortino_ratio,
-      maxDrawdown: liveSummary.max_drawdown,
-      maxDrawdownDate,
-      annualized: liveSummary.annualized_return_cum,
-      calmar: liveSummary.calmar_ratio,
-      winRate: liveSummary.win_rate,
-      bestDay: liveSummary.best_day_pct,
-      worstDay: liveSummary.worst_day_pct,
-      bestDayDate,
-      worstDayDate,
-      cumReturn: liveSummary.cumulative_return_pct,
-      twr: liveSummary.time_weighted_return,
-      mwr: liveSummary.money_weighted_return_period,
-      totalReturn: liveSummary.total_return_dollars,
-      startDate: liveSummary.start_date,
-      endDate: liveSummary.end_date,
-    };
-  }, [liveSummary, filteredLiveData]);
-
-  // Backtest metrics: use backend summary_metrics for ALL period, client-side for filtered
-  const btMetrics = useMemo(() => {
-    const empty = { cumReturn: null as number | null, annualized: null as number | null, sharpe: null as number | null, sortino: null as number | null, calmar: null as number | null, maxDrawdown: null as number | null, medianDrawdown: null as number | null, longestDrawdownDays: null as number | null, medianDrawdownDays: null as number | null, winRate: null as number | null, volatility: null as number | null, startDate: "", endDate: "" };
-    if (filteredBacktestData.length < 2) return empty;
-    const first = filteredBacktestData[0];
-    const last = filteredBacktestData[filteredBacktestData.length - 1];
-    const startDate = first.date;
-    const endDate = last.date;
-
-    // Use pre-computed backend metrics for ALL period (only if cache has the newer drawdown fields)
-    const sm = backtest?.summary_metrics;
-    if (sm && sm.median_drawdown != null && period === "ALL" && !customStart && !customEnd) {
-      return {
-        cumReturn: sm.cumulative_return_pct / 100,
-        annualized: (sm.annualized_return_cum ?? sm.annualized_return) / 100,
-        sharpe: sm.sharpe_ratio,
-        sortino: sm.sortino_ratio,
-        calmar: sm.calmar_ratio,
-        maxDrawdown: sm.max_drawdown / 100,
-        medianDrawdown: sm.median_drawdown / 100,
-        longestDrawdownDays: sm.longest_drawdown_days,
-        medianDrawdownDays: sm.median_drawdown_days,
-        winRate: sm.win_rate / 100,
-        volatility: sm.annualized_volatility / 100,
-        startDate,
-        endDate,
-      };
-    }
-
-    // Client-side computation for filtered periods
-    const dailyReturns = filteredBacktestData.slice(1).map((pt, i) => {
-      const prev = filteredBacktestData[i].value;
-      return prev > 0 ? ((pt.value - prev) / prev) * 100 : 0;
-    });
-    const n = dailyReturns.length;
-    if (n === 0) return empty;
-    const twrStart = 1 + (first.twr ?? 0) / 100;
-    const twrEnd = 1 + (last.twr ?? 0) / 100;
-    const cumReturn = twrStart > 0 ? (twrEnd / twrStart - 1) : 0;
-    const annualized = n > 0 ? Math.pow(1 + cumReturn, 252 / n) - 1 : 0;
-    const meanRet = dailyReturns.reduce((a, b) => a + b, 0) / n;
-    const variance = dailyReturns.reduce((a, r) => a + (r - meanRet) ** 2, 0) / n;
-    const stdDev = Math.sqrt(variance);
-    const sharpe = stdDev > 0 ? (meanRet / stdDev) * Math.sqrt(252) : null;
-    const downsideReturns = dailyReturns.filter((r) => r < 0);
-    const downsideVar = downsideReturns.length > 0 ? downsideReturns.reduce((a, r) => a + r ** 2, 0) / n : 0;
-    const downsideDev = Math.sqrt(downsideVar);
-    const sortino = downsideDev > 0 ? (meanRet / downsideDev) * Math.sqrt(252) : null;
-    let peak = first.value;
-    let maxDd = 0;
-    const ddTroughs: number[] = [];
-    const ddLengths: number[] = [];
-    let curTrough = 0;
-    let curLen = 0;
-    for (const pt of filteredBacktestData) {
-      if (pt.value >= peak) {
-        if (curLen > 0) {
-          ddTroughs.push(curTrough);
-          ddLengths.push(curLen);
-          curTrough = 0;
-          curLen = 0;
-        }
-        peak = pt.value;
-      } else {
-        const dd = peak > 0 ? (pt.value - peak) / peak : 0;
-        curLen++;
-        if (dd < curTrough) curTrough = dd;
-        if (dd < maxDd) maxDd = dd;
-      }
-    }
-    if (curLen > 0) {
-      ddTroughs.push(curTrough);
-      ddLengths.push(curLen);
-    }
-    const medianDrawdown = ddTroughs.length > 0 ? [...ddTroughs].sort((a, b) => a - b)[Math.floor(ddTroughs.length / 2)] : 0;
-    const longestLen = ddLengths.length > 0 ? Math.max(...ddLengths) : 0;
-    const medianDdLen = ddLengths.length > 0 ? [...ddLengths].sort((a, b) => a - b)[Math.floor(ddLengths.length / 2)] : 0;
-    const calmar = maxDd < 0 ? annualized / Math.abs(maxDd) : null;
-    const wins = dailyReturns.filter((r) => r > 0).length;
-    const winRate = wins / n;
-    return { cumReturn, annualized, sharpe, sortino, calmar, maxDrawdown: maxDd, medianDrawdown, longestDrawdownDays: longestLen, medianDrawdownDays: medianDdLen, winRate, volatility: stdDev / 100, startDate, endDate };
-  }, [filteredBacktestData, backtest, period, customStart, customEnd]);
+  const {
+    filteredBacktestData,
+    mergedLiveData,
+    mergedBacktestData,
+    backtestTwrOffset,
+    btFormatDate,
+    liveMetrics,
+    btMetrics,
+  } = useSymphonyChartModels({
+    liveData,
+    backtest,
+    liveSummary,
+    benchmarks,
+    period,
+    customStart,
+    customEnd,
+    oosDate,
+  });
 
   return (
     <div
@@ -582,6 +260,7 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     </div>
   );
 }
+
 
 
 
