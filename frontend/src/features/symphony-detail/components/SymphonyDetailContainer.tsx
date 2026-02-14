@@ -3,7 +3,8 @@
 import { useMemo, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { SymphonyInfo } from "@/lib/api";
-import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
+import { PerformanceChart } from "@/components/PerformanceChart";
+import type { ChartMode } from "@/features/charting/types";
 import { SymphonyBacktestControls } from "@/features/symphony-detail/components/SymphonyBacktestControls";
 import { SymphonyBacktestChartPanel } from "@/features/symphony-detail/components/SymphonyBacktestChartPanel";
 import { BacktestMetricsSummary } from "@/features/symphony-detail/components/BacktestMetricsSummary";
