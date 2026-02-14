@@ -97,7 +97,7 @@ function backtestOverlayTooltip(
                   color: dailyDeltaColor,
                 }}
               >
-                Delta to Prev. Day: {formatDelta(dailyDelta)}
+                Δ to Prev. Day: {formatDelta(dailyDelta)}
               </p>
             )}
           </div>
@@ -111,7 +111,7 @@ function backtestOverlayTooltip(
         )}
         {showOverlay && delta != null && (
           <p style={{ margin: 0, lineHeight: 1.6, marginTop: 2, color: totalDeltaColor }}>
-            Delta : {formatDelta(delta)}
+            Δ: {formatDelta(delta)}
           </p>
         )}
         {activeBenchmarks.map((benchmark, i) => {
@@ -134,7 +134,7 @@ function backtestOverlayTooltip(
                     color: primaryVal - benchmarkValue >= 0 ? "#10b981" : "#ef4444",
                   }}
                 >
-                  Delta : {formatDelta(primaryVal - benchmarkValue)}
+                  Δ: {formatDelta(primaryVal - benchmarkValue)}
                 </p>
               )}
             </div>
