@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
+def is_test_mode() -> bool:
+    """Return True when the app was launched with --test (CPV_TEST_MODE=1)."""
+    return os.environ.get("CPV_TEST_MODE", "") == "1"
+
+
 class AccountCredentials(BaseModel):
     """One Composer account's credentials from config.json."""
     name: str
@@ -47,7 +52,13 @@ def get_settings() -> Settings:
     except Exception:
         overrides = {}
 
-    return Settings(**{k: v for k, v in overrides.items() if k in Settings.model_fields})
+    values = {k: v for k, v in overrides.items() if k in Settings.model_fields}
+    # Allow test/local runners to force an isolated DB without editing config.json.
+    env_db_url = os.environ.get("CPV_DATABASE_URL", "").strip()
+    if env_db_url:
+        values["database_url"] = env_db_url
+
+    return Settings(**values)
 
 
 # Module-level cache for parsed config.json data

@@ -17,6 +17,9 @@ backend/data/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/.visual-baselines/
+frontend/test-results/
+frontend/playwright-report/
 
 # IDE
 .vscode/

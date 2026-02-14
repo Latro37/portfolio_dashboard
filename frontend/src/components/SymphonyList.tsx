@@ -51,13 +51,13 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
 
   if (!symphonies.length) {
     return (
-      <div className="rounded-xl border border-border bg-card p-6">
+      <div data-testid="section-symphonies" className="rounded-xl border border-border bg-card p-6">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
           {onRefresh && (
             <div className="flex items-center gap-3">
               {lastRefreshed && (
-                <span className="text-xs text-muted-foreground">{lastRefreshed.toLocaleTimeString()}</span>
+                <span data-testid="symphony-last-refreshed" className="text-xs text-muted-foreground">{lastRefreshed.toLocaleTimeString()}</span>
               )}
               <button
                 onClick={wrappedRefresh}
@@ -76,13 +76,13 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-6">
+    <div data-testid="section-symphonies" className="rounded-xl border border-border bg-card p-6">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Active Symphonies</h3>
         {onRefresh && (
           <div className="flex items-center gap-3">
             {lastRefreshed && (
-              <span className="text-xs text-muted-foreground">{lastRefreshed.toLocaleTimeString()}</span>
+              <span data-testid="symphony-last-refreshed" className="text-xs text-muted-foreground">{lastRefreshed.toLocaleTimeString()}</span>
             )}
             <button
               onClick={wrappedRefresh}
@@ -95,7 +95,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
           </div>
         )}
       </div>
-      <div className="max-h-[400px] overflow-y-auto overflow-x-hidden">
+      <div data-testid="symphony-table" className="max-h-[400px] overflow-y-auto overflow-x-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wider">
@@ -123,6 +123,7 @@ export function SymphonyList({ symphonies, showAccountColumn, onSelect, onRefres
             {symphonies.map((s) => (
               <tr
                 key={`${s.account_id}-${s.id}`}
+                data-testid={`symphony-row-${s.id}`}
                 onClick={() => onSelect(s)}
                 className="cursor-pointer border-b border-border/50 transition-colors hover:bg-muted/50"
               >

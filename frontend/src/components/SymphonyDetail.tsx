@@ -765,12 +765,14 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
 
   return (
     <div
+      data-testid="modal-symphony-detail"
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="relative mx-4 my-8 w-full max-w-7xl rounded-2xl border border-border bg-background shadow-2xl">
         {/* Close button */}
         <button
+          data-testid="btn-close-symphony-detail"
           onClick={onClose}
           className="cursor-pointer absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
         >

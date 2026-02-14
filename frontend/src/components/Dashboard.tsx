@@ -52,6 +52,7 @@ export default function Dashboard() {
     return true;
   });
   const [finnhubConfigured, setFinnhubConfigured] = useState(false);
+  const [isTestMode, setIsTestMode] = useState(false);
   const baseHoldingsRef = useRef<HoldingsResponse | null>(null);
   const basePerformanceRef = useRef<PerformancePoint[]>([]);
   const baseSummaryRef = useRef<Summary | null>(null);
@@ -104,14 +105,18 @@ export default function Dashboard() {
   useEffect(() => {
     api.getConfig().then((cfg) => {
       setFinnhubConfigured(cfg.finnhub_configured ?? !!cfg.finnhub_api_key);
+      setIsTestMode(cfg.test_mode === true);
       if (cfg.screenshot) setScreenshotConfig(cfg.screenshot);
     }).catch(() => {});
     api.getAccounts().then((accts) => {
       setAccounts(accts);
       if (accts.length > 0) {
-        const firstCred = accts[0].credential_name;
-        setSelectedCredential(firstCred);
-        const subsForCred = accts.filter((a) => a.credential_name === firstCred);
+        // In local test mode, prefer the synthetic credential when present.
+        const preferredCred = accts.some((a) => a.credential_name === "__TEST__")
+          ? "__TEST__"
+          : accts[0].credential_name;
+        setSelectedCredential(preferredCred);
+        const subsForCred = accts.filter((a) => a.credential_name === preferredCred);
         setSelectedSubAccount(subsForCred.length > 1 ? "all" : subsForCred[0]?.id || "");
       }
     }).catch(() => {
@@ -407,6 +412,10 @@ export default function Dashboard() {
   };
 
   const handleSync = async () => {
+    if (isTestMode) {
+      showToast("Sync is disabled in test mode. Seed test data instead.", "error");
+      return;
+    }
     setSyncing(true);
     try {
       await api.triggerSync(resolvedAccountId);
@@ -436,18 +445,22 @@ export default function Dashboard() {
           </h2>
           <p className="max-w-md text-sm text-muted-foreground">
             {needsSync
-              ? "Click the button below to fetch your portfolio history from Composer. This may take up to a minute on the first run."
+              ? (isTestMode
+                ? "No test data was found. Seed the test database (basic/power profile), then reload."
+                : "Click the button below to fetch your portfolio history from Composer. This may take up to a minute on the first run.")
               : error}
           </p>
         </div>
-        <Button onClick={handleSync} disabled={syncing}>
-          {syncing ? (
-            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="mr-2 h-4 w-4" />
-          )}
-          {syncing ? "Syncing..." : "Initial Sync"}
-        </Button>
+        {!isTestMode && (
+          <Button onClick={handleSync} disabled={syncing}>
+            {syncing ? (
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            {syncing ? "Syncing..." : "Initial Sync"}
+          </Button>
+        )}
       </div>
     );
   }
@@ -460,6 +473,7 @@ export default function Dashboard() {
           summary={summary!}
           onSync={handleSync}
           syncing={syncing}
+          canSync={!isTestMode}
           onSettings={() => setShowSettings(true)}
           onSnapshot={() => triggerSnapshot(false)}
           onHelp={() => setShowHelp(true)}
@@ -467,6 +481,7 @@ export default function Dashboard() {
           todayPctChange={symphonies.length ? (() => { const totalValue = symphonies.reduce((s, x) => s + x.value, 0); const totalDayDollar = symphonies.reduce((s, x) => s + x.last_dollar_change, 0); return totalValue > 0 ? (totalDayDollar / (totalValue - totalDayDollar)) * 100 : 0; })() : undefined}
           liveToggle={
             <button
+              data-testid="toggle-live"
               onClick={() => toggleLive(!liveEnabled)}
               className="cursor-pointer flex items-center gap-2 rounded-full border border-border/50 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
               title={liveEnabled ? "Live updates enabled — click to disable" : "Live updates disabled — click to enable"}

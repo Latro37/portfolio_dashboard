@@ -17,7 +17,7 @@ from app.models import (
 import requests
 
 from app.composer_client import ComposerClient
-from app.config import load_accounts, get_settings
+from app.config import load_accounts, get_settings, is_test_mode
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
 from app.services.symphony_export import export_single_symphony
 from app.market_hours import is_within_trading_session
@@ -100,20 +100,42 @@ def _get_client_for_account(db: Session, account_id: str) -> ComposerClient:
 
 def _resolve_account_ids(db: Session, account_id: Optional[str]) -> List[str]:
     """Resolve account_id param to list of sub-account IDs (same logic as portfolio router)."""
+    test_mode = is_test_mode()
     if account_id == "all":
-        accts = db.query(Account).all()
+        query = db.query(Account)
+        if test_mode:
+            query = query.filter(Account.credential_name == "__TEST__")
+        else:
+            query = query.filter(Account.credential_name != "__TEST__")
+        accts = query.all()
         if not accts:
             raise HTTPException(404, "No accounts discovered.")
         return [a.id for a in accts]
     if account_id and account_id.startswith("all:"):
         cred_name = account_id[4:]
+        if test_mode and cred_name != "__TEST__":
+            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
+        if not test_mode and cred_name == "__TEST__":
+            raise HTTPException(404, "Test mode is not enabled")
         accts = db.query(Account).filter_by(credential_name=cred_name).all()
         if not accts:
             raise HTTPException(404, f"No sub-accounts found for credential '{cred_name}'")
         return [a.id for a in accts]
     if account_id:
+        acct = db.query(Account).filter_by(id=account_id).first()
+        if not acct:
+            raise HTTPException(404, f"Account {account_id} not found")
+        if test_mode and acct.credential_name != "__TEST__":
+            raise HTTPException(404, "Only __TEST__ accounts are available in test mode")
+        if not test_mode and acct.credential_name == "__TEST__":
+            raise HTTPException(404, "Test mode is not enabled")
         return [account_id]
-    first = db.query(Account).first()
+    query = db.query(Account)
+    if test_mode:
+        query = query.filter(Account.credential_name == "__TEST__")
+    else:
+        query = query.filter(Account.credential_name != "__TEST__")
+    first = query.first()
     if not first:
         raise HTTPException(404, "No accounts discovered.")
     return [first.id]

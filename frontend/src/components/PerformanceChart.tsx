@@ -330,7 +330,7 @@ export function PerformanceChart({
   const displayEnd = endDate || (hasData ? tradingData[tradingData.length - 1].date : "");
 
   return (
-    <Card className="border-border/50">
+    <Card data-testid="chart-performance" className="border-border/50">
       <CardContent className="pt-6">
         {/* Controls row */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -389,6 +389,7 @@ export function PerformanceChart({
                 {PERIODS.map((p) => (
                   <button
                     key={p}
+                    data-testid={`period-${p}`}
                     onClick={() => {
                       onPeriodChange(p);
                       onStartDateChange("");
@@ -703,6 +704,8 @@ export function PerformanceChart({
               return (
                 <button
                   key={t}
+                  data-testid={`benchmark-${t}`}
+                  data-active={isActive ? "true" : "false"}
                   onClick={() => {
                     if (isActive) { onBenchmarkRemove?.(t); }
                     else if (benchmarks.length < MAX_BENCHMARKS) { onBenchmarkAdd(t); }
