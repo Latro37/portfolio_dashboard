@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import app.services.portfolio_admin as portfolio_admin
+
 
 def test_accounts_contract(client):
     res = client.get("/api/accounts")
@@ -77,3 +79,96 @@ def test_performance_contract(client):
         "money_weighted_return",
         "current_drawdown",
     }
+
+
+def test_sync_status_contract(client):
+    res = client.get("/api/sync/status?account_id=test-account-001")
+    assert res.status_code == 200
+    payload = res.json()
+    assert set(payload.keys()) == {
+        "status",
+        "last_sync_date",
+        "initial_backfill_done",
+        "message",
+    }
+    assert payload["status"] == "idle"
+    assert payload["last_sync_date"] is None
+    assert payload["initial_backfill_done"] is False
+
+
+def test_sync_trigger_skips_test_accounts_contract(client):
+    res = client.post("/api/sync?account_id=all")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["status"] == "skipped"
+    assert payload["synced_accounts"] == 0
+    assert payload["reason"] == "No sync-eligible accounts"
+
+
+def test_config_contract(client):
+    res = client.get("/api/config")
+    assert res.status_code == 200
+    payload = res.json()
+    assert set(payload.keys()) == {
+        "finnhub_api_key",
+        "finnhub_configured",
+        "polygon_configured",
+        "symphony_export",
+        "screenshot",
+        "test_mode",
+    }
+    assert payload["test_mode"] is True
+
+
+def test_config_symphony_export_contract(client, monkeypatch):
+    monkeypatch.setattr(portfolio_admin, "save_symphony_export_path", lambda _path: None)
+    res = client.post("/api/config/symphony-export", json={"local_path": "C:/tmp/export"})
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload == {"ok": True, "local_path": "C:/tmp/export"}
+
+
+def test_config_screenshot_contract(client, monkeypatch):
+    captured = {}
+
+    def _save(cfg):
+        captured.update(cfg)
+
+    monkeypatch.setattr(portfolio_admin, "save_screenshot_config", _save)
+    res = client.post(
+        "/api/config/screenshot",
+        json={
+            "local_path": "C:/tmp/screenshots",
+            "enabled": True,
+            "account_id": "test-account-001",
+            "chart_mode": "twr",
+            "period": "1Y",
+            "custom_start": "",
+            "hide_portfolio_value": False,
+            "metrics": ["total_return_dollars"],
+            "benchmarks": ["SPY"],
+        },
+    )
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+    assert captured["local_path"] == "C:/tmp/screenshots"
+
+
+def test_manual_cash_flow_contract(client):
+    res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-05",
+            "type": "withdrawal",
+            "amount": 123.45,
+            "description": "Manual correction",
+        },
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert set(payload.keys()) == {"status", "date", "type", "amount"}
+    assert payload["status"] == "ok"
+    assert payload["date"] == "2025-01-05"
+    assert payload["type"] == "withdrawal"
+    assert payload["amount"] == -123.45
