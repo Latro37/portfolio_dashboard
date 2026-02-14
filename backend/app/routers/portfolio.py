@@ -15,7 +15,8 @@ from app.models import (
 from app.schemas import (
     AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
     TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
-    SyncStatus, ManualCashFlowRequest,
+    SyncStatus, SyncTriggerResponse, ManualCashFlowRequest, ManualCashFlowResponse,
+    AppConfigResponse, SaveSymphonyExportResponse, OkResponse, ScreenshotUploadResponse,
 )
 from app.services.sync import full_backfill, incremental_update, get_sync_state
 from app.services.finnhub_market_data import (
@@ -223,7 +224,7 @@ def get_cash_flows(
         account_ids=ids,
     )
 
-@router.post("/cash-flows/manual")
+@router.post("/cash-flows/manual", response_model=ManualCashFlowResponse)
 def add_manual_cash_flow(
     body: ManualCashFlowRequest,
     db: Session = Depends(get_db),
@@ -279,7 +280,7 @@ def get_sync_status(
     )
 
 
-@router.post("/sync")
+@router.post("/sync", response_model=SyncTriggerResponse)
 def trigger_sync(
     account_id: Optional[str] = Query(None, description="Sub-account ID, all:<credential_name>, or omit to sync all"),
     db: Session = Depends(get_db),
@@ -325,7 +326,7 @@ def trigger_sync(
         _syncing = False
 
 
-@router.get("/config")
+@router.get("/config", response_model=AppConfigResponse)
 def get_app_config():
     """Return client-safe configuration (e.g. Finnhub API key, export settings)."""
     export_cfg = load_symphony_export_config()
@@ -348,7 +349,7 @@ def get_app_config():
 class _SymphonyExportBody(BaseModel):
     local_path: str
 
-@router.post("/config/symphony-export")
+@router.post("/config/symphony-export", response_model=SaveSymphonyExportResponse)
 def set_symphony_export_config(body: _SymphonyExportBody):
     """Save symphony export local_path from the frontend settings modal."""
     local_path = body.local_path.strip()
@@ -369,7 +370,7 @@ class _ScreenshotConfigBody(BaseModel):
     metrics: List[str] = []
     benchmarks: List[str] = []
 
-@router.post("/config/screenshot")
+@router.post("/config/screenshot", response_model=OkResponse)
 def set_screenshot_config(body: _ScreenshotConfigBody):
     """Save screenshot configuration from the frontend settings modal."""
     local_path = body.local_path.strip()
@@ -381,7 +382,7 @@ def set_screenshot_config(body: _ScreenshotConfigBody):
 
 _MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024  # 10 MB
 
-@router.post("/screenshot")
+@router.post("/screenshot", response_model=ScreenshotUploadResponse)
 async def upload_screenshot(request: Request):
     """Receive a PNG screenshot and save it to the configured folder."""
     import os
