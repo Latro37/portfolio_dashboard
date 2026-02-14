@@ -99,6 +99,7 @@ PowerShell runner:
 
 Examples:
 ```powershell
+.\scripts\run-local-tests.ps1 -Help
 .\scripts\run-local-tests.ps1
 .\scripts\run-local-tests.ps1 -Profile power
 .\scripts\run-local-tests.ps1 -Visual
