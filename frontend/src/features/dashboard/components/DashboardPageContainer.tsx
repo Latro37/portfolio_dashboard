@@ -7,7 +7,6 @@ import { HelpModal } from "@/components/HelpModal";
 import { HoldingsList } from "@/components/HoldingsList";
 import { HoldingsPie } from "@/components/HoldingsPie";
 import { MetricCards } from "@/components/MetricCards";
-import { PerformanceChart } from "@/components/PerformanceChart";
 import { PortfolioHeader } from "@/components/PortfolioHeader";
 import { SymphonyDetail } from "@/components/SymphonyDetail";
 import { SymphonyList } from "@/components/SymphonyList";
@@ -29,6 +28,7 @@ import { useDashboardSymphonySelection } from "@/features/dashboard/hooks/useDas
 import { useDashboardSyncAction } from "@/features/dashboard/hooks/useDashboardSyncAction";
 import type { DashboardPeriod } from "@/features/dashboard/types";
 import { summarizeSymphonyDailyChange } from "@/features/dashboard/utils";
+import { PerformanceChart } from "@/features/charting/components/PerformanceChartContainer";
 import { SettingsModal } from "@/features/settings/components/SettingsModalContainer";
 import { TradePreview } from "@/features/trade-preview/components/TradePreviewContainer";
 import { useFinnhubQuotes } from "@/hooks/useFinnhubQuotes";
