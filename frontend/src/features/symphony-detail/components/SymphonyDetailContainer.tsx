@@ -19,6 +19,7 @@ import {
   SymphonyInfo,
 } from "@/lib/api";
 import { PerformanceChart, ChartMode } from "@/components/PerformanceChart";
+import { SymphonyBacktestControls } from "@/features/symphony-detail/components/SymphonyBacktestControls";
 import { BacktestMetricsSummary } from "@/features/symphony-detail/components/BacktestMetricsSummary";
 import { HistoricalAllocationsTable } from "@/features/symphony-detail/components/HistoricalAllocationsTable";
 import { SymphonyBacktestHoldingsSection } from "@/features/symphony-detail/components/SymphonyBacktestHoldingsSection";
@@ -30,7 +31,6 @@ import { SymphonyTradePreviewSection } from "@/features/symphony-detail/componen
 import { useSymphonyBenchmarkManager } from "@/features/symphony-detail/hooks/useSymphonyBenchmarkManager";
 import { useSymphonyDetailData } from "@/features/symphony-detail/hooks/useSymphonyDetailData";
 import {
-  SYMPHONY_DETAIL_PERIODS,
   SymphonyDetailPeriod,
   SymphonyDetailTab,
 } from "@/features/symphony-detail/types";
@@ -203,20 +203,6 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
     return timestamp ? timestamp.slice(0, 10) : "";
   }, [backtest]);
   const s = symphony;
-  const isLightColor = (color: string) => color === "#e4e4e7";
-  const benchBtnStyle = (color: string) =>
-    isLightColor(color)
-      ? {
-          backgroundColor: color,
-          color: "#1a1a1a",
-          fontWeight: 700,
-          boxShadow: `0 0 0 1px ${color}`,
-        }
-      : {
-          backgroundColor: `${color}20`,
-          color,
-          boxShadow: `0 0 0 1px ${color}66`,
-        };
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
@@ -619,70 +605,37 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
             )
           ) : (
             <div>
-              {/* Backtest controls row */}
-              <div className="mb-4 flex flex-wrap items-center gap-3">
-                {/* Chart mode toggle */}
-                <div className="flex rounded-lg bg-muted p-0.5">
-                  {(["twr", "drawdown"] as ChartMode[]).map((m) => {
-                    const active = chartMode === m || (m === "twr" && chartMode !== "drawdown");
-                    return (
-                      <button
-                        key={m}
-                        onClick={() => setChartMode(m)}
-                        className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                          active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {m === "twr" ? "Return" : "Drawdown"}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="h-5 w-px bg-border/50" />
-
-                {/* Period pills */}
-                <div className="flex rounded-lg bg-muted p-0.5">
-                  {SYMPHONY_DETAIL_PERIODS.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => { setPeriod(p); setCustomStart(""); setCustomEnd(""); }}
-                      className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                        period === p && !customStart && !customEnd
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                  {oosDate && (
-                    <button
-                      onClick={() => { setPeriod("OOS"); setCustomStart(""); setCustomEnd(""); }}
-                      className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                        period === "OOS" && !customStart && !customEnd
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                      title={`Out of Sample — from ${oosDate} (last edited)`}
-                    >
-                      OOS
-                    </button>
-                  )}
-                </div>
-
-                <div className="h-5 w-px bg-border/50" />
-
-                {/* Date pickers */}
-                <div className="flex items-center gap-2 text-xs">
-                  <input type="date" value={customStart || (filteredBacktestData.length ? filteredBacktestData[0].date : "")} onChange={(e) => setCustomStart(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
-                  <span className="text-muted-foreground">to</span>
-                  <input type="date" value={customEnd || (filteredBacktestData.length ? filteredBacktestData[filteredBacktestData.length - 1].date : "")} onChange={(e) => setCustomEnd(e.target.value)} className="rounded-md border border-border/50 bg-muted px-2 py-1.5 text-xs text-foreground outline-none focus:border-foreground/30" />
-                  {(customStart || customEnd) && (
-                    <button onClick={() => { setCustomStart(""); setCustomEnd(""); }} className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Clear</button>
-                  )}
-                </div>
-              </div>
+              <SymphonyBacktestControls
+                chartMode={chartMode}
+                period={period}
+                customStart={customStart}
+                customEnd={customEnd}
+                filteredBacktestData={filteredBacktestData}
+                oosDate={oosDate}
+                benchmarks={benchmarks}
+                maxBenchmarks={MAX_BENCHMARKS}
+                customInputVisible={btCustomInput}
+                customTickerInput={btCustomTickerInput}
+                catalogDropdownOpen={catalogDropdownOpen}
+                catalogMatches={btCatalogMatches}
+                benchmarkDropdownRef={btDropdownRef}
+                onChartModeChange={setChartMode}
+                onPeriodChange={setPeriod}
+                onCustomStartChange={setCustomStart}
+                onCustomEndChange={setCustomEnd}
+                onClearCustomRange={() => {
+                  setCustomStart("");
+                  setCustomEnd("");
+                }}
+                onAddBenchmark={handleBenchmarkAdd}
+                onRemoveBenchmark={handleBenchmarkRemove}
+                onCustomInputVisibleChange={setBtCustomInput}
+                onCustomTickerInputChange={setBtCustomTickerInput}
+                onCatalogDropdownOpenChange={setCatalogDropdownOpen}
+                onRefreshCatalog={() => {
+                  refreshSymphonyCatalog().catch(() => undefined);
+                }}
+              />
 
               {loadingBacktest ? (
                 <div className="flex h-[280px] items-center justify-center">
@@ -780,125 +733,6 @@ export function SymphonyDetail({ symphony, onClose, scrollToSection }: Props) {
                 </>
               )}
 
-              {/* Benchmark toggle row for backtest tab */}
-              {filteredBacktestData.length > 0 && (
-                <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
-                  <span className="text-[11px] text-muted-foreground mr-1">Benchmark:</span>
-                  {["SPY", "QQQ", "TQQQ"].map((t) => {
-                    const entry = benchmarks.find((b) => b.ticker === t);
-                    const isActive = !!entry;
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => {
-                          if (isActive) { handleBenchmarkRemove(t); }
-                          else if (benchmarks.length < MAX_BENCHMARKS) { handleBenchmarkAdd(t); }
-                        }}
-                        className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                          isActive
-                            ? (isLightColor(entry.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : "")
-                            : benchmarks.length >= MAX_BENCHMARKS
-                              ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
-                              : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
-                        }`}
-                        style={isActive && !isLightColor(entry.color) ? benchBtnStyle(entry.color) : undefined}
-                        disabled={!isActive && benchmarks.length >= MAX_BENCHMARKS}
-                      >
-                        {t}
-                      </button>
-                    );
-                  })}
-                  {!btCustomInput ? (
-                    <button
-                      onClick={() => setBtCustomInput(true)}
-                      disabled={benchmarks.length >= MAX_BENCHMARKS}
-                      className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${
-                        benchmarks.length >= MAX_BENCHMARKS
-                          ? "text-muted-foreground/40 bg-muted/30 cursor-not-allowed"
-                          : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"
-                      }`}
-                    >
-                      +
-                    </button>
-                  ) : (
-                    <div className="relative" ref={btDropdownRef}>
-                      <form
-                        className="flex items-center gap-1"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          const raw = btCustomTickerInput.trim();
-                          if (!raw || benchmarks.length >= MAX_BENCHMARKS) return;
-                          const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
-                          if (symMatch) {
-                            handleBenchmarkAdd(`symphony:${symMatch[1]}`);
-                          } else {
-                            handleBenchmarkAdd(raw.toUpperCase());
-                          }
-                          setBtCustomTickerInput("");
-                          setBtCustomInput(false);
-                          setCatalogDropdownOpen(false);
-                        }}
-                      >
-                        <input
-                          autoFocus
-                          value={btCustomTickerInput}
-                          onChange={(e) => { setBtCustomTickerInput(e.target.value); setCatalogDropdownOpen(true); }}
-                          placeholder="Symphony name/link or Ticker"
-                          className="w-56 rounded-md border border-border/50 bg-muted px-2 py-1 text-xs text-foreground outline-none focus:border-foreground/30"
-                          onFocus={() => setCatalogDropdownOpen(true)}
-                          onBlur={() => { setTimeout(() => { if (!btCustomTickerInput.trim()) { setBtCustomInput(false); setCatalogDropdownOpen(false); } }, 200); }}
-                        />
-                        <button type="submit" className="cursor-pointer rounded-md bg-orange-500/20 px-2 py-1 text-xs font-medium text-orange-400 hover:bg-orange-500/30">Go</button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      refreshSymphonyCatalog().catch(() => undefined);
-                    }}
-                    className="cursor-pointer rounded-md bg-muted/50 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    title="Refresh symphony list"
-                  >
-                          ↻
-                        </button>
-                      </form>
-                      {catalogDropdownOpen && btCatalogMatches.length > 0 && (
-                        <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-md border border-border/50 bg-card shadow-lg max-h-48 overflow-y-auto">
-                          {btCatalogMatches.map((item) => (
-                            <button
-                              key={item.symphony_id}
-                              type="button"
-                              className="w-full cursor-pointer px-3 py-1.5 text-left text-xs hover:bg-muted/60 flex items-center justify-between gap-2"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                handleBenchmarkAdd(`symphony:${item.symphony_id}`);
-                                setBtCustomTickerInput("");
-                                setBtCustomInput(false);
-                                setCatalogDropdownOpen(false);
-                              }}
-                            >
-                              <span className="truncate text-foreground">{item.name}</span>
-                              <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-medium ${
-                                item.source === "invested" ? "bg-emerald-500/20 text-emerald-400" :
-                                item.source === "watchlist" ? "bg-blue-500/20 text-blue-400" :
-                                "bg-amber-500/20 text-amber-400"
-                              }`}>{item.source}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {benchmarks.filter((b) => !["SPY", "QQQ", "TQQQ"].includes(b.ticker)).map((b) => (
-                    <button
-                      key={b.ticker}
-                      onClick={() => handleBenchmarkRemove(b.ticker)}
-                      className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${isLightColor(b.color) ? "bg-zinc-200 text-zinc-900 font-bold shadow-[0_0_0_1px_#e4e4e7]" : ""}`}
-                      style={!isLightColor(b.color) ? benchBtnStyle(b.color) : undefined}
-                    >
-                      {b.label} ✕
-                    </button>
-                  ))}
-                </div>
-              )}
               <BacktestMetricsSummary btMetrics={btMetrics} show={filteredBacktestData.length >= 2} />
             </div>
           )}
