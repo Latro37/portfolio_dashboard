@@ -398,7 +398,7 @@ Click the **gear icon** (⚙) in the dashboard header to open Settings.
 
 ### Symphony Export
 
-Enter a local folder path to automatically save your symphony definitions as JSON files. Exports are saved as `<SymphonyName>/<SymphonyName>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
+Enter a local folder path to automatically save your symphony definitions as JSON files (invested symphonies plus all your drafts). Exports are saved as `<SymphonyName>/<SymphonyName>_<SymphonyId>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
 
 **Default export folder:** `./symphony_exports` (project root).
 

@@ -1,5 +1,6 @@
 """Symphony structure export: save latest version JSON locally."""
 
+import hashlib
 import json
 import logging
 import os
@@ -41,14 +42,15 @@ def _set_sync_state(db: Session, account_id: str, key: str, value: str):
     db.commit()
 
 
-def _save_local(local_path: str, symphony_name: str, version_json: dict) -> Optional[str]:
+def _save_local(local_path: str, symphony_name: str, version_json: dict, symphony_id: str = "") -> Optional[str]:
     """Write symphony version JSON to local disk. Returns the file path on success."""
     folder_name = _sanitize_name(symphony_name)
     folder = os.path.join(local_path, folder_name)
     os.makedirs(folder, exist_ok=True)
 
     today_str = date.today().isoformat()
-    filename = f"{folder_name}_{today_str}.json"
+    id_part = _sanitize_name(symphony_id) if symphony_id else ""
+    filename = f"{folder_name}_{id_part + '_' if id_part else ''}{today_str}.json"
     filepath = os.path.join(folder, filename)
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -81,7 +83,7 @@ def export_single_symphony(
     if not score:
         return
 
-    _save_local(local_path, symphony_name, score)
+    _save_local(local_path, symphony_name, score, symphony_id=symphony_id)
 
 
 def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
@@ -99,19 +101,34 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         logger.warning("Symphony export skipped: %s", exc)
         return
 
+    # Export should include invested symphonies *and* the user's drafts.
+    # Drafts are user-scoped and fetched via backtest-api.
+    symphony_targets: Dict[str, str] = {}
+
     try:
-        symphonies = client.get_symphony_stats(account_id)
+        symphonies = client.get_symphony_stats(account_id) or []
+        for s in symphonies:
+            sym_id = s.get("id", "")
+            sym_name = s.get("name", "Unknown")
+            if sym_id and sym_id not in symphony_targets:
+                symphony_targets[sym_id] = sym_name
     except Exception as e:
         logger.warning("Failed to fetch symphony stats for export (%s): %s", account_id, e)
-        return
+
+    try:
+        drafts = client.get_drafts() or []
+        for s in drafts:
+            sym_id = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
+            sym_name = s.get("name", "Unknown")
+            if sym_id and sym_id not in symphony_targets:
+                symphony_targets[sym_id] = sym_name
+    except Exception as e:
+        logger.warning("Failed to fetch drafts for export (%s): %s", account_id, e)
 
     exported = 0
 
-    for s in symphonies:
-        sym_id = s.get("id", "")
-        sym_name = s.get("name", "Unknown")
-        if not sym_id:
-            continue
+    for sym_id, sym_name in symphony_targets.items():
+        sym_name = sym_name or "Unknown"
 
         # Use versions endpoint for lightweight change detection
         try:
@@ -120,30 +137,50 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
             logger.warning("Failed to fetch versions for symphony %s: %s", sym_id, e)
             continue
 
-        if not versions:
-            continue
+        latest_ts = ""
+        if versions:
+            latest = versions[0] if isinstance(versions, list) else versions
+            if isinstance(latest, dict):
+                latest_ts = latest.get("created_at") or latest.get("updated_at") or ""
 
-        latest = versions[0] if isinstance(versions, list) else versions
-        latest_ts = latest.get("created_at") or latest.get("updated_at") or ""
-
-        # Check if we already exported this version
-        state_key = f"symphony_export:{sym_id}"
-        last_exported = _get_sync_state(db, account_id, state_key)
-        if last_exported and latest_ts and last_exported >= latest_ts:
-            continue
+        # Check if we already exported this version (timestamp-based)
+        state_key_ts = f"symphony_export:{sym_id}"
+        if latest_ts:
+            last_exported = _get_sync_state(db, account_id, state_key_ts)
+            if last_exported and last_exported >= latest_ts:
+                continue
 
         # Fetch full structure via /score
         score = client.get_symphony_score(sym_id)
         if not score:
             continue
 
-        _save_local(local_path, sym_name, score)
+        # Drafts (and occasionally invested symphonies) can return an empty versions list;
+        # use a content hash fallback so we still export once and only re-export on actual
+        # structure changes.
+        state_key_hash = f"symphony_export_hash:{sym_id}"
+        if not latest_ts:
+            canonical = json.dumps(score, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            score_hash = hashlib.sha256(canonical).hexdigest()
+            last_hash = _get_sync_state(db, account_id, state_key_hash)
+            if last_hash and last_hash == score_hash:
+                continue
 
-        if latest_ts:
-            _set_sync_state(db, account_id, state_key, latest_ts)
+            _save_local(local_path, sym_name, score, symphony_id=sym_id)
+            _set_sync_state(db, account_id, state_key_hash, score_hash)
+        else:
+            _save_local(local_path, sym_name, score, symphony_id=sym_id)
+
+            if latest_ts:
+                _set_sync_state(db, account_id, state_key_ts, latest_ts)
 
         exported += 1
         time.sleep(0.3)  # gentle rate limit between version fetches
 
-    logger.info("Symphony export for %s: %d exported, %d total", account_id, exported, len(symphonies))
+    logger.info(
+        "Symphony export for %s: %d exported, %d total",
+        account_id,
+        exported,
+        len(symphony_targets),
+    )
 
