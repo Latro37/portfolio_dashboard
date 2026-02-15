@@ -2,6 +2,7 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
 type QueryFamily =
   | "summary"
+  | "summary-live"
   | "performance"
   | "holdings"
   | "holdings-history"
@@ -27,9 +28,38 @@ function familyFromKey(key: QueryKey): QueryFamily | null {
   return typeof prefix === "string" ? (prefix as QueryFamily) : null;
 }
 
-function accountMatches(key: QueryKey, accountId: string): boolean {
-  if (key.length < 2) return false;
-  const value = key[1];
+function accountIndexForFamily(family: QueryFamily): number | null {
+  switch (family) {
+    case "summary":
+    case "summary-live":
+    case "performance":
+    case "holdings":
+    case "holdings-history":
+    case "transactions":
+    case "cash-flows":
+    case "sync-status":
+    case "symphonies":
+    case "trade-preview":
+      return 1;
+    case "symphony-summary":
+    case "symphony-summary-live":
+    case "symphony-performance":
+    case "symphony-backtest":
+    case "symphony-allocations":
+    case "symphony-trade-preview":
+    case "symphony-benchmark":
+      return 2;
+    case "benchmark-history":
+      return 4;
+    default:
+      return null;
+  }
+}
+
+function accountMatches(family: QueryFamily, key: QueryKey, accountId: string): boolean {
+  const accountIndex = accountIndexForFamily(family);
+  if (accountIndex == null || key.length <= accountIndex) return true;
+  const value = key[accountIndex];
   return typeof value === "string" && value === accountId;
 }
 
@@ -45,7 +75,7 @@ async function invalidateFamilies(
         predicate: (query) => {
           if (familyFromKey(query.queryKey) !== family) return false;
           if (!accountId) return true;
-          return accountMatches(query.queryKey, accountId);
+          return accountMatches(family, query.queryKey, accountId);
         },
       }),
     ),
@@ -57,6 +87,7 @@ export async function invalidateAfterSync(queryClient: QueryClient, accountId?: 
     queryClient,
     [
       "summary",
+      "summary-live",
       "performance",
       "holdings",
       "holdings-history",
@@ -71,6 +102,7 @@ export async function invalidateAfterSync(queryClient: QueryClient, accountId?: 
       "symphony-allocations",
       "symphony-trade-preview",
       "trade-preview",
+      "symphony-benchmark",
       "symphony-catalog",
     ],
     accountId,

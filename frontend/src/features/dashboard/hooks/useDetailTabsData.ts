@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, CashFlowRow } from "@/lib/api";
+import { invalidateAfterManualCashFlow } from "@/lib/queryInvalidation";
 import { getCashFlowsQueryFn, getTransactionsQueryFn } from "@/lib/queryFns";
 import { queryKeys } from "@/lib/queryKeys";
 
@@ -13,6 +14,7 @@ type Args = {
 const PAGE_SIZE = 50;
 
 export function useDetailTabsData({ accountId, onDataChange }: Args) {
+  const queryClient = useQueryClient();
   const [txPagesByAccount, setTxPagesByAccount] = useState<Record<string, number>>({});
 
   const [showManualForm, setShowManualForm] = useState(false);
@@ -53,11 +55,19 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
   const transactions = transactionsQuery.data?.transactions ?? [];
   const txTotal = transactionsQuery.data?.total ?? 0;
   const cashFlows: CashFlowRow[] = cashFlowsQuery.data ?? [];
+  const manualCashFlowMutation = useMutation({
+    mutationFn: api.addManualCashFlow,
+    onSuccess: async (_, variables) => {
+      await invalidateAfterManualCashFlow(queryClient, variables.account_id);
+      await cashFlowsQuery.refetch();
+      await transactionsQuery.refetch();
+    },
+  });
 
   const handleAddManual = async () => {
     if (!resolvedSingleAccountId || !manualDate || !manualAmount) return;
 
-    await api.addManualCashFlow({
+    await manualCashFlowMutation.mutateAsync({
       account_id: resolvedSingleAccountId,
       date: manualDate,
       type: manualType,
@@ -69,8 +79,6 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     setManualAmount("");
     setManualDesc("");
     setShowManualForm(false);
-    await cashFlowsQuery.refetch();
-    await transactionsQuery.refetch();
     onDataChange?.();
   };
 

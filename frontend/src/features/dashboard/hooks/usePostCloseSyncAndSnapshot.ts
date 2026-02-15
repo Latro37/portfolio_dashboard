@@ -7,10 +7,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toPng } from "html-to-image";
 
 import { showToast } from "@/components/Toast";
 import { api, ScreenshotConfig, Summary } from "@/lib/api";
+import { invalidateAfterSync } from "@/lib/queryInvalidation";
 import { isAfterClose, todayET } from "@/lib/marketHours";
 import type {
   DashboardPeriodReturns,
@@ -40,9 +42,17 @@ export function usePostCloseSyncAndSnapshot({
   setScreenshotConfig,
   refreshDashboardData,
 }: Args): Result {
+  const queryClient = useQueryClient();
   const snapshotRef = useRef<HTMLDivElement>(null);
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const [snapshotData, setSnapshotData] = useState<DashboardSnapshotData | null>(null);
+  const syncMutation = useMutation({
+    mutationFn: () => api.triggerSync(resolvedAccountId),
+    onSuccess: async () => {
+      await invalidateAfterSync(queryClient, resolvedAccountId);
+      await refreshDashboardData();
+    },
+  });
 
   const triggerSnapshot = useCallback(
     async (autoMode = false): Promise<void> => {
@@ -188,9 +198,8 @@ export function usePostCloseSyncAndSnapshot({
   );
 
   const runSyncAndRefresh = useCallback(async () => {
-    await api.triggerSync(resolvedAccountId);
-    await refreshDashboardData();
-  }, [resolvedAccountId, refreshDashboardData]);
+    await syncMutation.mutateAsync();
+  }, [syncMutation]);
 
   useEffect(() => {
     if (!resolvedAccountId) return;
