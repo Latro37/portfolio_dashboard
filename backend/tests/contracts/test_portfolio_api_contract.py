@@ -210,11 +210,13 @@ def test_mutation_rejects_cross_origin_even_with_token(client, auth_headers):
     assert res.json()["detail"] == "Origin not allowed"
 
 
-def test_export_path_rejects_parent_escape(client, auth_headers):
+def test_export_path_allows_parent_segments(client, auth_headers):
     res = client.post(
         "/api/config/symphony-export",
         json={"local_path": "../outside"},
         headers=auth_headers,
     )
-    assert res.status_code == 400
-    assert "approved base directory" in res.json()["detail"]
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["ok"] is True
+    assert payload["local_path"].endswith(os.path.join("data", "outside"))

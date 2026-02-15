@@ -209,7 +209,7 @@ You can customize advanced settings by adding a `settings` block to your `config
 | `benchmark_ticker` | `SPY` | Default benchmark ticker for comparisons |
 | `risk_free_rate` | `0.05` | Annual risk-free rate used in Sharpe/Sortino calculations |
 | `local_auth_token` | runtime-generated | Token required for sensitive localhost API operations |
-| `local_write_base_dir` | `data/local_storage` | Approved root directory for screenshot/export file writes |
+| `local_write_base_dir` | `data/local_storage` | Default base directory for relative screenshot/export paths |
 
 Most users don't need to change these.
 
@@ -397,7 +397,7 @@ Click the **gear icon** (⚙) in the dashboard header to open Settings.
 
 Enter a local folder path to automatically save your symphony definitions as JSON files. Exports are saved as `<SymphonyName>/<SymphonyName>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
 
-The configured folder must stay inside an approved local write root. By default this is `settings.local_write_base_dir` (`data/local_storage`), and legacy absolute paths under your user home directory are accepted for backward compatibility.
+The configured folder can be any local path. Relative paths resolve under `settings.local_write_base_dir` (default: `data/local_storage`).
 
 This is useful as a backup of your symphony logic in case Composer should ever go dark, and for tracking changes over time.
 
@@ -416,7 +416,7 @@ Configure an automatic portfolio screenshot captured after market close each day
 | **Benchmark overlays** | Up to 3 ticker symbols (e.g. SPY, QQQ) shown as dashed lines on the chart. Only applies to TWR, MWR, and Drawdown modes. |
 | **Metrics** | Choose which metric cards appear in the snapshot. Metrics appear in the order in which they are selected. |
 
-Snapshots are saved as `Snapshot_YYYY-MM-DD.png` (1200x900 resolution), and the save path must stay inside an approved local write root (`settings.local_write_base_dir` by default).
+Snapshots are saved as `Snapshot_YYYY-MM-DD.png` (1200x900 resolution). Relative save paths resolve under `settings.local_write_base_dir` by default.
 
 You can also capture a snapshot manually at any time by clicking the **camera button** (📷) in the dashboard header.
 
