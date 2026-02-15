@@ -85,7 +85,7 @@ def _safe_step(label: str, fn, *args, **kwargs):
 
 def _refresh_symphony_catalog_safe(db: Session):
     """Wrapper to refresh the symphony catalog during sync (lazy import to avoid circular deps)."""
-    from app.routers.symphonies import _refresh_symphony_catalog
+    from app.services.symphony_catalog import _refresh_symphony_catalog
     _refresh_symphony_catalog(db)
 
 

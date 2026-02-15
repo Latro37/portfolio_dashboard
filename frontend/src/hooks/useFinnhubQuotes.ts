@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { isMarketOpen } from "@/lib/marketHours";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
+import { api } from "@/lib/api";
 
 export interface QuoteData {
   price: number;
@@ -38,45 +36,44 @@ export function useFinnhubQuotes(
 
   // Stable sorted key for symbols to avoid unnecessary reconnects
   const symbolsKey = [...symbols].sort().join(",");
+  const stableSymbols = useMemo(
+    () => (symbolsKey ? symbolsKey.split(",") : []),
+    [symbolsKey],
+  );
 
   // Check if we should be connected (regular market hours only)
   const shouldConnect = useCallback((): boolean => {
-    if (!finnhubEnabled || symbols.length === 0) return false;
+    if (!finnhubEnabled || !symbolsKey) return false;
     return isMarketOpen();
-  }, [finnhubEnabled, symbols.length]);
+  }, [finnhubEnabled, symbolsKey]);
 
   // Fetch previousClose for all symbols via backend proxy (market hours only)
   const fetchPreviousCloses = useCallback(async () => {
-    if (!finnhubEnabled || symbols.length === 0 || !isMarketOpen()) return;
+    if (!finnhubEnabled || !symbolsKey || !isMarketOpen()) return;
     const closes: Record<string, number> = {};
     try {
-      const res = await fetch(
-        `${API_BASE}/finnhub/quote?symbols=${encodeURIComponent(symbols.join(","))}`,
-      );
-      if (res.ok) {
-        const data: Record<string, { c?: number; pc?: number }> = await res.json();
-        for (const [sym, q] of Object.entries(data)) {
-          if (q.pc && q.pc > 0) {
-            closes[sym] = q.pc;
-          }
-          if (q.c && q.c > 0 && q.pc && q.pc > 0) {
-            const change = q.c - q.pc;
-            const changePct = (change / q.pc) * 100;
-            setQuotes((prev) => ({
-              ...prev,
-              [sym]: { price: q.c!, change, changePct },
-            }));
-          }
+      const data = await api.getFinnhubQuotes(stableSymbols);
+      for (const [sym, q] of Object.entries(data)) {
+        if (q.pc && q.pc > 0) {
+          closes[sym] = q.pc;
+        }
+        if (q.c && q.c > 0 && q.pc && q.pc > 0) {
+          const change = q.c - q.pc;
+          const changePct = (change / q.pc) * 100;
+          setQuotes((prev) => ({
+            ...prev,
+            [sym]: { price: q.c, change, changePct },
+          }));
         }
       }
     } catch {
       // Silently skip — badge just won't show
     }
     prevCloseRef.current = { ...prevCloseRef.current, ...closes };
-  }, [finnhubEnabled, symbols]);
+  }, [finnhubEnabled, symbolsKey, stableSymbols]);
 
   // Open WebSocket connection via backend proxy
-  const connectWS = useCallback(() => {
+  const connectWS = useCallback(async function openWebSocket() {
     if (!finnhubEnabled || !mountedRef.current) return;
 
     // Clean up any existing connection
@@ -84,7 +81,14 @@ export function useFinnhubQuotes(
       try { wsRef.current.close(); } catch { /* ignore */ }
     }
 
-    const ws = new WebSocket(`${WS_BASE}/finnhub/ws`);
+    let wsUrl = "";
+    try {
+      wsUrl = await api.getFinnhubWsUrl();
+    } catch {
+      return;
+    }
+
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -94,7 +98,7 @@ export function useFinnhubQuotes(
 
       // Subscribe to all symbols
       subscribedSymbols.current.clear();
-      for (const sym of symbols) {
+      for (const sym of stableSymbols) {
         ws.send(JSON.stringify({ type: "subscribe", symbol: sym }));
         subscribedSymbols.current.add(sym);
       }
@@ -138,7 +142,7 @@ export function useFinnhubQuotes(
       reconnectDelay.current = Math.min(delay * 2, 30000);
       reconnectTimer.current = setTimeout(() => {
         if (mountedRef.current && shouldConnect()) {
-          connectWS();
+          void openWebSocket();
         }
       }, delay);
     };
@@ -146,13 +150,13 @@ export function useFinnhubQuotes(
     ws.onerror = () => {
       // onclose will fire after onerror, triggering reconnect
     };
-  }, [finnhubEnabled, symbols, shouldConnect]);
+  }, [finnhubEnabled, stableSymbols, shouldConnect]);
 
   // Main effect: fetch closes + connect WS when symbols or key change
   useEffect(() => {
     mountedRef.current = true;
 
-    if (!finnhubEnabled || symbols.length === 0) {
+    if (!finnhubEnabled || !symbolsKey) {
       setQuotes({});
       setConnected(false);
       return;
@@ -168,14 +172,14 @@ export function useFinnhubQuotes(
     // Fetch previous closes, then connect WS
     fetchPreviousCloses().then(() => {
       if (mountedRef.current && shouldConnect()) {
-        connectWS();
+        void connectWS();
       }
     });
 
     // Periodic check: reconnect if we should be connected but aren't
     const checkInterval = setInterval(() => {
       if (shouldConnect() && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
-        connectWS();
+        void connectWS();
       }
     }, 60_000);
     const subscribedSymbolsSnapshot = subscribedSymbols.current;

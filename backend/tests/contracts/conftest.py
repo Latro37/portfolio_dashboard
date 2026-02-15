@@ -21,11 +21,13 @@ from app.models import (
     SymphonyDailyPortfolio,
 )
 from app.routers import portfolio, symphonies
+from app.routers import health
 
 
 @pytest.fixture
 def session_factory(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("PD_TEST_MODE", "1")
+    monkeypatch.setenv("PD_LOCAL_AUTH_TOKEN", "contract-test-token")
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -132,6 +134,7 @@ def client(monkeypatch: pytest.MonkeyPatch, session_factory):
     app = FastAPI()
     app.include_router(portfolio.router)
     app.include_router(symphonies.router)
+    app.include_router(health.router)
 
     def override_get_db():
         db = session_factory()
@@ -144,3 +147,8 @@ def client(monkeypatch: pytest.MonkeyPatch, session_factory):
 
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def auth_headers() -> dict[str, str]:
+    return {"X-PD-Local-Token": "contract-test-token"}

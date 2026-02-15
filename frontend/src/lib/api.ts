@@ -1,4 +1,8 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const WS_BASE = API_BASE.replace(/^http/, "ws");
+const LOCAL_AUTH_HEADER = "X-PD-Local-Token";
+let localAuthToken: string | null = null;
+let localAuthTokenPromise: Promise<string> | null = null;
 
 async function fetchJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
@@ -10,7 +14,46 @@ async function fetchJSON<T>(path: string): Promise<T> {
     throw new Error(`Rate limited on ${path}. Try again later.`);
   }
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  if (path === "/config" && data && typeof data === "object") {
+    const token = (data as { local_auth_token?: string }).local_auth_token;
+    if (typeof token === "string" && token.trim()) {
+      localAuthToken = token.trim();
+    }
+  }
+  return data;
+}
+
+async function ensureLocalAuthToken(): Promise<string> {
+  if (localAuthToken) return localAuthToken;
+
+  if (!localAuthTokenPromise) {
+    localAuthTokenPromise = fetchJSON<{ local_auth_token?: string }>("/config")
+      .then((cfg) => {
+        const token = (cfg.local_auth_token || "").trim();
+        if (!token) {
+          throw new Error("Missing local auth token from /config");
+        }
+        localAuthToken = token;
+        return token;
+      })
+      .finally(() => {
+        localAuthTokenPromise = null;
+      });
+  }
+
+  return localAuthTokenPromise;
+}
+
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await ensureLocalAuthToken();
+  const headers = new Headers(init.headers || {});
+  headers.set(LOCAL_AUTH_HEADER, token);
+  return fetch(`${API_BASE}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers,
+  });
 }
 
 export interface Summary {
@@ -303,6 +346,7 @@ export interface AppConfig {
   finnhub_api_key: string | null;
   finnhub_configured: boolean;
   polygon_configured?: boolean;
+  local_auth_token: string;
   symphony_export: SymphonyExportStatus | null;
   screenshot: ScreenshotConfig | null;
   test_mode: boolean;
@@ -311,7 +355,7 @@ export interface AppConfig {
 export const api = {
   getConfig: () => fetchJSON<AppConfig>("/config"),
   saveSymphonyExportPath: (localPath: string) =>
-    fetch(`${API_BASE}/config/symphony-export`, {
+    authFetch("/config/symphony-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ local_path: localPath }),
@@ -353,8 +397,8 @@ export const api = {
   getSyncStatus: (accountId?: string) =>
     fetchJSON<SyncStatus>(`/sync/status${_qs(accountId)}`),
   triggerSync: (accountId?: string) =>
-    fetch(`${API_BASE}/sync${_qs(accountId)}`, { method: "POST" })
-      .then((r) => r.json()),
+    authFetch(`/sync${_qs(accountId)}`, { method: "POST" })
+      .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   addManualCashFlow: (body: {
     account_id: string;
     date: string;
@@ -362,11 +406,11 @@ export const api = {
     amount: number;
     description?: string;
   }) =>
-    fetch(`${API_BASE}/cash-flows/manual`, {
+    authFetch("/cash-flows/manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).then((r) => r.json()),
+    }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   getSymphonies: (accountId?: string) =>
     fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`),
   getSymphonyPerformance: (symphonyId: string, accountId: string) =>
@@ -405,7 +449,7 @@ export const api = {
     return fetchJSON<Summary>(`/summary/live?${params.toString()}`);
   },
   saveScreenshotConfig: (config: ScreenshotConfig) =>
-    fetch(`${API_BASE}/config/screenshot`, {
+    authFetch("/config/screenshot", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
@@ -414,7 +458,7 @@ export const api = {
     const form = new FormData();
     form.append("file", blob, `Snapshot_${dateStr}.png`);
     form.append("date", dateStr);
-    return fetch(`${API_BASE}/screenshot`, { method: "POST", body: form })
+    return authFetch("/screenshot", { method: "POST", body: form })
       .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); });
   },
   getBenchmarkHistory: (ticker: string, startDate?: string, endDate?: string, accountId?: string) => {
@@ -441,5 +485,15 @@ export const api = {
       params.set("period", period);
     }
     return fetchJSON<SymphonySummary>(`/symphonies/${symphonyId}/summary/live?${params.toString()}`);
+  },
+  getFinnhubQuotes: (symbols: string[]) =>
+    authFetch(`/finnhub/quote?symbols=${encodeURIComponent(symbols.join(","))}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed: ${r.status}`);
+        return r.json() as Promise<Record<string, { c?: number; pc?: number }>>;
+      }),
+  getFinnhubWsUrl: async () => {
+    const token = await ensureLocalAuthToken();
+    return `${WS_BASE}/finnhub/ws?local_token=${encodeURIComponent(token)}`;
   },
 };

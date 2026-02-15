@@ -25,6 +25,8 @@ from app.config import (
 )
 from app.models import Account, CashFlow
 from app.schemas import ManualCashFlowRequest
+from app.security import get_local_auth_token
+from app.services.local_paths import LocalPathError, resolve_local_write_path
 from app.services.sync import (
     full_backfill,
     get_sync_state,
@@ -164,6 +166,7 @@ def get_app_config_data() -> dict:
         "finnhub_api_key": None,
         "finnhub_configured": load_finnhub_key() is not None,
         "polygon_configured": load_polygon_key() is not None,
+        "local_auth_token": get_local_auth_token(),
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
         "test_mode": is_test_mode(),
@@ -171,17 +174,20 @@ def get_app_config_data() -> dict:
 
 
 def save_symphony_export_config_data(local_path: str) -> dict:
-    normalized = local_path.strip()
-    if not normalized:
-        raise HTTPException(400, "local_path is required")
+    try:
+        normalized = resolve_local_write_path(local_path)
+    except LocalPathError as exc:
+        raise HTTPException(400, str(exc))
     save_symphony_export_path(normalized)
     return {"ok": True, "local_path": normalized}
 
 
 def save_screenshot_config_data(config: dict) -> dict:
-    local_path = (config.get("local_path") or "").strip()
-    if not local_path:
-        raise HTTPException(400, "local_path is required")
+    try:
+        local_path = resolve_local_write_path(config.get("local_path") or "")
+    except LocalPathError as exc:
+        raise HTTPException(400, str(exc))
+    config["local_path"] = local_path
     save_screenshot_config(config)
     return {"ok": True}
 
@@ -191,9 +197,10 @@ async def upload_screenshot_data(request: Request) -> dict:
     if not cfg:
         raise HTTPException(400, "Screenshot not configured")
 
-    local_path = cfg.get("local_path", "")
-    if not local_path:
-        raise HTTPException(400, "Screenshot save folder not configured")
+    try:
+        local_path = resolve_local_write_path(cfg.get("local_path", ""))
+    except LocalPathError as exc:
+        raise HTTPException(400, str(exc))
 
     form = await request.form()
     file = form.get("file")

@@ -1,18 +1,12 @@
 """Health check and Finnhub proxy routes."""
 
-import asyncio
-import json
-import logging
 import os
-from typing import List, Optional
 
-import requests
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket
 from fastapi.responses import PlainTextResponse
 
-from app.config import load_finnhub_key
-
-logger = logging.getLogger(__name__)
+from app.security import require_local_auth, require_local_ws_auth
+from app.services.health_proxy import get_finnhub_quote_proxy_data, proxy_finnhub_ws
 router = APIRouter(tags=["health"])
 
 
@@ -46,65 +40,14 @@ def metrics_guide():
 @router.get("/api/finnhub/quote")
 def finnhub_quote_proxy(
     symbols: str = Query(..., description="Comma-separated ticker symbols"),
+    _auth: None = Depends(require_local_auth),
 ):
-    """Proxy Finnhub quote requests so the API key never reaches the browser."""
-    api_key = load_finnhub_key()
-    if not api_key:
-        return {}
-    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    result = {}
-    for sym in symbol_list[:50]:  # cap at 50 symbols
-        try:
-            resp = requests.get(
-                "https://finnhub.io/api/v1/quote",
-                params={"symbol": sym, "token": api_key},
-                timeout=5,
-            )
-            if resp.ok:
-                result[sym] = resp.json()
-        except Exception:
-            pass
-    return result
+    return get_finnhub_quote_proxy_data(symbols)
 
 
 @router.websocket("/api/finnhub/ws")
-async def finnhub_ws_proxy(websocket: WebSocket):
-    """WebSocket relay to Finnhub — client subscribes via this proxy,
-    the server holds the API key and forwards messages in both directions."""
-    import websockets
-
-    api_key = load_finnhub_key()
-    if not api_key:
-        await websocket.close(code=4000, reason="Finnhub API key not configured")
-        return
-
-    await websocket.accept()
-
-    upstream_url = f"wss://ws.finnhub.io?token={api_key}"
-    try:
-        async with websockets.connect(upstream_url) as upstream:
-            async def client_to_upstream():
-                """Forward subscribe/unsubscribe messages from browser to Finnhub."""
-                try:
-                    while True:
-                        data = await websocket.receive_text()
-                        await upstream.send(data)
-                except WebSocketDisconnect:
-                    pass
-
-            async def upstream_to_client():
-                """Forward trade data from Finnhub to browser."""
-                try:
-                    async for message in upstream:
-                        await websocket.send_text(message)
-                except Exception:
-                    pass
-
-            await asyncio.gather(client_to_upstream(), upstream_to_client())
-    except Exception as e:
-        logger.debug("Finnhub WS proxy closed: %s", e)
-    finally:
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+async def finnhub_ws_proxy(
+    websocket: WebSocket,
+    _auth: None = Depends(require_local_ws_auth),
+):
+    await proxy_finnhub_ws(websocket)

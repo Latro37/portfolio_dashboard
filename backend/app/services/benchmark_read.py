@@ -1,5 +1,6 @@
 """Benchmark history read service."""
 
+from collections import OrderedDict
 import logging
 import math
 import time
@@ -24,8 +25,28 @@ from app.services.metrics import compute_mwr
 
 logger = logging.getLogger(__name__)
 
-_benchmark_cache: Dict[Tuple[str, str, str, str], Tuple[float, list]] = {}
+_benchmark_cache: "OrderedDict[Tuple[str, str, str, str], Tuple[float, list]]" = OrderedDict()
 _BENCHMARK_TTL = 3600  # 1 hour
+_BENCHMARK_CACHE_MAX = 256
+
+
+def _get_cached_benchmark(cache_key: Tuple[str, str, str, str]) -> Optional[list]:
+    cached = _benchmark_cache.get(cache_key)
+    if not cached:
+        return None
+    ts, cached_data = cached
+    if time.time() - ts >= _BENCHMARK_TTL:
+        _benchmark_cache.pop(cache_key, None)
+        return None
+    _benchmark_cache.move_to_end(cache_key)
+    return cached_data
+
+
+def _set_cached_benchmark(cache_key: Tuple[str, str, str, str], payload: list) -> None:
+    _benchmark_cache[cache_key] = (time.time(), payload)
+    _benchmark_cache.move_to_end(cache_key)
+    while len(_benchmark_cache) > _BENCHMARK_CACHE_MAX:
+        _benchmark_cache.popitem(last=False)
 
 
 def get_benchmark_history_data(
@@ -67,10 +88,9 @@ def get_benchmark_history_data(
     account_scope = ",".join(sorted(resolved_account_ids))
     cache_key = (ticker, s_date, e_date, account_scope)
 
-    if cache_key in _benchmark_cache:
-        ts, cached_data = _benchmark_cache[cache_key]
-        if time.time() - ts < _BENCHMARK_TTL:
-            return {"ticker": ticker, "data": cached_data}
+    cached_data = _get_cached_benchmark(cache_key)
+    if cached_data is not None:
+        return {"ticker": ticker, "data": cached_data}
 
     closes: List[Tuple[date, float]] = get_daily_closes_stooq_fn(ticker, start_dt, end_dt)
 
@@ -188,5 +208,5 @@ def get_benchmark_history_data(
             }
         )
 
-    _benchmark_cache[cache_key] = (time.time(), result)
+    _set_cached_benchmark(cache_key, result)
     return {"ticker": ticker, "data": result}

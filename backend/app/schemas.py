@@ -52,6 +52,7 @@ class AppConfigResponse(BaseModel):
     finnhub_api_key: Optional[str] = None
     finnhub_configured: bool
     polygon_configured: bool
+    local_auth_token: str
     symphony_export: Optional[SymphonyExportConfig] = None
     screenshot: Optional[Dict[str, Any]] = None
     test_mode: bool

@@ -39,6 +39,10 @@ class Settings(BaseModel):
     # Database
     database_url: str = "sqlite:///data/portfolio.db"
 
+    # Local security and filesystem controls
+    local_auth_token: str = ""
+    local_write_base_dir: str = "data/local_storage"
+
     # Market / Analytics
     benchmark_ticker: str = "SPY"
     risk_free_rate: float = 0.05  # annualized
@@ -57,6 +61,12 @@ def get_settings() -> Settings:
     env_db_url = os.environ.get("PD_DATABASE_URL", "").strip()
     if env_db_url:
         values["database_url"] = env_db_url
+    env_local_auth_token = os.environ.get("PD_LOCAL_AUTH_TOKEN", "").strip()
+    if env_local_auth_token:
+        values["local_auth_token"] = env_local_auth_token
+    env_local_write_base_dir = os.environ.get("PD_LOCAL_WRITE_BASE_DIR", "").strip()
+    if env_local_write_base_dir:
+        values["local_write_base_dir"] = env_local_write_base_dir
 
     return Settings(**values)
 

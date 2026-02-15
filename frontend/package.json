@@ -13,6 +13,7 @@
     "test:e2e:headed": "playwright test tests/e2e --headed",
     "test:visual": "playwright test tests/visual",
     "test:visual:update": "playwright test tests/visual --update-snapshots",
+    "audit:ci": "npm audit --audit-level=high",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest"
   },
@@ -34,7 +35,7 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.51.1",
+    "@playwright/test": "^1.55.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

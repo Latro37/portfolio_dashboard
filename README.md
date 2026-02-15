@@ -196,7 +196,9 @@ You can customize advanced settings by adding a `settings` block to your `config
 {
   "settings": {
     "benchmark_ticker": "SPY",
-    "risk_free_rate": 0.05
+    "risk_free_rate": 0.05,
+    "local_auth_token": "set-a-long-random-local-token",
+    "local_write_base_dir": "data/local_storage"
   },
   "accounts": [ ... ]
 }
@@ -206,6 +208,8 @@ You can customize advanced settings by adding a `settings` block to your `config
 |---------|---------|-------------|
 | `benchmark_ticker` | `SPY` | Default benchmark ticker for comparisons |
 | `risk_free_rate` | `0.05` | Annual risk-free rate used in Sharpe/Sortino calculations |
+| `local_auth_token` | runtime-generated | Token required for sensitive localhost API operations |
+| `local_write_base_dir` | `data/local_storage` | Approved root directory for screenshot/export file writes |
 
 Most users don't need to change these.
 
@@ -393,6 +397,8 @@ Click the **gear icon** (⚙) in the dashboard header to open Settings.
 
 Enter a local folder path to automatically save your symphony definitions as JSON files. Exports are saved as `<SymphonyName>/<SymphonyName>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
 
+The configured folder must be inside `settings.local_write_base_dir` (default: `data/local_storage`).
+
 This is useful as a backup of your symphony logic in case Composer should ever go dark, and for tracking changes over time.
 
 ### Daily Snapshot
@@ -410,7 +416,7 @@ Configure an automatic portfolio screenshot captured after market close each day
 | **Benchmark overlays** | Up to 3 ticker symbols (e.g. SPY, QQQ) shown as dashed lines on the chart. Only applies to TWR, MWR, and Drawdown modes. |
 | **Metrics** | Choose which metric cards appear in the snapshot. Metrics appear in the order in which they are selected. |
 
-Snapshots are saved as `Snapshot_YYYY-MM-DD.png` (1200×900 resolution).
+Snapshots are saved as `Snapshot_YYYY-MM-DD.png` (1200x900 resolution), and the save path must stay inside `settings.local_write_base_dir`.
 
 You can also capture a snapshot manually at any time by clicking the **camera button** (📷) in the dashboard header.
 
@@ -451,7 +457,8 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 
 - **Your API keys stay on your machine.** They are stored in `config.json`, which is git-ignored and never committed to version control.
 - **The backend only listens on localhost** (`127.0.0.1`). It is not accessible from other devices on your network.
-- **CORS is restricted** to `http://localhost:3000` — only the local frontend can make API requests to the backend.
+- **Sensitive endpoints require local auth + origin checks.** Mutating API routes and Finnhub proxy routes require a local token and enforce localhost host/origin constraints.
+- **CORS is restricted** to local frontend origins (`http://localhost:3000`, `http://127.0.0.1:3000`) to reduce browser cross-origin exposure.
 - **Finnhub API key is never sent to the browser.** All Finnhub requests (REST quotes and WebSocket streams) are proxied through the backend.
 - **All network traffic goes directly to Composer's API** (`api.composer.trade`) and market-data providers used by enabled features: Finnhub (`finnhub.io`), Stooq (`stooq.com`) for historical benchmark candles, and optionally Polygon (`polygon.io`) for split-event fallback.
 - **No telemetry or analytics.** Nothing is phoned home.
@@ -475,4 +482,5 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 ## License
 
 MIT
+
 

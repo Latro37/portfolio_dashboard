@@ -275,6 +275,8 @@ See `docs/TEST_MATRIX.md` for scope-to-gate mapping.
 Preferred:
 - `PD_TEST_MODE`
 - `PD_DATABASE_URL`
+- `PD_LOCAL_AUTH_TOKEN`
+- `PD_LOCAL_WRITE_BASE_DIR`
 
 Legacy aliases:
 - removed after TQ-1 cleanup; do not use or reintroduce.
