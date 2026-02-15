@@ -44,7 +44,7 @@ from app.services.portfolio_admin import (
     upload_screenshot_data,
 )
 from app.config import is_test_mode
-from app.security import require_local_auth, require_local_origin
+from app.security import require_local_auth, require_local_strict_origin
 
 router = APIRouter(prefix="/api", tags=["portfolio"])
 
@@ -280,7 +280,7 @@ def trigger_sync(
 @router.get(
     "/config",
     response_model=AppConfigResponse,
-    dependencies=[Depends(require_local_origin)],
+    dependencies=[Depends(require_local_strict_origin)],
 )
 def get_app_config():
     """Return client-safe configuration (e.g. Finnhub API key, export settings)."""
