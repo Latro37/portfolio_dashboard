@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import {
   HoldingsResponse,
@@ -109,6 +109,7 @@ export function useDashboardData({
       }),
     enabled: Boolean(resolvedAccountId),
     staleTime: 60000,
+    placeholderData: keepPreviousData,
   });
 
   const holdingsQuery = useQuery({
@@ -139,6 +140,7 @@ export function useDashboardData({
     },
     enabled: Boolean(resolvedAccountId),
     staleTime: 60000,
+    placeholderData: keepPreviousData,
   });
 
   const symphoniesQuery = useQuery({
@@ -192,8 +194,12 @@ export function useDashboardData({
     Boolean(resolvedAccountId) &&
     (summaryQuery.isLoading ||
       holdingsQuery.isLoading ||
+      performanceQuery.isLoading ||
+      symphoniesQuery.isLoading ||
       summaryQuery.isFetching ||
-      holdingsQuery.isFetching);
+      holdingsQuery.isFetching ||
+      performanceQuery.isFetching ||
+      symphoniesQuery.isFetching);
   const loading = !resolvedAccountId || hasPendingCriticalRead || (manualLoading && hasPendingCriticalRead);
 
   const setSummary: Dispatch<SetStateAction<Summary | null>> = useCallback(
