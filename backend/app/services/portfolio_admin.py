@@ -20,6 +20,7 @@ from app.config import (
     load_polygon_key,
     load_screenshot_config,
     load_symphony_export_config,
+    validate_composer_config,
     save_screenshot_config,
     save_symphony_export_path,
 )
@@ -156,6 +157,7 @@ def trigger_sync_data(
 
 
 def get_app_config_data() -> dict:
+    composer_ok, composer_err = validate_composer_config()
     export_cfg = load_symphony_export_config()
     export_status = None
     if export_cfg:
@@ -170,6 +172,8 @@ def get_app_config_data() -> dict:
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
         "test_mode": is_test_mode(),
+        "composer_config_ok": composer_ok,
+        "composer_config_error": composer_err,
     }
 
 

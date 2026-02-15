@@ -35,7 +35,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. Includes invested symphonies plus your Composer watchlist and drafts.
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
 - **Backtest caching** — Symphony backtests are cached locally and automatically re-fetched when you edit the symphony in Composer.
-- **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change.
+- **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change (draft exports are temporarily disabled to keep startup fast).
 - **Daily snapshot** — Captures a clean portfolio summary image after market close (or manually via the camera button). Configurable chart type, metrics, date range, and benchmark overlays.
 - **Trade preview** — See what trades are pending before the next rebalance.
 - **Live intraday data** — During market hours, your portfolio value updates in real time.
@@ -355,24 +355,70 @@ python start.py
 ```
 This checks prerequisites, installs dependencies, starts both the backend and frontend, and opens your browser.
 
-**Option B: Manual start** (two terminals)
-```bash
-# Terminal 1 — Backend
-cd backend
-pip install -r requirements.txt
-python -m uvicorn app.main:app --port 8000
+Notes:
+- `start.py` creates/uses a backend virtualenv at `backend/.venv` by default (avoids global `pip install`). Use `--no-venv` to use your current Python environment.
+- If `config.json` is missing/invalid in non-test mode, the app still starts and the dashboard shows setup instructions instead of spinning forever.
 
-# Terminal 2 — Frontend
+Common overrides:
+```bash
+# Port overrides
+python start.py --backend-port 8010 --frontend-port 3010
+
+# Use current environment instead of backend/.venv
+python start.py --no-venv
+```
+
+**Option B: Manual start** (two terminals)
+
+Backend (Terminal 1):
+```bash
+cd backend
+
+# Optional (recommended): install into a venv at backend/.venv (matches start.py default)
+python -m venv .venv
+
+# Activate the venv:
+# - Windows (PowerShell): .\.venv\Scripts\Activate.ps1
+# - Windows (cmd.exe):    .\.venv\Scripts\activate.bat
+# - macOS/Linux:          source .venv/bin/activate
+#
+# To exit the venv later:
+# - Windows (PowerShell): deactivate
+# - Windows (cmd.exe):    deactivate
+# - macOS/Linux:          deactivate
+
+python -m pip install -r requirements.txt
+
+# If you use a non-default frontend port, set PD_ALLOWED_ORIGINS to match it.
+# Example (frontend on 3010):
+# - Windows (PowerShell): $env:PD_ALLOWED_ORIGINS="http://localhost:3010,http://127.0.0.1:3010"
+# - Windows (cmd.exe):    set PD_ALLOWED_ORIGINS=http://localhost:3010,http://127.0.0.1:3010
+# - macOS/Linux:          export PD_ALLOWED_ORIGINS="http://localhost:3010,http://127.0.0.1:3010"
+
+python -m uvicorn app.main:app --port 8000
+# optionally, use a custom port e.g. --port 8080
+```
+
+Frontend (Terminal 2):
+```bash
 cd frontend
 npm install
 npm run dev
+# optionally, use a custom port e.g. npm run dev -- -p 3010
 ```
-Then open **http://localhost:3000** in your browser.
+Then open **http://localhost:3000** (or your chosen frontend port) in your browser.
+
+If you use a non-default frontend port, make sure the backend `PD_ALLOWED_ORIGINS` matches it (see backend commands above). Tip: `python start.py --frontend-port <port>` wires this automatically.
 
 ### Stopping the App
 
 ```bash
 python stop.py
+```
+
+With custom ports:
+```bash
+python stop.py --backend-port 8010 --frontend-port 3010
 ```
 
 This cleanly shuts down both the backend and frontend and kills any zombie processes (orphan `uvicorn` or `next dev` processes that survived a crash or forced close). Use this when:
@@ -438,7 +484,13 @@ Click the **Update** button in the top-right corner. The app doesn't fetch data 
 The first sync can take 30–60 seconds. If it takes longer than 2 minutes, check the terminal window running the backend for error messages.
 
 ### Port 8000 or 3000 is already in use
-A previous session may not have shut down cleanly. Run `python stop.py` to kill any lingering processes, then start the app again.
+A previous session may not have shut down cleanly.
+
+1. Run `python stop.py` to kill any lingering processes.
+2. Restart with `python start.py`.
+3. If you already have apps on those ports, override them:
+   - `python start.py --backend-port 8010 --frontend-port 3010`
+   - `python stop.py --backend-port 8010 --frontend-port 3010`
 
 ### Symphony backtest shows old data
 Backtests are cached for up to 24 hours. If you edited the symphony recently, the app checks for edits and re-fetches automatically. You can also close and reopen the symphony detail to trigger a fresh check.
@@ -465,7 +517,7 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 - **Your API keys stay on your machine.** They are stored in `config.json`, which is git-ignored and never committed to version control.
 - **The backend only listens on localhost** (`127.0.0.1`). It is not accessible from other devices on your network.
 - **Sensitive endpoints require local auth + origin checks.** Mutating API routes and Finnhub proxy routes require a local token and enforce localhost host/origin constraints.
-- **CORS is restricted** to local frontend origins (`http://localhost:3000`, `http://127.0.0.1:3000`) to reduce browser cross-origin exposure.
+- **CORS is restricted** to the local dashboard origin (localhost + the frontend port you're running) to reduce browser cross-origin exposure.
 - **Finnhub API key is never sent to the browser.** All Finnhub requests (REST quotes and WebSocket streams) are proxied through the backend.
 - **All network traffic goes directly to Composer's API** (`api.composer.trade`) and market-data providers used by enabled features: Finnhub (`finnhub.io`), Stooq (`stooq.com`) for historical benchmark candles, and optionally Polygon (`polygon.io`) for split-event fallback.
 - **No telemetry or analytics.** Nothing is phoned home.

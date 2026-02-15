@@ -232,6 +232,9 @@ graph TD
 - `POST /api/screenshot`
 - `GET /api/benchmark-history`
 
+Notes:
+- `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning.
+
 ### Symphony routes
 
 - `GET /api/symphonies`
@@ -277,6 +280,9 @@ Preferred:
 - `PD_DATABASE_URL`
 - `PD_LOCAL_AUTH_TOKEN`
 - `PD_LOCAL_WRITE_BASE_DIR`
+
+Optional:
+- `PD_ALLOWED_ORIGINS` (comma-separated strict allowlist for browser Origin/CORS; loopback-only origins are honored)
 
 Legacy aliases:
 - removed after TQ-1 cleanup; do not use or reintroduce.

@@ -1,9 +1,19 @@
 """US equity market hours utilities (Eastern Time)."""
 
 from datetime import datetime, date, timedelta, time
-import zoneinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-ET = zoneinfo.ZoneInfo("America/New_York")
+try:
+    ET = ZoneInfo("America/New_York")
+except ZoneInfoNotFoundError as e:
+    # Windows may not have IANA timezone data available by default.
+    # The 'tzdata' PyPI package provides it and is included in requirements.txt,
+    # but keep a clear error here in case a user is running an incomplete env.
+    raise RuntimeError(
+        "Timezone data not found for 'America/New_York'. "
+        "On Windows, ensure the 'tzdata' package is installed "
+        "(python -m pip install tzdata), then retry."
+    ) from e
 
 MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)

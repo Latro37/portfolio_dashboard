@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 # Characters not allowed in file/folder names (Windows + Unix)
 _UNSAFE_CHARS = re.compile(r'[\\/:*?"<>|]+')
 _DRAFTS_STATE_ACCOUNT_PREFIX = "__DRAFTS__:"
+# Draft exports can be very slow and are currently disabled pending a better UX flow.
+_EXPORT_DRAFTS_ENABLED = False
 
 
 def _sanitize_name(name: str) -> str:
@@ -102,9 +104,12 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         logger.warning("Symphony export skipped: %s", exc)
         return
 
-    # Export should include invested symphonies *and* the user's drafts.
-    # Drafts are user-scoped; during sync we run once per account, so draft export
-    # state must be shared across all sub-accounts under the same credential.
+    export_drafts = _EXPORT_DRAFTS_ENABLED
+    if not export_drafts:
+        logger.info("Draft symphony export is temporarily disabled (skipping drafts for %s)", account_id)
+
+    # Export includes invested symphonies.
+    # Draft export logic is retained but currently disabled (_EXPORT_DRAFTS_ENABLED=False).
     invested_targets: Dict[str, str] = {}
     draft_targets: Dict[str, str] = {}
 
@@ -118,24 +123,25 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
     except Exception as e:
         logger.warning("Failed to fetch symphony stats for export (%s): %s", account_id, e)
 
-    try:
-        drafts = client.get_drafts() or []
-        for s in drafts:
-            sym_id = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
-            sym_name = s.get("name", "Unknown")
-            if sym_id and sym_id not in invested_targets and sym_id not in draft_targets:
-                draft_targets[sym_id] = sym_name
-    except Exception as e:
-        logger.warning("Failed to fetch drafts for export (%s): %s", account_id, e)
-
     # Drafts are credential-scoped, not account-scoped.
     drafts_state_account_id = account_id
-    try:
-        acct = db.query(Account).filter_by(id=account_id).first()
-        if acct and acct.credential_name:
-            drafts_state_account_id = f"{_DRAFTS_STATE_ACCOUNT_PREFIX}{acct.credential_name}"
-    except Exception as exc:
-        logger.warning("Failed to resolve credential scope for drafts export (%s): %s", account_id, exc)
+    if export_drafts:
+        try:
+            drafts = client.get_drafts() or []
+            for s in drafts:
+                sym_id = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
+                sym_name = s.get("name", "Unknown")
+                if sym_id and sym_id not in invested_targets and sym_id not in draft_targets:
+                    draft_targets[sym_id] = sym_name
+        except Exception as e:
+            logger.warning("Failed to fetch drafts for export (%s): %s", account_id, e)
+
+        try:
+            acct = db.query(Account).filter_by(id=account_id).first()
+            if acct and acct.credential_name:
+                drafts_state_account_id = f"{_DRAFTS_STATE_ACCOUNT_PREFIX}{acct.credential_name}"
+        except Exception as exc:
+            logger.warning("Failed to resolve credential scope for drafts export (%s): %s", account_id, exc)
 
     exported = 0
 
@@ -194,8 +200,9 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
     for sym_id, sym_name in invested_targets.items():
         _export_one(sym_id, sym_name, state_account_id=account_id)
 
-    for sym_id, sym_name in draft_targets.items():
-        _export_one(sym_id, sym_name, state_account_id=drafts_state_account_id)
+    if export_drafts:
+        for sym_id, sym_name in draft_targets.items():
+            _export_one(sym_id, sym_name, state_account_id=drafts_state_account_id)
 
     logger.info(
         "Symphony export for %s: %d exported, %d total",

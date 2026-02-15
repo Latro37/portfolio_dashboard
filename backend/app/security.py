@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import secrets
+from urllib.parse import urlparse
 from typing import Optional
 
 from fastapi import HTTPException, Request, WebSocket, WebSocketException, status
@@ -12,10 +13,11 @@ from fastapi import HTTPException, Request, WebSocket, WebSocketException, statu
 from app.config import get_settings, is_test_mode
 
 LOCAL_AUTH_HEADER = "x-pd-local-token"
-ALLOWED_ORIGINS = {
+_DEFAULT_ALLOWED_ORIGINS = {
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 }
+_ALLOWED_ORIGINS_ENV = "PD_ALLOWED_ORIGINS"
 _DEFAULT_ALLOWED_HOSTS = {
     "localhost",
     "127.0.0.1",
@@ -43,6 +45,46 @@ def get_local_auth_token() -> str:
         return settings_token
 
     return _runtime_local_auth_token
+
+
+def _normalize_origin(value: str) -> str:
+    return value.strip().rstrip("/")
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def get_allowed_origins() -> set[str]:
+    """Return the allowed browser Origins for localhost requests.
+
+    Default is fixed to the dev frontend on port 3000.
+    For port overrides, set PD_ALLOWED_ORIGINS to a comma-separated list.
+    Safety: only loopback origins are honored (localhost/127.0.0.1/::1).
+    """
+    raw = os.environ.get(_ALLOWED_ORIGINS_ENV, "").strip()
+    if not raw:
+        return set(_DEFAULT_ALLOWED_ORIGINS)
+
+    allowed: set[str] = set()
+    for part in raw.split(","):
+        normalized = _normalize_origin(part)
+        if not normalized:
+            continue
+        if _is_loopback_origin(normalized):
+            allowed.add(normalized)
+    return allowed
 
 
 def _normalize_host(host_header: str) -> str:
@@ -115,7 +157,7 @@ def _enforce_origin(
             raise HTTPException(403, "Origin header required")
         return
 
-    if normalized not in ALLOWED_ORIGINS:
+    if normalized not in get_allowed_origins():
         if websocket:
             raise WebSocketException(
                 code=status.WS_1008_POLICY_VIOLATION,

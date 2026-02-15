@@ -3,7 +3,7 @@
 Kills the backend (uvicorn/python on port 8000), frontend (node/next on port 3000),
 and any zombie child processes left behind.
 
-Usage: python stop.py [--help]
+Usage: python stop.py [--backend-port 8000] [--frontend-port 3000]
 """
 
 import argparse
@@ -148,24 +148,27 @@ def kill_orphan_node_next():
     return killed
 
 
-def main():
+def main(args: argparse.Namespace):
     print("=" * 50)
     print("  Stopping Portfolio Dashboard")
     print("=" * 50)
     total = 0
 
     # 1. Kill backend (port 8000)
-    print("\nBackend (port 8000):")
-    count = kill_by_name_and_port("python", 8000)
+    backend_port = int(args.backend_port)
+    frontend_port = int(args.frontend_port)
+
+    print(f"\nBackend (port {backend_port}):")
+    count = kill_by_name_and_port("python", backend_port)
     if not count:
-        print("  No processes found on port 8000")
+        print(f"  No processes found on port {backend_port}")
     total += count
 
     # 2. Kill frontend (port 3000)
-    print("\nFrontend (port 3000):")
-    count = kill_by_name_and_port("node", 3000)
+    print(f"\nFrontend (port {frontend_port}):")
+    count = kill_by_name_and_port("node", frontend_port)
     if not count:
-        print("  No processes found on port 3000")
+        print(f"  No processes found on port {frontend_port}")
     total += count
 
     # 3. Kill orphan uvicorn processes
@@ -183,7 +186,7 @@ def main():
     total += count
 
     # 5. Final check — anything still on our ports?
-    remaining = get_pids_on_port(8000) + get_pids_on_port(3000)
+    remaining = get_pids_on_port(backend_port) + get_pids_on_port(frontend_port)
     if remaining:
         print(f"\nForce-killing {len(remaining)} remaining process(es)...")
         for pid in set(remaining):
@@ -198,9 +201,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Stop Portfolio Dashboard backend/frontend and orphan worker processes."
     )
+    parser.add_argument("--backend-port", type=int, default=8000, help="Backend port (default: 8000)")
+    parser.add_argument("--frontend-port", type=int, default=3000, help="Frontend port (default: 3000)")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    parse_args()
-    main()
+    args = parse_args()
+    main(args)

@@ -16,6 +16,7 @@ import { DashboardErrorScreen } from "@/features/dashboard/components/DashboardE
 import { DashboardLiveToggleButton } from "@/features/dashboard/components/DashboardLiveToggleButton";
 import { DashboardLoadingScreen } from "@/features/dashboard/components/DashboardLoadingScreen";
 import { DashboardSnapshotRenderer } from "@/features/dashboard/components/DashboardSnapshotRenderer";
+import { DashboardSetupScreen } from "@/features/dashboard/components/DashboardSetupScreen";
 import { useDashboardAccountScope } from "@/features/dashboard/hooks/useDashboardAccountScope";
 import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
 import { useDashboardBootstrap } from "@/features/dashboard/hooks/useDashboardBootstrap";
@@ -41,6 +42,10 @@ export default function DashboardPageContainer() {
   const [showSettings, setShowSettings] = useState(false);
   const {
     accounts,
+    bootstrapLoading,
+    bootstrapError,
+    composerConfigOk,
+    composerConfigError,
     selectedCredential,
     selectedSubAccount,
     finnhubConfigured,
@@ -161,6 +166,43 @@ export default function DashboardPageContainer() {
 
   const { todayDollarChange, todayPctChange, totalValue: symphonyTotalValue } =
     useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
+
+  if (bootstrapLoading) {
+    return <DashboardLoadingScreen />;
+  }
+
+  if (bootstrapError) {
+    return (
+      <DashboardErrorScreen
+        error={bootstrapError}
+        isTestMode={isTestMode}
+        syncing={syncing}
+        onSync={handleSync}
+      />
+    );
+  }
+
+  if (accounts.length === 0) {
+    if (isTestMode || !composerConfigOk) {
+      return (
+        <DashboardSetupScreen
+          isTestMode={isTestMode}
+          composerConfigError={composerConfigError}
+        />
+      );
+    }
+
+    return (
+      <DashboardErrorScreen
+        error={
+          "No accounts were discovered. Your Composer credentials look valid, but the backend could not discover accounts on startup (Composer API call may have failed). Check the backend logs and retry."
+        }
+        isTestMode={isTestMode}
+        syncing={syncing}
+        onSync={handleSync}
+      />
+    );
+  }
 
   if (loading && !summary) {
     return <DashboardLoadingScreen />;

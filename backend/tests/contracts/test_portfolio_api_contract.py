@@ -119,9 +119,13 @@ def test_config_contract(client):
         "symphony_export",
         "screenshot",
         "test_mode",
+        "composer_config_ok",
+        "composer_config_error",
     }
     assert payload["test_mode"] is True
     assert payload["local_auth_token"] == "contract-test-token"
+    assert payload["composer_config_ok"] is True
+    assert payload["composer_config_error"] is None
 
 
 def test_config_requires_origin_header(client):
