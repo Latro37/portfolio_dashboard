@@ -29,7 +29,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Full historical backfill** — On first sync, the app downloads your entire transaction history, holdings, deposits, fees, and dividends.
 - **Incremental updates** — After the initial sync, only new data is fetched. If the app hasn't run for days, it automatically fills in the gaps.
 - **20+ portfolio metrics** — Sharpe ratio, Sortino ratio, Calmar ratio, TWR, MWR, max drawdown, win rate, volatility, annualized return, and more. All computed live from your data.
-- **Performance chart** — Interactive chart with TWR, MWR, Portfolio Value, and Drawdown views. Adjustable time periods (1D–All) and custom date ranges.
+- **Performance chart** — Interactive chart with TWR, MWR, Portfolio Value, and Drawdown views. Adjustable time periods (1W–All) and custom date ranges.
 - **Live vs Backtest overlays** — Compare your live symphony results directly against the Composer backtest, charted side by side. Easily see any discrepancies.
 - **Benchmark overlays** — Compare your performance against SPY, QQQ, TQQQ, any ticker symbol, or other Composer symphonies. Up to 3 benchmarks at once.
 - **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. Includes invested symphonies plus your Composer watchlist and drafts.
@@ -64,7 +64,7 @@ Get up and running in under 5 minutes.
    Open `config.json` and replace the placeholder values:
    ```json
    {
-     "accounts": [
+     "composer_accounts": [
        {
          "name": "Primary",
          "api_key_id": "your-api-key-id",
@@ -122,7 +122,7 @@ This file tells the app which Composer accounts to connect to.
 2. Open `config.json` in any text editor and fill in your credentials:
    ```json
    {
-     "accounts": [
+     "composer_accounts": [
        {
          "name": "Primary",
          "api_key_id": "paste-your-api-key-id-here",
@@ -136,10 +136,10 @@ This file tells the app which Composer accounts to connect to.
    - **`api_key_id`** — The API Key ID from step 5 above.
    - **`api_secret`** — The API Secret from step 5 above.
 
-3. **Multiple accounts** — If you manage more than one Composer account, add another entry to the `accounts` array:
+3. **Multiple accounts** — If you manage more than one Composer account, add another entry to the `composer_accounts` array:
    ```json
    {
-     "accounts": [
+     "composer_accounts": [
        {
          "name": "Primary",
          "api_key_id": "primary-key-id",
@@ -164,7 +164,7 @@ To see live price changes next to each holding (e.g. "+$1.23 (+0.5%)"):
    ```json
    {
      "finnhub_api_key": "your-finnhub-key",
-     "accounts": [ ... ]
+     "composer_accounts": [ ... ]
    }
    ```
 
@@ -182,7 +182,7 @@ Split events are used to reconstruct historical holdings quantities accurately.
    {
      "finnhub_api_key": "your-finnhub-key",
      "polygon_api_key": "your-polygon-key",
-     "accounts": [ ... ]
+     "composer_accounts": [ ... ]
    }
    ```
 5. Restart the backend (or rerun `python start.py`) so the new key is loaded.
@@ -203,7 +203,7 @@ You can customize advanced settings by adding a `settings` block to your `config
     "local_auth_token": "set-a-long-random-local-token",
     "local_write_base_dir": "data/local_storage"
   },
-  "accounts": [ ... ]
+  "composer_accounts": [ ... ]
 }
 ```
 
@@ -312,7 +312,7 @@ The main chart supports four view modes via toggle buttons:
 - **Portfolio Value** — Raw dollar value over time (includes a deposits line for reference)
 - **Drawdown** — How far below the peak your portfolio has been at each point
 
-**Time periods:** 1D, 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
+**Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
 
 ### Benchmark Overlays
 
@@ -400,6 +400,8 @@ Click the **gear icon** (⚙) in the dashboard header to open Settings.
 
 Enter a local folder path to automatically save your symphony definitions as JSON files. Exports are saved as `<SymphonyName>/<SymphonyName>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
 
+**Default export folder:** `./symphony_exports` (project root).
+
 The configured folder can be any local path. Relative paths resolve under `settings.local_write_base_dir` (default: `data/local_storage`).
 
 This is useful as a backup of your symphony logic in case Composer should ever go dark, and for tracking changes over time.
@@ -418,6 +420,8 @@ Configure an automatic portfolio screenshot captured after market close each day
 | **Hide portfolio value** | Omit the dollar amount from the snapshot (for sharing) |
 | **Benchmark overlays** | Up to 3 ticker symbols (e.g. SPY, QQQ) shown as dashed lines on the chart. Only applies to TWR, MWR, and Drawdown modes. |
 | **Metrics** | Choose which metric cards appear in the snapshot. Metrics appear in the order in which they are selected. |
+
+**Default snapshot folder:** `./daily_snapshots` (project root).
 
 Snapshots are saved as `Snapshot_YYYY-MM-DD.png` (1200x900 resolution). Relative save paths resolve under `settings.local_write_base_dir` by default.
 
@@ -449,7 +453,7 @@ Portfolio-level data (values, transactions, cash flows, holdings) is fully backf
 Yes! Roth IRA contributions are not captured by the API, so you can add them manually. Go to the **Non-Trade Activity** tab and use the manual entry form to add deposits or withdrawals with a date and amount. The next sync will recalculate all metrics with the corrected deposit totals.
 
 ### How do I add another Composer account?
-Add another entry to the `accounts` array in `config.json` and restart the app. See [Multiple accounts](#configuring-configjson).
+Add another entry to the `composer_accounts` array in `config.json` and restart the app. See [Multiple accounts](#configuring-configjson).
 
 ### Where is my data stored?
 Everything is in a local SQLite database at `backend/data/portfolio.db`. No data leaves your machine.

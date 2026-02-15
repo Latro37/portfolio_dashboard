@@ -738,7 +738,7 @@ The application has four chart modes, available in both the account-level dashbo
 - **Reference line:** Dashed line at 0%
 
 **Controls:**
-- **Period pills:** 1D, 1W, 1M, 3M, YTD, 1Y, ALL — filter the data to a time window
+- **Period pills:** 1W, 1M, 3M, YTD, 1Y, ALL — filter the data to a time window
 - **Date pickers:** Custom start/end date range
 - **Chart mode toggle:** Switches between the four views above
 

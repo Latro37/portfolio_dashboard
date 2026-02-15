@@ -10,7 +10,7 @@
   "symphony_export": {
     "local_path": ""
   },
-  "screenshot": {
+  "daily_snapshot": {
     "enabled": false,
     "local_path": "",
     "account_id": "",
@@ -21,7 +21,7 @@
     "metrics": ["twr", "sharpe", "max_drawdown", "volatility", "cumulative_return_pct", "calmar", "win_rate", "best_day"],
     "benchmarks": []
   },
-  "accounts": [
+  "composer_accounts": [
     {
       "name": "Primary",
       "api_key_id": "your-api-key-id",

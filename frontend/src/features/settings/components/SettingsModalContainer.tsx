@@ -101,7 +101,7 @@ export function SettingsModal({ onClose }: Props) {
 
             {/* Enable toggle */}
             <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-sm text-foreground/80">Enable daily screenshot</span>
+              <span className="text-sm text-foreground/80">Enable daily snapshot</span>
               <button
                 type="button"
                 role="switch"

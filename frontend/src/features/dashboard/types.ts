@@ -1,7 +1,7 @@
 import type { SnapshotBenchmark } from "@/features/dashboard/snapshot/types";
 import type { PerformancePoint, Summary } from "@/lib/api";
 
-export type DashboardPeriod = "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
+export type DashboardPeriod = "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
 
 export type DashboardPeriodReturns = {
   "1W"?: number;
