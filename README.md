@@ -380,6 +380,11 @@ python -m venv .venv
 # - Windows (PowerShell): .\.venv\Scripts\Activate.ps1
 # - Windows (cmd.exe):    .\.venv\Scripts\activate.bat
 # - macOS/Linux:          source .venv/bin/activate
+#
+# Exit the venv later:
+# - Windows (PowerShell): deactivate
+# - Windows (cmd.exe):    deactivate
+# - macOS/Linux:          deactivate
 
 python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --port 8000
