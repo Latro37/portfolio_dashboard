@@ -369,6 +369,7 @@ python start.py --no-venv
 ```
 
 **Option B: Manual start** (two terminals)
+
 Backend (Terminal 1):
 ```bash
 cd backend
@@ -381,22 +382,24 @@ python -m venv .venv
 # - Windows (cmd.exe):    .\.venv\Scripts\activate.bat
 # - macOS/Linux:          source .venv/bin/activate
 #
-# Exit the venv later:
+# To exit the venv later:
 # - Windows (PowerShell): deactivate
 # - Windows (cmd.exe):    deactivate
 # - macOS/Linux:          deactivate
 
 python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --port 8000
-```
+# optionally, use a custom port e.g. --port 8080
 
-Frontend (Terminal 2):
-```bash
+# Terminal 2 — Frontend
 cd frontend
 npm install
 npm run dev
+# optionally, use a custom port e.g. npm run dev -- -p 3010 (then restart the backend with PD_ALLOWED_ORIGINS for that port)
 ```
-Then open **http://localhost:3000** in your browser.
+Then open **http://localhost:3000** (or your chosen frontend port) in your browser.
+
+If you use a non-default frontend port, either start via `python start.py --frontend-port <port>` (recommended) or set `PD_ALLOWED_ORIGINS` when running the backend to match that port (example: `http://localhost:<port>,http://127.0.0.1:<port>`).
 
 ### Stopping the App
 
