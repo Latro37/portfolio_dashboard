@@ -13,6 +13,7 @@ build/
 *.db
 
 # Data
+/data
 backend/data/
 
 # Node

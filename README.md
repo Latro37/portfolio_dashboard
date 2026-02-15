@@ -15,8 +15,11 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 7. [Settings & Configuration](#settings--configuration)
 8. [Troubleshooting & FAQ](#troubleshooting--faq)
 9. [Security & Privacy](#security--privacy)
-10. [Documentation](#documentation)
-11. [License](#license)
+10. [Legal & Use Disclaimer](#legal--use-disclaimer)
+11. [Third-Party Services](#third-party-services)
+12. [Security Reporting](#security-reporting)
+13. [Documentation](#documentation)
+14. [License](#license)
 
 ---
 
@@ -467,6 +470,37 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 
 ---
 
+## Legal & Use Disclaimer
+
+- This project is provided for educational and informational purposes only.
+- Nothing in this repository is financial, investment, tax, legal, or accounting advice.
+- You are solely responsible for your trading, investment, and compliance decisions.
+- This software is provided "AS IS", without warranties of any kind.
+- See [DISCLAIMER.md](DISCLAIMER.md) for full terms.
+
+---
+
+## Third-Party Services
+
+This project integrates with third-party services and data providers. You are responsible for complying with their terms and policies when you use this code.
+
+- Composer: [composer.trade](https://www.composer.trade/)
+- Finnhub: [finnhub.io](https://finnhub.io/)
+- Polygon: [polygon.io](https://polygon.io/)
+- Stooq: [stooq.com](https://stooq.com/)
+
+This project is an independent community project and is not affiliated with, endorsed by, or sponsored by these providers.
+
+See [THIRD_PARTY_SERVICES.md](THIRD_PARTY_SERVICES.md) for details.
+
+---
+
+## Security Reporting
+
+If you find a security issue, see [SECURITY.md](SECURITY.md) for reporting guidance.
+
+---
+
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** - project structure, data flow, boundaries, API surface
@@ -476,11 +510,14 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 - **[Contributing](docs/CONTRIBUTING.md)** - coding boundaries, workflow, and commit conventions
 - **[Operations Runbook](docs/OPERATIONS_RUNBOOK.md)** - start/stop, troubleshooting, and recovery
 - **[Agent Guide](AGENTS.md)** - mandatory operating rules for future agents
+- **[Legal Disclaimer](DISCLAIMER.md)** - non-advice notice, no warranty, and limitation of liability
+- **[Third-Party Services](THIRD_PARTY_SERVICES.md)** - provider terms responsibility and affiliation statement
+- **[Security Policy](SECURITY.md)** - vulnerability reporting guidance
 
 ---
 
 ## License
 
-MIT
+Licensed under the MIT License. See [LICENSE](LICENSE).
 
 
