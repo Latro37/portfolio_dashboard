@@ -115,7 +115,14 @@ export async function invalidateAfterManualCashFlow(
 ) {
   await invalidateFamilies(
     queryClient,
-    ["summary", "performance", "cash-flows", "transactions", "sync-status"],
+    [
+      "summary",
+      "performance",
+      "cash-flows",
+      "transactions",
+      "sync-status",
+      "benchmark-history",
+    ],
     accountId,
   );
 }
