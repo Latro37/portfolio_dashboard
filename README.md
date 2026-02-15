@@ -8,10 +8,10 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 
 1. [Features](#features)
 2. [Show Me the Money (Quick Setup)](#show-me-the-money-quick-setup)
-3. [Detailed Setup](#detailed-setup)
-4. [Getting Started](#getting-started)
-5. [Dashboard Guide](#dashboard-guide)
-6. [Symphony Analytics](#symphony-analytics)
+3. [Getting Started](#getting-started)
+4. [Dashboard Guide](#dashboard-guide)
+5. [Symphony Analytics](#symphony-analytics)
+6. [Detailed Setup](#detailed-setup)
 7. [Settings & Configuration](#settings--configuration)
 8. [Troubleshooting & FAQ](#troubleshooting--faq)
 9. [Security & Privacy](#security--privacy)
@@ -51,7 +51,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 
 Get up and running in under 5 minutes.
 
-**Prerequisites:** Python 3.10+ and Node.js 18+ installed on your machine.
+**Prerequisites:** Python 3.10+ and Node.js 18.18+ (or 20+) installed on your machine.
 
 **Steps:**
 
@@ -86,6 +86,137 @@ That's it! You're ready to go with the basic features. If you want to take advan
 
 ---
 
+## Getting Started
+
+### First Sync
+
+When you click **Update** for the first time, the app downloads your complete Composer history:
+
+- **Transactions** — Every buy and sell order
+- **Portfolio values** — Daily portfolio value snapshots
+- **Cash flows** — Deposits, withdrawals, fees (CAT/TAF), and dividends
+- **Holdings** — Current positions and historical position reconstruction
+- **Symphony data** — Per-symphony daily values and metadata
+
+This typically takes **30–60 seconds** depending on your account age and trading frequency.
+
+### After the First Sync
+
+Subsequent syncs are **incremental** — only new data since the last sync is fetched. These typically complete in under 10 seconds.
+
+The app also runs an **automatic sync after market close** (4:00 PM ET) if you leave the page open. A `localStorage` flag prevents duplicate syncs.
+
+If the app hasn't been opened for several days, the next sync automatically **fills in all missing portfolio days** — no portfolio data is lost from downtime. Note that per-symphony daily values are only recorded for the current day during incremental syncs, so symphony-level charts may have gaps for days the app wasn't running.
+
+---
+
+## Dashboard Guide
+
+### Portfolio Header
+
+The top section shows:
+- **Portfolio Value** — Your current total portfolio value in dollars
+- **Total return** — Dollar and percentage gain/loss since inception
+- **Today's change** — Dollar and percentage change for the current day
+- **Live / Update toggle** — "Live" enables real-time intraday value updates during market hours. "Update" triggers a data sync.
+- **Camera button** (📷) — Manually capture a portfolio snapshot image
+- **Gear button** (⚙) — Open settings
+
+### Account Switcher
+
+If you have multiple accounts configured, a dropdown appears in the header:
+- **All Sub-Accounts** — Aggregates all accounts into one combined view
+- **Individual accounts** — Select a specific sub-account to view it alone
+- **Credential groups** — If one API key has multiple sub-accounts (e.g. Individual + IRA), you can view them grouped
+
+### Performance Chart
+
+The main chart supports four view modes via toggle buttons:
+- **TWR** (Time-Weighted Return) — Your return percentage, immune to deposit/withdrawal timing
+- **MWR** (Money-Weighted Return) — Your return accounting for the timing of cash flows
+- **Portfolio Value** — Raw dollar value over time (includes a deposits line for reference)
+- **Drawdown** — How far below the peak your portfolio has been at each point
+
+**Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
+
+### Benchmark Overlays
+
+Compare your performance against up to 3 benchmarks simultaneously:
+
+- **Predefined tickers** — Click **SPY**, **QQQ**, or **TQQQ** to toggle them on/off
+- **Custom ticker** — Click the **+** button, type any valid ticker symbol (e.g. `AAPL`, `BTC-USD`), and press Go
+- **Symphony by name** — Click **+**, start typing a symphony name (2+ characters), and select from the dropdown. Results come from invested symphonies plus your watchlist and drafts.
+- **Symphony by URL/ID** — Paste a Composer symphony URL (e.g. `https://app.composer.trade/symphony/abc123/details`) or just the ID
+
+Benchmark lines are color-coded (orange, white, pink). Click an active benchmark button to remove it.
+
+### Metric Cards
+
+Below the chart, key metrics are displayed as tiles:
+- **Annualized Return** — Your projected yearly return based on cumulative performance
+- **TWR** — Time-weighted return for the selected period
+- **Win Rate** — Percentage of days with positive returns
+- **Sortino** — Risk-adjusted return (penalizes only downside volatility)
+- **Volatility** — Annualized standard deviation of daily returns
+- **Best Day / Worst Day** — Largest single-day gain and loss
+
+Hover over the ⓘ icon on any metric for a brief explanation. Click "Metrics Guide" to view detailed formulas for every metric.
+
+### Holdings
+
+- **Holdings Allocation** (donut chart) — Visual breakdown of your current positions by percentage
+- **Holdings list** — Table with ticker, shares, market value, allocation %, and real-time price badges (if Finnhub is configured). Navigate to past dates to see historical positions.
+
+### Detail Tabs
+
+Three tabs below the main dashboard:
+
+- **All Metrics** — Complete list of 20+ computed metrics, grouped by category
+- **Transactions** — Paginated table of every trade (filterable by symbol)
+- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes a form to **manually add** deposits or withdrawals not captured by the API.
+
+### Symphony Cards
+
+A grid of cards showing each invested symphony with:
+- Current value and allocation percentage
+- Today's change
+- Click any card to open the **Symphony Detail** modal
+
+### Trade Preview
+
+Shows pending rebalance trades that will execute at the next scheduled rebalance. Useful for previewing what Composer plans to do before it happens.
+
+---
+
+## Symphony Analytics
+
+Click any symphony card to open its detail view. The modal has two main tabs:
+
+### Live Tab
+
+Shows your **actual live performance** for this symphony:
+- **Performance chart** — Same TWR/MWR/Value/Drawdown modes as the main dashboard, scoped to this symphony
+- **Drawdown chart** — Separate drawdown visualization
+- **Metrics** — Symphony-specific metrics (return, Sharpe, Sortino, max drawdown, etc.)
+- **Current holdings** — What this symphony currently holds
+
+### Backtest Tab
+
+Shows **backtested historical performance** of the symphony's logic:
+- **Backtest chart** — How the symphony would have performed historically
+- **Benchmark overlays** — Same benchmark system as the main chart (SPY/QQQ/TQQQ, custom tickers, other symphonies)
+- **Backtest metrics** — Key stats from the backtest (return, Sharpe, max drawdown, etc.)
+
+**Cache behavior:** Backtest results are cached locally for 24 hours. If you edit the symphony in Composer, the app detects the change and automatically re-fetches a fresh backtest.
+
+**Backtest friction:** This app uses slightly more conservative slippage and spread assumptions than Composer's defaults (15 bps total vs 1 bps). This means backtest returns will be slightly lower than what Composer shows, but closer to real-world execution.
+
+### Trade Preview
+
+At the bottom of the modal, you can see pending rebalance trades for this specific symphony.
+
+---
+
 ## Detailed Setup
 
 A more thorough walkthrough for users who want to take advantage of all features and/or additional guidance.
@@ -95,7 +226,7 @@ A more thorough walkthrough for users who want to take advantage of all features
 | Requirement | How to check | Where to get it |
 |-------------|-------------|-----------------|
 | Python 3.10+ | `python --version` | [python.org](https://www.python.org/downloads/) |
-| Node.js 18+ | `node --version` | [nodejs.org](https://nodejs.org/) |
+| Node.js 18.18+ (or 20+) | `node --version` | [nodejs.org](https://nodejs.org/) |
 | Composer account | You have one if you trade on Composer | [composer.trade](https://www.composer.trade/) |
 
 ### Getting Your Composer API Credentials
@@ -258,137 +389,6 @@ This cleanly shuts down both the backend and frontend and kills any zombie proce
 4. After 30–60 seconds, your portfolio value, chart, metrics, and holdings appear.
 
 If something goes wrong, check the [Troubleshooting](#troubleshooting--faq) section.
-
----
-
-## Getting Started
-
-### First Sync
-
-When you click **Update** for the first time, the app downloads your complete Composer history:
-
-- **Transactions** — Every buy and sell order
-- **Portfolio values** — Daily portfolio value snapshots
-- **Cash flows** — Deposits, withdrawals, fees (CAT/TAF), and dividends
-- **Holdings** — Current positions and historical position reconstruction
-- **Symphony data** — Per-symphony daily values and metadata
-
-This typically takes **30–60 seconds** depending on your account age and trading frequency.
-
-### After the First Sync
-
-Subsequent syncs are **incremental** — only new data since the last sync is fetched. These typically complete in under 10 seconds.
-
-The app also runs an **automatic sync after market close** (4:00 PM ET) if you leave the page open. A `localStorage` flag prevents duplicate syncs.
-
-If the app hasn't been opened for several days, the next sync automatically **fills in all missing portfolio days** — no portfolio data is lost from downtime. Note that per-symphony daily values are only recorded for the current day during incremental syncs, so symphony-level charts may have gaps for days the app wasn't running.
-
----
-
-## Dashboard Guide
-
-### Portfolio Header
-
-The top section shows:
-- **Portfolio Value** — Your current total portfolio value in dollars
-- **Total return** — Dollar and percentage gain/loss since inception
-- **Today's change** — Dollar and percentage change for the current day
-- **Live / Update toggle** — "Live" enables real-time intraday value updates during market hours. "Update" triggers a data sync.
-- **Camera button** (📷) — Manually capture a portfolio snapshot image
-- **Gear button** (⚙) — Open settings
-
-### Account Switcher
-
-If you have multiple accounts configured, a dropdown appears in the header:
-- **All Sub-Accounts** — Aggregates all accounts into one combined view
-- **Individual accounts** — Select a specific sub-account to view it alone
-- **Credential groups** — If one API key has multiple sub-accounts (e.g. Individual + IRA), you can view them grouped
-
-### Performance Chart
-
-The main chart supports four view modes via toggle buttons:
-- **TWR** (Time-Weighted Return) — Your return percentage, immune to deposit/withdrawal timing
-- **MWR** (Money-Weighted Return) — Your return accounting for the timing of cash flows
-- **Portfolio Value** — Raw dollar value over time (includes a deposits line for reference)
-- **Drawdown** — How far below the peak your portfolio has been at each point
-
-**Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
-
-### Benchmark Overlays
-
-Compare your performance against up to 3 benchmarks simultaneously:
-
-- **Predefined tickers** — Click **SPY**, **QQQ**, or **TQQQ** to toggle them on/off
-- **Custom ticker** — Click the **+** button, type any valid ticker symbol (e.g. `AAPL`, `BTC-USD`), and press Go
-- **Symphony by name** — Click **+**, start typing a symphony name (2+ characters), and select from the dropdown. Results come from invested symphonies plus your watchlist and drafts.
-- **Symphony by URL/ID** — Paste a Composer symphony URL (e.g. `https://app.composer.trade/symphony/abc123/details`) or just the ID
-
-Benchmark lines are color-coded (orange, white, pink). Click an active benchmark button to remove it.
-
-### Metric Cards
-
-Below the chart, key metrics are displayed as tiles:
-- **Annualized Return** — Your projected yearly return based on cumulative performance
-- **TWR** — Time-weighted return for the selected period
-- **Win Rate** — Percentage of days with positive returns
-- **Sortino** — Risk-adjusted return (penalizes only downside volatility)
-- **Volatility** — Annualized standard deviation of daily returns
-- **Best Day / Worst Day** — Largest single-day gain and loss
-
-Hover over the ⓘ icon on any metric for a brief explanation. Click "Metrics Guide" to view detailed formulas for every metric.
-
-### Holdings
-
-- **Holdings Allocation** (donut chart) — Visual breakdown of your current positions by percentage
-- **Holdings list** — Table with ticker, shares, market value, allocation %, and real-time price badges (if Finnhub is configured). Navigate to past dates to see historical positions.
-
-### Detail Tabs
-
-Three tabs below the main dashboard:
-
-- **All Metrics** — Complete list of 20+ computed metrics, grouped by category
-- **Transactions** — Paginated table of every trade (filterable by symbol)
-- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes a form to **manually add** deposits or withdrawals not captured by the API.
-
-### Symphony Cards
-
-A grid of cards showing each invested symphony with:
-- Current value and allocation percentage
-- Today's change
-- Click any card to open the **Symphony Detail** modal
-
-### Trade Preview
-
-Shows pending rebalance trades that will execute at the next scheduled rebalance. Useful for previewing what Composer plans to do before it happens.
-
----
-
-## Symphony Analytics
-
-Click any symphony card to open its detail view. The modal has two main tabs:
-
-### Live Tab
-
-Shows your **actual live performance** for this symphony:
-- **Performance chart** — Same TWR/MWR/Value/Drawdown modes as the main dashboard, scoped to this symphony
-- **Drawdown chart** — Separate drawdown visualization
-- **Metrics** — Symphony-specific metrics (return, Sharpe, Sortino, max drawdown, etc.)
-- **Current holdings** — What this symphony currently holds
-
-### Backtest Tab
-
-Shows **backtested historical performance** of the symphony's logic:
-- **Backtest chart** — How the symphony would have performed historically
-- **Benchmark overlays** — Same benchmark system as the main chart (SPY/QQQ/TQQQ, custom tickers, other symphonies)
-- **Backtest metrics** — Key stats from the backtest (return, Sharpe, max drawdown, etc.)
-
-**Cache behavior:** Backtest results are cached locally for 24 hours. If you edit the symphony in Composer, the app detects the change and automatically re-fetches a fresh backtest.
-
-**Backtest friction:** This app uses slightly more conservative slippage and spread assumptions than Composer's defaults (15 bps total vs 1 bps). This means backtest returns will be slightly lower than what Composer shows, but closer to real-world execution.
-
-### Trade Preview
-
-At the bottom of the modal, you can see pending rebalance trades for this specific symphony.
 
 ---
 
