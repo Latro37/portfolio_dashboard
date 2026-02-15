@@ -38,9 +38,7 @@ Preferred env vars:
 - `PD_TEST_MODE=1`
 - `PD_DATABASE_URL=sqlite:///data/portfolio_test.db`
 
-Legacy aliases still supported temporarily:
-- `CPV_TEST_MODE`
-- `CPV_DATABASE_URL`
+Legacy env aliases are removed and unsupported.
 
 Behavior:
 - Test mode exposes only `__TEST__` accounts.

@@ -35,7 +35,6 @@ def _acct(aid: str, cred: str, display: str) -> Account:
 
 def test_resolve_account_ids_normal_mode(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PD_TEST_MODE", raising=False)
-    monkeypatch.delenv("CPV_TEST_MODE", raising=False)
     db = _build_session(
         [
             _acct("real-1", "Primary", "Primary: Main"),
@@ -72,7 +71,6 @@ def test_resolve_account_ids_test_mode(monkeypatch: pytest.MonkeyPatch):
 
 def test_resolve_account_ids_rejects_test_in_normal_mode(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PD_TEST_MODE", raising=False)
-    monkeypatch.delenv("CPV_TEST_MODE", raising=False)
     db = _build_session([_acct("test-1", "__TEST__", "Test: Main")])
     try:
         with pytest.raises(HTTPException, match="Test mode is not enabled"):
@@ -83,7 +81,6 @@ def test_resolve_account_ids_rejects_test_in_normal_mode(monkeypatch: pytest.Mon
 
 def test_resolve_account_ids_no_accounts_message(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("PD_TEST_MODE", raising=False)
-    monkeypatch.delenv("CPV_TEST_MODE", raising=False)
     db = _build_session([])
     try:
         with pytest.raises(HTTPException, match="No accounts discovered\\. Check config\\.json and restart\\."):
