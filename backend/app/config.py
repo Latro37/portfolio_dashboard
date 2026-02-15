@@ -179,7 +179,9 @@ def validate_composer_config() -> tuple[bool, Optional[str]]:
         if not isinstance(entry, dict):
             problems.append(f"composer_accounts[{idx}] must be an object with name/api_key_id/api_secret")
             continue
-        name = str(entry.get("name") or f"#{idx + 1}")
+        name_raw = entry.get("name")
+        name_str = name_raw.strip() if isinstance(name_raw, str) else ""
+        name = name_str or f"#{idx + 1}"
         key_id = entry.get("api_key_id")
         secret = entry.get("api_secret")
 
@@ -187,6 +189,8 @@ def validate_composer_config() -> tuple[bool, Optional[str]]:
         secret_str = secret.strip() if isinstance(secret, str) else ""
 
         missing_fields = []
+        if not name_str:
+            missing_fields.append("name missing")
         if not key_id_str:
             missing_fields.append("api_key_id missing")
         elif key_id_str.lower() == _PLACEHOLDER_API_KEY_ID:

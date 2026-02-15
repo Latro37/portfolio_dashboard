@@ -44,6 +44,7 @@ export default function DashboardPageContainer() {
     accounts,
     bootstrapLoading,
     bootstrapError,
+    composerConfigOk,
     composerConfigError,
     selectedCredential,
     selectedSubAccount,
@@ -182,10 +183,23 @@ export default function DashboardPageContainer() {
   }
 
   if (accounts.length === 0) {
+    if (isTestMode || !composerConfigOk) {
+      return (
+        <DashboardSetupScreen
+          isTestMode={isTestMode}
+          composerConfigError={composerConfigError}
+        />
+      );
+    }
+
     return (
-      <DashboardSetupScreen
+      <DashboardErrorScreen
+        error={
+          "No accounts were discovered. Your Composer credentials look valid, but the backend could not discover accounts on startup (Composer API call may have failed). Check the backend logs and retry."
+        }
         isTestMode={isTestMode}
-        composerConfigError={composerConfigError}
+        syncing={syncing}
+        onSync={handleSync}
       />
     );
   }
