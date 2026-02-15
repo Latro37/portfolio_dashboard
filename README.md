@@ -468,7 +468,6 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 - **[Test Matrix](docs/TEST_MATRIX.md)** - required validation gates by change scope
 - **[Contributing](docs/CONTRIBUTING.md)** - coding boundaries, workflow, and commit conventions
 - **[Operations Runbook](docs/OPERATIONS_RUNBOOK.md)** - start/stop, troubleshooting, and recovery
-- **[TanStack Query Blueprint](docs/TQ1_TANSTACK_QUERY_BLUEPRINT.md)** - deferred TQ-1 migration plan
 - **[Agent Guide](AGENTS.md)** - mandatory operating rules for future agents
 
 ---

@@ -9,6 +9,16 @@ description: Best-practice Git and GitHub workflow guidance for day-to-day softw
 
 Run a consistent workflow from issue pickup to merged pull request.
 Keep history readable, PRs reviewable, and significant decisions traceable.
+When running in full access mode, execute the full branch->edit->commit->push->PR loop autonomously and use PR review as the human oversight checkpoint.
+
+## Operating Mode
+
+- In full access mode, do not stop at local edits; carry work through push and PR creation.
+- Use sensible intervals for commit/push cadence:
+1. push at each validated logical checkpoint
+2. for longer work, avoid large local-only deltas; push coherent increments regularly
+- Use draft PRs for in-progress changes that benefit from early visibility.
+- Do not self-merge unless explicitly instructed and policy permits.
 
 ## Workflow
 
@@ -56,6 +66,7 @@ Use `references/commit-message-patterns.md` for message patterns.
 - Push branch: `git push -u origin <branch>`
 - Open PR in GitHub UI or CLI:
 `gh pr create --fill --base main --head <branch>`
+- For non-trivial work, open a draft PR early and update it as checkpoints land.
 - Draft PR body from `references/pr-description-template.md`.
 - Include in every PR:
 1. Problem statement and solution summary
@@ -89,6 +100,7 @@ Use `references/commit-message-patterns.md` for message patterns.
 
 - Merge only after approvals and required CI checks pass.
 - Prefer squash merge for iterative branch history unless repository policy says otherwise.
+- Treat PR review as the required human-in-the-loop approval gate.
 - After merge:
 1. `git switch main && git pull --ff-only`
 2. `git branch -d <branch>`

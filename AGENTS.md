@@ -46,6 +46,24 @@ Use `docs/TEST_MATRIX.md` as the source of truth. Minimum required gates:
 3. Use `python stop.py` before retries when ports are dirty.
 4. Use `scripts/run-local-tests.ps1 -Help` to inspect test runner options safely.
 
+## GitHub Execution Policy (Full Access Mode)
+
+When the agent has full repository access and push capability, run the end-to-end delivery loop without waiting for manual handoff:
+
+1. Create a dedicated branch from latest `master`/`main` for each logical change.
+2. Implement the smallest safe change and run required gates for scope.
+3. Commit and push in sensible intervals:
+- push after each validated logical checkpoint (not every small edit)
+- for longer tasks, avoid long-lived local-only work; push incremental, coherent commits regularly
+4. Open or update a PR as soon as the change is reviewable; use draft PR for in-progress work.
+5. Keep PR description current with:
+- what changed
+- test plan and results
+- significant decisions and rationale
+6. Continue iterating by pushing follow-up commits to the same PR until ready for human review.
+
+Human-in-the-loop control occurs at PR review and approval. Do not bypass required review or merge protections.
+
 ## Naming and Deprecation Policy
 
 - Prefer `PD_TEST_MODE` and `PD_DATABASE_URL`.
@@ -63,7 +81,10 @@ Do not add alternate server-state frameworks ad hoc; extend the existing query k
 
 1. Read this file and `docs/TEST_MATRIX.md`.
 2. Classify blast radius (backend, frontend, charting, router/schema, docs).
-3. Implement smallest safe change.
-4. Run required gates for that scope.
-5. Update docs if structure or boundaries changed.
-6. Report exactly what changed, which tests ran, and any residual risk.
+3. Create a dedicated branch for the change.
+4. Implement smallest safe change.
+5. Run required gates for that scope.
+6. Commit and push coherent checkpoints at sensible intervals.
+7. Open or update PR with tests and rationale.
+8. Update docs if structure or boundaries changed.
+9. Report exactly what changed, which tests ran, and any residual risk.
