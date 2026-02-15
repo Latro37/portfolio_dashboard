@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 # Characters not allowed in file/folder names (Windows + Unix)
 _UNSAFE_CHARS = re.compile(r'[\\/:*?"<>|]+')
 _DRAFTS_STATE_ACCOUNT_PREFIX = "__DRAFTS__:"
+# Draft exports can be very slow and are currently disabled pending a better UX flow.
+_EXPORT_DRAFTS_ENABLED = False
 
 
 def _sanitize_name(name: str) -> str:
@@ -102,15 +104,9 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         logger.warning("Symphony export skipped: %s", exc)
         return
 
-    # UX: drafts exports can be very slow on first run (lots of drafts + full /score JSON).
-    # Keep the codepath, but defer draft exports until after the first successful sync.
-    initial_backfill_done = (_get_sync_state(db, account_id, "initial_backfill_done") or "") == "true"
-    export_drafts = initial_backfill_done
+    export_drafts = _EXPORT_DRAFTS_ENABLED
     if not export_drafts:
-        logger.info(
-            "Skipping draft symphony export on first sync for %s (will export drafts on subsequent syncs)",
-            account_id,
-        )
+        logger.info("Draft symphony export is temporarily disabled (skipping drafts for %s)", account_id)
 
     # Export should include invested symphonies *and* the user's drafts.
     # Drafts are user-scoped; during sync we run once per account, so draft export

@@ -35,7 +35,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. Includes invested symphonies plus your Composer watchlist and drafts.
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
 - **Backtest caching** — Symphony backtests are cached locally and automatically re-fetched when you edit the symphony in Composer.
-- **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change (draft exports are deferred until after your first successful sync to keep first-run fast).
+- **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change (draft exports are temporarily disabled to keep startup fast).
 - **Daily snapshot** — Captures a clean portfolio summary image after market close (or manually via the camera button). Configurable chart type, metrics, date range, and benchmark overlays.
 - **Trade preview** — See what trades are pending before the next rebalance.
 - **Live intraday data** — During market hours, your portfolio value updates in real time.
