@@ -6,8 +6,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, SymphonyCatalogItem } from "@/lib/api";
+import { SymphonyCatalogItem } from "@/lib/api";
+import { getSymphonyCatalogQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Args = {
   onBenchmarkAdd?: (ticker: string) => void;
@@ -35,23 +38,21 @@ export function useBenchmarkCatalog({
   benchmarksCount,
   maxBenchmarks,
 }: Args): Result {
+  const queryClient = useQueryClient();
   const [customTickerInput, setCustomTickerInput] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const [symphonyCatalog, setSymphonyCatalog] = useState<SymphonyCatalogItem[]>([]);
-  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showCustomInput || catalogLoaded) return;
-    api
-      .getSymphonyCatalog()
-      .then((items) => {
-        setSymphonyCatalog(items);
-        setCatalogLoaded(true);
-      })
-      .catch(() => setCatalogLoaded(true));
-  }, [showCustomInput, catalogLoaded]);
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.symphonyCatalog(false),
+    queryFn: () => getSymphonyCatalogQueryFn(false),
+    enabled: showCustomInput,
+    staleTime: 900000,
+  });
+  const symphonyCatalog = useMemo(
+    () => catalogQuery.data ?? [],
+    [catalogQuery.data],
+  );
 
   useEffect(() => {
     if (!catalogDropdownOpen) return;
@@ -124,15 +125,16 @@ export function useBenchmarkCatalog({
   );
 
   const refreshCatalog = useCallback(() => {
-    setCatalogLoaded(false);
-    api
-      .getSymphonyCatalog(true)
-      .then((items) => {
-        setSymphonyCatalog(items);
-        setCatalogLoaded(true);
+    void queryClient
+      .fetchQuery({
+        queryKey: queryKeys.symphonyCatalog(true),
+        queryFn: () => getSymphonyCatalogQueryFn(true),
+        staleTime: 900000,
       })
-      .catch(() => setCatalogLoaded(true));
-  }, []);
+      .then((items) => {
+        queryClient.setQueryData(queryKeys.symphonyCatalog(false), items);
+      });
+  }, [queryClient]);
 
   return {
     customTickerInput,

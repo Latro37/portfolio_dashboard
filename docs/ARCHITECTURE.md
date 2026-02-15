@@ -10,7 +10,7 @@ This document describes the current implementation architecture for Portfolio Da
 |---|---|
 | Backend | Python, FastAPI, SQLAlchemy, Pydantic |
 | Database | SQLite |
-| Frontend | Next.js App Router, TypeScript, Tailwind CSS, Recharts |
+| Frontend | Next.js App Router, TypeScript, Tailwind CSS, Recharts, TanStack Query |
 | Test | Pytest, Vitest, Playwright |
 | External APIs | Composer API, Finnhub, Stooq, optional Polygon |
 
@@ -26,7 +26,8 @@ This document describes the current implementation architecture for Portfolio Da
 
 ```mermaid
 flowchart LR
-    UI[Next.js Frontend] --> API[FastAPI Routers]
+    UI[Next.js Frontend] --> Q[TanStack Query Layer]
+    Q --> API[FastAPI Routers]
     API --> SVC[Service Layer]
     SVC --> DB[(SQLite)]
     SVC --> EXT[Composer and Market Data APIs]
@@ -88,6 +89,25 @@ Request and response models are centralized in `backend/app/schemas.py`.
 - benchmark rebasing and drawdown calculations
 - shared tooltip and control behavior
 
+### TanStack Query server-state layer
+
+`frontend/src/lib/*` query contracts:
+- `queryKeys.ts`: stable key factories for all server-state families
+- `queryFns.ts`: shared API-backed query functions and endpoint retry overrides
+- `queryInvalidation.ts`: centralized invalidation families for sync, cash-flow, and config writes
+
+Provider wiring:
+- `frontend/src/app/providers.tsx`
+- `frontend/src/lib/queryClient.ts`
+- `frontend/src/app/layout.tsx`
+
+Default query policy:
+- `refetchOnWindowFocus: false`
+- `refetchOnReconnect: true`
+- `gcTime: 600000`
+- `retry: 1` default
+- `retry: 0` overrides for `symphonyBacktest` and `symphonyBenchmark`
+
 ## Project Structure
 
 ```text
@@ -126,6 +146,7 @@ portfolio_dashboard/
     - app/
       - page.tsx
       - layout.tsx
+      - providers.tsx
     - components/
       - Dashboard.tsx
       - PerformanceChart.tsx
@@ -144,6 +165,10 @@ portfolio_dashboard/
     - lib/
       - api.ts
       - marketHours.ts
+      - queryClient.ts
+      - queryKeys.ts
+      - queryFns.ts
+      - queryInvalidation.ts
 - scripts/
   - run-local-tests.ps1
 - docs/
@@ -260,10 +285,9 @@ Resolution rules:
 - Using only `CPV_*` logs a deprecation warning.
 - Removal target: next major refactor cycle after TQ-1.
 
-## Deferred Phase TQ-1 (TanStack Query)
+## TQ-1 Status
 
-TanStack Query migration remains deferred and tracked in:
-- this document (deferred status)
-- `docs/TQ1_TANSTACK_QUERY_BLUEPRINT.md` (implementation blueprint)
+TQ-1 migration is now implemented for frontend server-state. Follow-up refinements remain tracked in:
+- `docs/TQ1_TANSTACK_QUERY_BLUEPRINT.md`
 
-Do not start this migration without satisfying entry criteria in the blueprint.
+Future server-state work should extend the existing query key/fn/invalidation contracts rather than adding parallel cache orchestration patterns.

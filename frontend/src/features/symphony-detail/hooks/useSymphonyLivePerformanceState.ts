@@ -1,6 +1,18 @@
-import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef, useState } from "react";
+import {
+  Dispatch,
+  MutableRefObject,
+  SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { api, PerformancePoint } from "@/lib/api";
+import { PerformancePoint } from "@/lib/api";
+import { getSymphonyPerformanceQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Args = {
   symphonyId: string;
@@ -14,40 +26,68 @@ type Result = {
   loadingLive: boolean;
 };
 
+type ScopedLiveOverride = {
+  scopeKey: string;
+  data: PerformancePoint[];
+} | null;
+
+function applySetStateAction<T>(previous: T, value: SetStateAction<T>): T {
+  return typeof value === "function"
+    ? (value as (prevState: T) => T)(previous)
+    : value;
+}
+
 export function useSymphonyLivePerformanceState({
   symphonyId,
   accountId,
 }: Args): Result {
-  const [liveData, setLiveData] = useState<PerformancePoint[]>([]);
-  const [loadingLive, setLoadingLive] = useState(true);
+  const scopeKey = `${symphonyId}:${accountId}`;
+  const [liveDataOverride, setLiveDataOverride] = useState<ScopedLiveOverride>(null);
   const baseLiveDataRef = useRef<PerformancePoint[]>([]);
+  const liveQuery = useQuery({
+    queryKey: queryKeys.symphonyPerformance({ symphonyId, accountId }),
+    queryFn: async () => {
+      try {
+        return await getSymphonyPerformanceQueryFn({ symphonyId, accountId });
+      } catch {
+        return [] as PerformancePoint[];
+      }
+    },
+    staleTime: 60000,
+  });
 
   useEffect(() => {
-    let active = true;
-    api
-      .getSymphonyPerformance(symphonyId, accountId)
-      .then((data) => {
-        if (!active) return;
-        setLiveData(data);
-        baseLiveDataRef.current = data;
-      })
-      .catch(() => {
-        if (!active) return;
-        setLiveData([]);
-        baseLiveDataRef.current = [];
-      })
-      .finally(() => {
-        if (active) setLoadingLive(false);
+    if (!liveQuery.data) return;
+    baseLiveDataRef.current = liveQuery.data;
+  }, [liveQuery.data]);
+
+  const liveData = useMemo(() => {
+    if (liveDataOverride && liveDataOverride.scopeKey === scopeKey) {
+      return liveDataOverride.data;
+    }
+    return liveQuery.data ?? [];
+  }, [liveDataOverride, scopeKey, liveQuery.data]);
+
+  const setLiveData: Dispatch<SetStateAction<PerformancePoint[]>> = useCallback(
+    (value) => {
+      setLiveDataOverride((previous) => {
+        const base =
+          previous && previous.scopeKey === scopeKey
+            ? previous.data
+            : liveQuery.data ?? [];
+        return {
+          scopeKey,
+          data: applySetStateAction(base, value),
+        };
       });
-    return () => {
-      active = false;
-    };
-  }, [symphonyId, accountId]);
+    },
+    [scopeKey, liveQuery.data],
+  );
 
   return {
     liveData,
     setLiveData,
     baseLiveDataRef,
-    loadingLive,
+    loadingLive: liveQuery.isLoading || liveQuery.isFetching,
   };
 }

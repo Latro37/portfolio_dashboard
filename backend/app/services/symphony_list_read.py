@@ -9,7 +9,7 @@ from typing import Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import Account, SymphonyDailyMetrics
+from app.models import Account, SymphonyDailyMetrics, SymphonyDailyPortfolio
 from app.services.account_scope import resolve_account_ids
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ _TEST_META_PATH = os.path.join(
 
 
 def _list_symphonies_test(
+    db: Session,
     account_id: str,
     account_name: str,
     stored_twr: dict,
@@ -28,7 +29,12 @@ def _list_symphonies_test(
     meta_path = os.path.normpath(_TEST_META_PATH)
     if not os.path.exists(meta_path):
         logger.warning("Test symphony meta not found at %s", meta_path)
-        return []
+        return _list_symphonies_test_from_db(
+            db=db,
+            account_id=account_id,
+            account_name=account_name,
+            stored_twr=stored_twr,
+        )
     with open(meta_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
 
@@ -69,6 +75,124 @@ def _list_symphonies_test(
     return result
 
 
+def _list_symphonies_test_from_db(
+    db: Session,
+    account_id: str,
+    account_name: str,
+    stored_twr: dict,
+) -> List[Dict]:
+    """Fallback list path for __TEST__ accounts when JSON metadata is unavailable."""
+    latest_portfolio: Dict[str, Dict[str, float]] = {}
+    invested_since: Dict[str, str] = {}
+    portfolio_rows = (
+        db.query(
+            SymphonyDailyPortfolio.symphony_id,
+            SymphonyDailyPortfolio.date,
+            SymphonyDailyPortfolio.portfolio_value,
+            SymphonyDailyPortfolio.net_deposits,
+        )
+        .filter_by(account_id=account_id)
+        .order_by(SymphonyDailyPortfolio.date.desc())
+        .all()
+    )
+    for symphony_id, row_date, portfolio_value, net_deposits in portfolio_rows:
+        if symphony_id not in latest_portfolio:
+            latest_portfolio[symphony_id] = {
+                "portfolio_value": float(portfolio_value or 0.0),
+                "net_deposits": float(net_deposits or 0.0),
+            }
+        invested_since[symphony_id] = row_date.isoformat()
+
+    latest_metrics: Dict[str, Dict[str, float]] = {}
+    metrics_rows = (
+        db.query(
+            SymphonyDailyMetrics.symphony_id,
+            SymphonyDailyMetrics.daily_return_pct,
+            SymphonyDailyMetrics.cumulative_return_pct,
+            SymphonyDailyMetrics.time_weighted_return,
+            SymphonyDailyMetrics.sharpe_ratio,
+            SymphonyDailyMetrics.max_drawdown,
+            SymphonyDailyMetrics.annualized_return,
+        )
+        .filter_by(account_id=account_id)
+        .order_by(SymphonyDailyMetrics.date.desc())
+        .all()
+    )
+    for (
+        symphony_id,
+        daily_return_pct,
+        cumulative_return_pct,
+        time_weighted_return,
+        sharpe_ratio,
+        max_drawdown,
+        annualized_return,
+    ) in metrics_rows:
+        if symphony_id in latest_metrics:
+            continue
+        latest_metrics[symphony_id] = {
+            "daily_return_pct": float(daily_return_pct or 0.0),
+            "cumulative_return_pct": float(cumulative_return_pct or 0.0),
+            "time_weighted_return": float(time_weighted_return or 0.0),
+            "sharpe_ratio": float(sharpe_ratio or 0.0),
+            "max_drawdown": float(max_drawdown or 0.0),
+            "annualized_return": float(annualized_return or 0.0),
+        }
+
+    symphony_ids = set(latest_portfolio.keys()) | set(latest_metrics.keys())
+    symphony_ids.update(
+        symphony_id
+        for aid, symphony_id in stored_twr
+        if aid == account_id
+    )
+
+    result: List[Dict] = []
+    for symphony_id in sorted(symphony_ids):
+        portfolio = latest_portfolio.get(
+            symphony_id,
+            {"portfolio_value": 0.0, "net_deposits": 0.0},
+        )
+        metrics = latest_metrics.get(symphony_id, {})
+        value = float(portfolio["portfolio_value"])
+        net_deposits = float(portfolio["net_deposits"])
+        total_return = value - net_deposits
+        cumulative_return_pct = metrics.get("cumulative_return_pct")
+        if cumulative_return_pct is None:
+            cumulative_return_pct = (total_return / net_deposits * 100) if net_deposits else 0.0
+
+        twr = stored_twr.get((account_id, symphony_id))
+        if twr is None:
+            twr = metrics.get("time_weighted_return", 0.0)
+
+        result.append(
+            {
+                "id": symphony_id,
+                "position_id": "",
+                "account_id": account_id,
+                "account_name": account_name,
+                "name": f"Test Symphony {symphony_id}",
+                "color": "#888",
+                "value": round(value, 2),
+                "net_deposits": round(net_deposits, 2),
+                "cash": 0.0,
+                "total_return": round(total_return, 2),
+                "cumulative_return_pct": round(float(cumulative_return_pct), 2),
+                "simple_return": round(float(cumulative_return_pct), 2),
+                "time_weighted_return": round(float(twr or 0.0), 2),
+                "last_dollar_change": 0.0,
+                "last_percent_change": round(float(metrics.get("daily_return_pct", 0.0)), 2),
+                "sharpe_ratio": round(float(metrics.get("sharpe_ratio", 0.0)), 2),
+                "max_drawdown": round(float(metrics.get("max_drawdown", 0.0)), 2),
+                "annualized_return": round(float(metrics.get("annualized_return", 0.0)), 2),
+                "invested_since": invested_since.get(symphony_id, ""),
+                "last_rebalance_on": None,
+                "next_rebalance_on": None,
+                "rebalance_frequency": "",
+                "holdings": [],
+            }
+        )
+    return result
+
+
 def get_symphonies_list_data(
     db: Session,
     account_id: Optional[str],
@@ -104,6 +228,7 @@ def get_symphonies_list_data(
         if aid in test_ids:
             result.extend(
                 _list_symphonies_test(
+                    db=db,
                     account_id=aid,
                     account_name=acct_names.get(aid, aid),
                     stored_twr=stored_twr,

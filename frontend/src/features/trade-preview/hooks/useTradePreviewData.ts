@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { api, TradePreviewItem } from "@/lib/api";
+import { TradePreviewItem } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { isMarketOpen } from "@/lib/marketHours";
+import { getTradePreviewQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 import type { PriceQuote } from "@/features/trade-preview/types";
 import { groupTradePreviewRows } from "@/features/trade-preview/utils";
 
@@ -20,13 +23,18 @@ export function useTradePreviewData({
   finnhubConfigured,
 }: Args) {
   const [trades, setTrades] = useState<TradePreviewItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [isFinalPreview, setIsFinalPreview] = useState(false);
   const [priceQuotes, setPriceQuotes] = useState<Record<string, PriceQuote>>({});
   const tradesRef = useRef<TradePreviewItem[]>([]);
+  const { refetch, isFetching } = useQuery({
+    queryKey: queryKeys.tradePreview(accountId),
+    queryFn: () => getTradePreviewQueryFn(accountId),
+    enabled: false,
+    staleTime: 30000,
+  });
 
   useEffect(() => {
     tradesRef.current = trades;
@@ -42,7 +50,8 @@ export function useTradePreviewData({
           `${API_BASE}/finnhub/quote?symbols=${encodeURIComponent(tickers.join(","))}`,
         );
         if (response.ok) {
-          const data: Record<string, { c?: number; pc?: number }> = await response.json();
+          const data: Record<string, { c?: number; pc?: number }> =
+            await response.json();
           for (const [symbol, quote] of Object.entries(data)) {
             if (quote.c && quote.c > 0) {
               const change = quote.pc && quote.pc > 0 ? quote.c - quote.pc : 0;
@@ -55,16 +64,20 @@ export function useTradePreviewData({
         // Ignore quote fetch errors.
       }
 
-      setPriceQuotes((prev) => ({ ...prev, ...results }));
+      setPriceQuotes((previous) => ({ ...previous, ...results }));
     },
     [finnhubConfigured],
   );
 
   const fetchPreview = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
-      const data = await api.getTradePreview(accountId);
+      const result = await refetch();
+      if (result.error || !result.data) {
+        throw result.error ?? new Error("Failed to load trade preview");
+      }
+
+      const data = result.data;
       const nowET = new Date(
         new Date().toLocaleString("en-US", { timeZone: "America/New_York" }),
       );
@@ -80,24 +93,35 @@ export function useTradePreviewData({
         const uniqueTickers = [...new Set(data.map((trade) => trade.ticker))];
         await fetchPrices(uniqueTickers);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load trade preview");
-    } finally {
-      setLoading(false);
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Failed to load trade preview",
+      );
     }
-  }, [accountId, fetchPrices]);
+  }, [refetch, fetchPrices]);
 
   useEffect(() => {
-    if (accountId) fetchPreview();
+    if (accountId) {
+      void fetchPreview();
+      return;
+    }
+    setTrades([]);
+    setLastRefreshed(null);
+    setIsFinalPreview(false);
   }, [accountId, fetchPreview]);
 
   useAutoRefresh(fetchPreview, 60_000, autoRefreshEnabled);
 
   const toggleExpand = (key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   };
@@ -106,7 +130,7 @@ export function useTradePreviewData({
 
   return {
     grouped,
-    loading,
+    loading: isFetching,
     error,
     expanded,
     lastRefreshed,

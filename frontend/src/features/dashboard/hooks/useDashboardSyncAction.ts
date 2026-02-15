@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
+import { useMutation } from "@tanstack/react-query";
 
 import { showToast } from "@/components/Toast";
 
@@ -18,7 +19,12 @@ export function useDashboardSyncAction({
   runSyncAndRefresh,
   setError,
 }: Args): Result {
-  const [syncing, setSyncing] = useState(false);
+  const syncMutation = useMutation({
+    mutationFn: runSyncAndRefresh,
+    onError: () => {
+      setError("Sync failed");
+    },
+  });
 
   const handleSync = useCallback(async () => {
     if (isTestMode) {
@@ -26,18 +32,11 @@ export function useDashboardSyncAction({
       return;
     }
 
-    setSyncing(true);
-    try {
-      await runSyncAndRefresh();
-    } catch {
-      setError("Sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  }, [isTestMode, runSyncAndRefresh, setError]);
+    await syncMutation.mutateAsync();
+  }, [isTestMode, syncMutation]);
 
   return {
-    syncing,
+    syncing: syncMutation.isPending,
     handleSync,
   };
 }
