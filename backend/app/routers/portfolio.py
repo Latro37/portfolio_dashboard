@@ -44,6 +44,7 @@ from app.services.portfolio_admin import (
     upload_screenshot_data,
 )
 from app.config import is_test_mode
+from app.security import require_local_auth, require_local_origin
 
 router = APIRouter(prefix="/api", tags=["portfolio"])
 
@@ -226,7 +227,11 @@ def get_cash_flows(
         account_ids=ids,
     )
 
-@router.post("/cash-flows/manual", response_model=ManualCashFlowResponse)
+@router.post(
+    "/cash-flows/manual",
+    response_model=ManualCashFlowResponse,
+    dependencies=[Depends(require_local_auth)],
+)
 def add_manual_cash_flow(
     body: ManualCashFlowRequest,
     db: Session = Depends(get_db),
@@ -254,7 +259,11 @@ def get_sync_status(
     return get_sync_status_data(db, ids[0])
 
 
-@router.post("/sync", response_model=SyncTriggerResponse)
+@router.post(
+    "/sync",
+    response_model=SyncTriggerResponse,
+    dependencies=[Depends(require_local_auth)],
+)
 def trigger_sync(
     account_id: Optional[str] = Query(None, description="Sub-account ID, all:<credential_name>, or omit to sync all"),
     db: Session = Depends(get_db),
@@ -268,22 +277,38 @@ def trigger_sync(
     )
 
 
-@router.get("/config", response_model=AppConfigResponse)
+@router.get(
+    "/config",
+    response_model=AppConfigResponse,
+    dependencies=[Depends(require_local_origin)],
+)
 def get_app_config():
     """Return client-safe configuration (e.g. Finnhub API key, export settings)."""
     return get_app_config_data()
 
-@router.post("/config/symphony-export", response_model=SaveSymphonyExportResponse)
+@router.post(
+    "/config/symphony-export",
+    response_model=SaveSymphonyExportResponse,
+    dependencies=[Depends(require_local_auth)],
+)
 def set_symphony_export_config(body: SaveSymphonyExportRequest):
     """Save symphony export local_path from the frontend settings modal."""
     return save_symphony_export_config_data(body.local_path)
 
-@router.post("/config/screenshot", response_model=OkResponse)
+@router.post(
+    "/config/screenshot",
+    response_model=OkResponse,
+    dependencies=[Depends(require_local_auth)],
+)
 def set_screenshot_config(body: SaveScreenshotConfigRequest):
     """Save screenshot configuration from the frontend settings modal."""
     return save_screenshot_config_data(body.model_dump())
 
-@router.post("/screenshot", response_model=ScreenshotUploadResponse)
+@router.post(
+    "/screenshot",
+    response_model=ScreenshotUploadResponse,
+    dependencies=[Depends(require_local_auth)],
+)
 async def upload_screenshot(request: Request):
     """Receive a PNG screenshot and save it to the configured folder."""
     return await upload_screenshot_data(request)

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.composer_client import ComposerClient
 from app.config import load_symphony_export_config
 from app.models import SyncState
+from app.services.local_paths import LocalPathError, resolve_local_write_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +71,10 @@ def export_single_symphony(
     if not config:
         return
 
-    local_path = config.get("local_path", "")
-    if not local_path:
+    try:
+        local_path = resolve_local_write_path(config.get("local_path", ""))
+    except LocalPathError as exc:
+        logger.warning("Symphony export skipped: %s", exc)
         return
 
     score = client.get_symphony_score(symphony_id)
@@ -90,9 +93,10 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
     if not config:
         return
 
-    local_path = config.get("local_path", "")
-    if not local_path:
-        logger.debug("Symphony export skipped — no local_path configured")
+    try:
+        local_path = resolve_local_write_path(config.get("local_path", ""))
+    except LocalPathError as exc:
+        logger.warning("Symphony export skipped: %s", exc)
         return
 
     try:
@@ -142,3 +146,4 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         time.sleep(0.3)  # gentle rate limit between version fetches
 
     logger.info("Symphony export for %s: %d exported, %d total", account_id, exported, len(symphonies))
+

@@ -1,5 +1,7 @@
 # Config (contains API credentials)
 config.json
+.env
+.env.*
 
 # Python
 __pycache__/

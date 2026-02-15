@@ -12,6 +12,7 @@ from app.routers import portfolio, health, symphonies
 from app.config import load_accounts, is_test_mode
 from app.composer_client import ComposerClient
 from app.models import Account
+from app.security import ALLOWED_ORIGINS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,7 +88,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=sorted(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )

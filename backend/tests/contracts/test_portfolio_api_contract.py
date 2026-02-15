@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import app.services.portfolio_admin as portfolio_admin
 
 
@@ -96,8 +98,8 @@ def test_sync_status_contract(client):
     assert payload["initial_backfill_done"] is False
 
 
-def test_sync_trigger_skips_test_accounts_contract(client):
-    res = client.post("/api/sync?account_id=all")
+def test_sync_trigger_skips_test_accounts_contract(client, auth_headers):
+    res = client.post("/api/sync?account_id=all", headers=auth_headers)
     assert res.status_code == 200
     payload = res.json()
     assert payload["status"] == "skipped"
@@ -113,22 +115,37 @@ def test_config_contract(client):
         "finnhub_api_key",
         "finnhub_configured",
         "polygon_configured",
+        "local_auth_token",
         "symphony_export",
         "screenshot",
         "test_mode",
     }
     assert payload["test_mode"] is True
+    assert payload["local_auth_token"] == "contract-test-token"
 
 
-def test_config_symphony_export_contract(client, monkeypatch):
-    monkeypatch.setattr(portfolio_admin, "save_symphony_export_path", lambda _path: None)
-    res = client.post("/api/config/symphony-export", json={"local_path": "C:/tmp/export"})
+def test_config_symphony_export_contract(client, monkeypatch, auth_headers):
+    captured = {"path": ""}
+
+    def _save(path: str):
+        captured["path"] = path
+
+    monkeypatch.setattr(portfolio_admin, "save_symphony_export_path", _save)
+    res = client.post(
+        "/api/config/symphony-export",
+        json={"local_path": "exports"},
+        headers=auth_headers,
+    )
     assert res.status_code == 200
     payload = res.json()
-    assert payload == {"ok": True, "local_path": "C:/tmp/export"}
+    assert payload["ok"] is True
+    assert payload["local_path"] == captured["path"]
+    assert payload["local_path"].endswith(
+        os.path.join("data", "local_storage", "exports")
+    )
 
 
-def test_config_screenshot_contract(client, monkeypatch):
+def test_config_screenshot_contract(client, monkeypatch, auth_headers):
     captured = {}
 
     def _save(cfg):
@@ -138,7 +155,7 @@ def test_config_screenshot_contract(client, monkeypatch):
     res = client.post(
         "/api/config/screenshot",
         json={
-            "local_path": "C:/tmp/screenshots",
+            "local_path": "screenshots",
             "enabled": True,
             "account_id": "test-account-001",
             "chart_mode": "twr",
@@ -148,13 +165,16 @@ def test_config_screenshot_contract(client, monkeypatch):
             "metrics": ["total_return_dollars"],
             "benchmarks": ["SPY"],
         },
+        headers=auth_headers,
     )
     assert res.status_code == 200
     assert res.json() == {"ok": True}
-    assert captured["local_path"] == "C:/tmp/screenshots"
+    assert captured["local_path"].endswith(
+        os.path.join("data", "local_storage", "screenshots")
+    )
 
 
-def test_manual_cash_flow_contract(client):
+def test_manual_cash_flow_contract(client, auth_headers):
     res = client.post(
         "/api/cash-flows/manual",
         json={
@@ -164,6 +184,7 @@ def test_manual_cash_flow_contract(client):
             "amount": 123.45,
             "description": "Manual correction",
         },
+        headers=auth_headers,
     )
     assert res.status_code == 200
     payload = res.json()
@@ -172,3 +193,28 @@ def test_manual_cash_flow_contract(client):
     assert payload["date"] == "2025-01-05"
     assert payload["type"] == "withdrawal"
     assert payload["amount"] == -123.45
+
+
+def test_sync_requires_local_auth_token(client):
+    res = client.post("/api/sync?account_id=all")
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Invalid local auth token"
+
+
+def test_mutation_rejects_cross_origin_even_with_token(client, auth_headers):
+    res = client.post(
+        "/api/sync?account_id=all",
+        headers={**auth_headers, "Origin": "https://evil.example"},
+    )
+    assert res.status_code == 403
+    assert res.json()["detail"] == "Origin not allowed"
+
+
+def test_export_path_rejects_parent_escape(client, auth_headers):
+    res = client.post(
+        "/api/config/symphony-export",
+        json={"local_path": "../outside"},
+        headers=auth_headers,
+    )
+    assert res.status_code == 400
+    assert "approved base directory" in res.json()["detail"]
