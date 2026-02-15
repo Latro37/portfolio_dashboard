@@ -108,9 +108,8 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
     if not export_drafts:
         logger.info("Draft symphony export is temporarily disabled (skipping drafts for %s)", account_id)
 
-    # Export should include invested symphonies *and* the user's drafts.
-    # Drafts are user-scoped; during sync we run once per account, so draft export
-    # state must be shared across all sub-accounts under the same credential.
+    # Export includes invested symphonies.
+    # Draft export logic is retained but currently disabled (_EXPORT_DRAFTS_ENABLED=False).
     invested_targets: Dict[str, str] = {}
     draft_targets: Dict[str, str] = {}
 
