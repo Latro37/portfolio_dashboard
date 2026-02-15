@@ -32,7 +32,7 @@ export function DashboardErrorScreen({
         </p>
       </div>
 
-      {!isTestMode && (
+      {!isTestMode && needsSync && (
         <Button onClick={onSync} disabled={syncing}>
           {syncing ? (
             <RefreshCw className="mr-2 h-4 w-4 animate-spin" />

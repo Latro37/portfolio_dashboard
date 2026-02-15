@@ -24,10 +24,18 @@ python start.py
 python stop.py
 ```
 
+### Port overrides
+
+```bash
+python start.py --backend-port 8010 --frontend-port 3010
+python stop.py --backend-port 8010 --frontend-port 3010
+```
+
 Use `python stop.py --help` for safe usage details.
 
 ## Health Verification
 
+Defaults:
 1. Backend responds at `http://localhost:8000/api/health`.
 2. Frontend responds at `http://localhost:3000`.
 3. Account and summary endpoints are reachable after sync.

@@ -56,6 +56,8 @@ class AppConfigResponse(BaseModel):
     symphony_export: Optional[SymphonyExportConfig] = None
     screenshot: Optional[Dict[str, Any]] = None
     test_mode: bool
+    composer_config_ok: bool
+    composer_config_error: Optional[str] = None
 
 
 class SaveSymphonyExportResponse(BaseModel):

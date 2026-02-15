@@ -1,24 +1,33 @@
-﻿"""One-command launcher for Portfolio Dashboard.
+"""One-command launcher for Portfolio Dashboard.
 
 Starts both the Python backend (FastAPI) and the Next.js frontend.
-Usage: python start.py [--test]
+
+Usage:
+  python start.py [--test] [--backend-port 8000] [--frontend-port 3000] [--no-venv]
 """
 
+from __future__ import annotations
+
+import argparse
+import json
 import os
-import sys
 import shutil
-import subprocess
-import time
 import signal
-import webbrowser
+import subprocess
+import sys
 import threading
+import time
 import urllib.request
+import webbrowser
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(ROOT, "backend")
 FRONTEND_DIR = os.path.join(ROOT, "frontend")
 
-processes = []
+processes: list[subprocess.Popen] = []
+
+_PLACEHOLDER_API_KEY_ID = "your-api-key-id"
+_PLACEHOLDER_API_SECRET = "your-api-secret"
 
 
 def cleanup(*_):
@@ -39,6 +48,7 @@ signal.signal(signal.SIGTERM, cleanup)
 # Prerequisite checks
 # ------------------------------------------------------------------
 
+
 def check_python():
     """Verify Python version is 3.10+."""
     major, minor = sys.version_info[:2]
@@ -49,18 +59,32 @@ def check_python():
     print(f"  Python {major}.{minor} ............. OK")
 
 
-def check_node():
+def resolve_node_and_npm() -> tuple[str, str]:
+    """Return (node_exe, npm_cmd) resolved from PATH."""
+    node_exe = shutil.which("node") or ""
+    npm_cmd = shutil.which("npm") or ""
+    return node_exe, npm_cmd
+
+
+def check_node(node_exe: str, npm_cmd: str):
     """Verify Node.js is installed and is version 18+."""
-    npm_cmd = shutil.which("npm")
-    if not npm_cmd:
+    if not npm_cmd or not os.path.exists(npm_cmd):
         print("ERROR: Node.js is not installed (npm not found).")
         print("Download it from: https://nodejs.org/")
         print("  Recommended: LTS version (18 or newer)")
         sys.exit(1)
 
+    if not node_exe or not os.path.exists(node_exe):
+        print("ERROR: Node.js is not installed (node not found).")
+        print("Download it from: https://nodejs.org/")
+        sys.exit(1)
+
     try:
         result = subprocess.run(
-            ["node", "--version"], capture_output=True, text=True, shell=True
+            [node_exe, "--version"],
+            capture_output=True,
+            text=True,
+            check=True,
         )
         version_str = result.stdout.strip().lstrip("v")
         node_major = int(version_str.split(".")[0])
@@ -73,26 +97,30 @@ def check_node():
         print("WARNING: Could not determine Node.js version. Continuing anyway...")
 
 
-def check_config():
-    """Verify config.json exists."""
+def check_config_file(*, test_mode: bool):
+    """Check config.json presence and print a helpful message.
+
+    In non-test mode, config.json is required for live Composer sync, but we still
+    start the app so the dashboard can show setup instructions instead of hanging.
+    """
     config_path = os.path.join(ROOT, "config.json")
     if os.path.exists(config_path):
         print("  config.json ........... OK")
     else:
-        print("\nERROR: config.json not found.\n")
-        print("  1. Copy config.json.example to config.json")
-        print("  2. Edit config.json and add your Composer API credentials")
-        print("  3. Run this script again\n")
-        print("Your API credentials never leave your machine. See the README for details.")
-        sys.exit(1)
+        if test_mode:
+            print("  config.json ........... (missing, ok in --test mode)")
+        else:
+            print("  config.json ........... MISSING")
+            print("  WARNING: Live mode requires Composer credentials.")
+            print("           The dashboard will start and show setup instructions.")
 
 
-def check_prerequisites():
+def check_prerequisites(*, test_mode: bool, node_exe: str, npm_cmd: str):
     """Run all prerequisite checks."""
     print("Checking prerequisites...\n")
     check_python()
-    check_node()
-    check_config()
+    check_node(node_exe, npm_cmd)
+    check_config_file(test_mode=test_mode)
     print()
 
 
@@ -100,29 +128,153 @@ def check_prerequisites():
 # Dependency installation
 # ------------------------------------------------------------------
 
-def install_deps():
+
+def _venv_python_path(venv_dir: str) -> str:
+    if os.name == "nt":
+        return os.path.join(venv_dir, "Scripts", "python.exe")
+    return os.path.join(venv_dir, "bin", "python")
+
+
+def ensure_backend_python(*, no_venv: bool) -> str:
+    """Return python executable to use for backend (venv by default)."""
+    if no_venv:
+        return sys.executable
+
+    venv_dir = os.path.join(BACKEND_DIR, ".venv")
+    py = _venv_python_path(venv_dir)
+    if not os.path.exists(py):
+        print("Creating backend virtual environment (backend/.venv)...")
+        try:
+            subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
+        except subprocess.CalledProcessError:
+            print("ERROR: Failed to create a virtual environment.")
+            if os.name != "nt":
+                print("Tip (Linux): you may need to install the venv package (e.g. python3-venv).")
+            sys.exit(1)
+
+    # Ensure pip exists in the venv (some environments disable ensurepip).
+    try:
+        subprocess.run([py, "-m", "pip", "--version"], capture_output=True, check=True, text=True)
+    except Exception:
+        try:
+            subprocess.run([py, "-m", "ensurepip", "--upgrade"], check=True)
+        except subprocess.CalledProcessError:
+            print("ERROR: pip is not available in the backend venv.")
+            sys.exit(1)
+
+    return py
+
+
+def install_deps(*, backend_python: str, npm_cmd: str):
     """Install dependencies if needed."""
-    # Python
     req = os.path.join(BACKEND_DIR, "requirements.txt")
     if os.path.exists(req):
         print("Checking Python dependencies...")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", req, "-q"],
-            cwd=BACKEND_DIR,
-        )
+        try:
+            subprocess.run(
+                [backend_python, "-m", "pip", "install", "-r", req, "-q"],
+                cwd=BACKEND_DIR,
+                check=True,
+            )
+        except subprocess.CalledProcessError:
+            print("ERROR: Failed to install backend dependencies.")
+            sys.exit(1)
 
-    # Node
     nm = os.path.join(FRONTEND_DIR, "node_modules")
     if not os.path.exists(nm):
         print("Installing frontend dependencies (first run only, may take a minute)...")
-        subprocess.run(["npm", "install"], cwd=FRONTEND_DIR, shell=True)
+        try:
+            subprocess.run([npm_cmd, "install"], cwd=FRONTEND_DIR, check=True)
+        except subprocess.CalledProcessError:
+            print("ERROR: Failed to install frontend dependencies.")
+            sys.exit(1)
+
+
+def validate_config_credentials() -> tuple[bool, str | None]:
+    """Validate config.json has usable Composer credentials (non-test mode).
+
+    Returns (ok, message). Never raises.
+    """
+    config_path = os.path.join(ROOT, "config.json")
+    if not os.path.exists(config_path):
+        return False, (
+            "config.json not found.\n"
+            "Fix:\n"
+            "1) Copy config.json.example to config.json\n"
+            "2) Edit config.json and add your Composer API credentials\n"
+            "3) Restart: python start.py\n"
+            "Tip: For a demo without real credentials, run: python start.py --test"
+        )
+
+    try:
+        with open(config_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        return False, (
+            f"config.json is not valid JSON (line {e.lineno}).\n"
+            "Fix the syntax error and restart."
+        )
+    except Exception as e:
+        return False, f"Failed to read config.json: {e}"
+
+    if not isinstance(raw, dict):
+        return False, "config.json must be a JSON object. Re-copy config.json.example and try again."
+
+    account_list = raw.get("composer_accounts") or raw.get("accounts")
+    if account_list is None:
+        return False, (
+            "config.json is missing 'composer_accounts'.\n"
+            "Re-copy config.json.example to config.json and fill in your Composer API credentials."
+        )
+
+    if not isinstance(account_list, list) or len(account_list) == 0:
+        return False, (
+            "config.json must contain a non-empty 'composer_accounts' array.\n"
+            "Copy config.json.example to config.json and fill in your Composer API credentials."
+        )
+
+    problems: list[str] = []
+    for idx, entry in enumerate(account_list):
+        if not isinstance(entry, dict):
+            problems.append(f"composer_accounts[{idx}] must be an object with name/api_key_id/api_secret")
+            continue
+        name = str(entry.get("name") or f"#{idx + 1}")
+        key_id = entry.get("api_key_id")
+        secret = entry.get("api_secret")
+        key_id_str = key_id.strip() if isinstance(key_id, str) else ""
+        secret_str = secret.strip() if isinstance(secret, str) else ""
+
+        missing_fields = []
+        if not key_id_str:
+            missing_fields.append("api_key_id missing")
+        elif key_id_str.lower() == _PLACEHOLDER_API_KEY_ID:
+            missing_fields.append("api_key_id is placeholder")
+        if not secret_str:
+            missing_fields.append("api_secret missing")
+        elif secret_str.lower() == _PLACEHOLDER_API_SECRET:
+            missing_fields.append("api_secret is placeholder")
+
+        if missing_fields:
+            problems.append(f"composer_accounts[{idx}] (name: {name}): " + ", ".join(missing_fields))
+
+    if problems:
+        msg = (
+            "Composer API credentials are not configured in config.json.\n"
+            "Update composer_accounts[*].api_key_id and composer_accounts[*].api_secret, then restart.\n"
+            "Details:\n- "
+            + "\n- ".join(problems)
+        )
+        return False, msg
+
+    return True, None
 
 
 # ------------------------------------------------------------------
 # Browser auto-open
 # ------------------------------------------------------------------
 
-def open_browser_when_ready(url, timeout=30):
+
+def open_browser_when_ready(url: str, timeout: int = 30):
     """Wait for the frontend to be reachable, then open the browser."""
     start = time.time()
     while time.time() - start < timeout:
@@ -138,14 +290,27 @@ def open_browser_when_ready(url, timeout=30):
 # Main
 # ------------------------------------------------------------------
 
+
 def main():
-    import argparse
     parser = argparse.ArgumentParser(description="Portfolio Dashboard launcher")
     parser.add_argument("--test", action="store_true", help="Enable __TEST__ demo account with synthetic data")
+    parser.add_argument("--backend-port", type=int, default=8000, help="Backend port (default: 8000)")
+    parser.add_argument("--frontend-port", type=int, default=3000, help="Frontend port (default: 3000)")
+    parser.add_argument("--no-venv", action="store_true", help="Use current Python environment instead of backend/.venv")
     args = parser.parse_args()
 
-    check_prerequisites()
-    install_deps()
+    if not (1 <= int(args.backend_port) <= 65535):
+        print("ERROR: --backend-port must be between 1 and 65535.")
+        sys.exit(1)
+    if not (1 <= int(args.frontend_port) <= 65535):
+        print("ERROR: --frontend-port must be between 1 and 65535.")
+        sys.exit(1)
+
+    node_exe, npm_cmd = resolve_node_and_npm()
+    check_prerequisites(test_mode=args.test, node_exe=node_exe, npm_cmd=npm_cmd)
+
+    backend_python = ensure_backend_python(no_venv=args.no_venv)
+    install_deps(backend_python=backend_python, npm_cmd=npm_cmd)
 
     print("=" * 50)
     print("  Portfolio Dashboard")
@@ -161,11 +326,33 @@ def main():
     else:
         backend_env.pop("PD_TEST_MODE", None)
         backend_env.pop("PD_DATABASE_URL", None)
+        ok, msg = validate_config_credentials()
+        if not ok and msg:
+            print("\n" + "=" * 50)
+            print("  Setup Required")
+            print("=" * 50)
+            print(msg)
+            print()
+
+    # Strict origin allowlist for this run (dashboard origin only).
+    backend_env["PD_ALLOWED_ORIGINS"] = (
+        f"http://localhost:{int(args.frontend_port)},http://127.0.0.1:{int(args.frontend_port)}"
+    )
 
     # Start backend
     print("\nStarting backend...")
     backend = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+        [
+            backend_python,
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(int(args.backend_port)),
+            "--reload",
+        ],
         cwd=BACKEND_DIR,
         env=backend_env,
     )
@@ -179,7 +366,7 @@ def main():
             print("\nERROR: Backend failed to start. Check the output above for errors.")
             sys.exit(1)
         try:
-            urllib.request.urlopen("http://localhost:8000/api/health", timeout=2)
+            urllib.request.urlopen(f"http://localhost:{int(args.backend_port)}/api/health", timeout=2)
             ready = True
             break
         except Exception:
@@ -192,22 +379,26 @@ def main():
 
     # Start frontend
     print("Starting frontend...")
+    frontend_env = os.environ.copy()
+    frontend_env["NEXT_PUBLIC_API_URL"] = f"http://localhost:{int(args.backend_port)}/api"
+    frontend_env["PORT"] = str(int(args.frontend_port))
     frontend = subprocess.Popen(
-        ["npm", "run", "dev"],
+        [npm_cmd, "run", "dev", "--", "-p", str(int(args.frontend_port))],
         cwd=FRONTEND_DIR,
-        shell=True,
+        env=frontend_env,
     )
     processes.append(frontend)
 
     # Auto-open browser in background thread
+    frontend_url = f"http://localhost:{int(args.frontend_port)}"
     threading.Thread(
         target=open_browser_when_ready,
-        args=("http://localhost:3000",),
+        args=(frontend_url,),
         daemon=True,
     ).start()
 
-    print("\n  Dashboard:  http://localhost:3000")
-    print("  API docs:   http://localhost:8000/docs")
+    print(f"\n  Dashboard:  {frontend_url}")
+    print(f"  API docs:   http://localhost:{int(args.backend_port)}/docs")
     print("\n  Opening browser automatically...")
     print("  Press Ctrl+C to stop.\n")
 

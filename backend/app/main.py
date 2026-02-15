@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db, SessionLocal
 from app.routers import portfolio, health, symphonies
-from app.config import load_accounts, is_test_mode
+from app.config import load_accounts, is_test_mode, validate_composer_config
 from app.composer_client import ComposerClient
 from app.models import Account
-from app.security import ALLOWED_ORIGINS
+from app.security import get_allowed_origins
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,7 +72,12 @@ async def lifespan(app: FastAPI):
         if is_test_mode():
             logger.info("Test mode active: skipping real account discovery")
         else:
-            _discover_accounts()
+            ok, err = validate_composer_config()
+            if not ok:
+                # Avoid slow/hanging account discovery when config is missing/placeholder.
+                logger.warning("Account discovery skipped: %s", err)
+            else:
+                _discover_accounts()
     except FileNotFoundError as e:
         logger.warning("Account discovery skipped: %s", e)
     except Exception as e:
@@ -88,7 +93,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=sorted(ALLOWED_ORIGINS),
+    allow_origins=sorted(get_allowed_origins()),
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -129,6 +129,88 @@ def load_accounts() -> List[AccountCredentials]:
     return accounts
 
 
+_PLACEHOLDER_API_KEY_ID = "your-api-key-id"
+_PLACEHOLDER_API_SECRET = "your-api-secret"
+
+
+def validate_composer_config() -> tuple[bool, Optional[str]]:
+    """Validate config.json has usable Composer API credentials (non-test mode).
+
+    This is intended for user-facing setup messaging and safe startup behavior.
+    Returns (ok, error_message). Never raises.
+    """
+    if is_test_mode():
+        return True, None
+
+    config_path = os.path.join(_PROJECT_ROOT, "config.json")
+    if not os.path.exists(config_path):
+        return (
+            False,
+            "config.json not found. Copy config.json.example to config.json and add your Composer API credentials.",
+        )
+
+    try:
+        # Be liberal in what we accept: Windows editors often add a UTF-8 BOM.
+        with open(config_path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        return False, f"config.json is not valid JSON (line {e.lineno}). Check syntax and try again."
+    except Exception as e:
+        return False, f"Failed to read config.json: {e}"
+
+    if not isinstance(raw, dict):
+        return False, "config.json must be a JSON object. Re-copy config.json.example and try again."
+
+    account_list = raw.get("composer_accounts") or raw.get("accounts")
+    if account_list is None:
+        return (
+            False,
+            "config.json is missing 'composer_accounts'. Copy config.json.example to config.json and fill in your Composer API credentials.",
+        )
+
+    if not isinstance(account_list, list) or len(account_list) == 0:
+        return (
+            False,
+            "config.json must contain a non-empty 'composer_accounts' array. Copy config.json.example to config.json and fill in your Composer API credentials.",
+        )
+
+    problems: list[str] = []
+    for idx, entry in enumerate(account_list):
+        if not isinstance(entry, dict):
+            problems.append(f"composer_accounts[{idx}] must be an object with name/api_key_id/api_secret")
+            continue
+        name = str(entry.get("name") or f"#{idx + 1}")
+        key_id = entry.get("api_key_id")
+        secret = entry.get("api_secret")
+
+        key_id_str = key_id.strip() if isinstance(key_id, str) else ""
+        secret_str = secret.strip() if isinstance(secret, str) else ""
+
+        missing_fields = []
+        if not key_id_str:
+            missing_fields.append("api_key_id missing")
+        elif key_id_str.lower() == _PLACEHOLDER_API_KEY_ID:
+            missing_fields.append("api_key_id is placeholder")
+        if not secret_str:
+            missing_fields.append("api_secret missing")
+        elif secret_str.lower() == _PLACEHOLDER_API_SECRET:
+            missing_fields.append("api_secret is placeholder")
+
+        if missing_fields:
+            problems.append(f"composer_accounts[{idx}] (name: {name}): " + ", ".join(missing_fields))
+
+    if problems:
+        msg = (
+            "Composer API credentials are not configured in config.json.\n"
+            "Update composer_accounts[*].api_key_id and composer_accounts[*].api_secret with real values from Composer (Settings -> API Keys), then restart.\n"
+            "Details:\n- "
+            + "\n- ".join(problems)
+        )
+        return False, msg
+
+    return True, None
+
+
 def load_finnhub_key() -> Optional[str]:
     """Return the Finnhub API key from config.json, or None if not configured."""
     try:

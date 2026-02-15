@@ -355,6 +355,19 @@ python start.py
 ```
 This checks prerequisites, installs dependencies, starts both the backend and frontend, and opens your browser.
 
+Notes:
+- `start.py` creates/uses a backend virtualenv at `backend/.venv` by default (avoids global `pip install`). Use `--no-venv` to use your current Python environment.
+- If `config.json` is missing/invalid in non-test mode, the app still starts and the dashboard shows setup instructions instead of spinning forever.
+
+Common overrides:
+```bash
+# Port overrides
+python start.py --backend-port 8010 --frontend-port 3010
+
+# Use current environment instead of backend/.venv
+python start.py --no-venv
+```
+
 **Option B: Manual start** (two terminals)
 ```bash
 # Terminal 1 — Backend
@@ -373,6 +386,11 @@ Then open **http://localhost:3000** in your browser.
 
 ```bash
 python stop.py
+```
+
+With custom ports:
+```bash
+python stop.py --backend-port 8010 --frontend-port 3010
 ```
 
 This cleanly shuts down both the backend and frontend and kills any zombie processes (orphan `uvicorn` or `next dev` processes that survived a crash or forced close). Use this when:
@@ -438,7 +456,13 @@ Click the **Update** button in the top-right corner. The app doesn't fetch data 
 The first sync can take 30–60 seconds. If it takes longer than 2 minutes, check the terminal window running the backend for error messages.
 
 ### Port 8000 or 3000 is already in use
-A previous session may not have shut down cleanly. Run `python stop.py` to kill any lingering processes, then start the app again.
+A previous session may not have shut down cleanly.
+
+1. Run `python stop.py` to kill any lingering processes.
+2. Restart with `python start.py`.
+3. If you already have apps on those ports, override them:
+   - `python start.py --backend-port 8010 --frontend-port 3010`
+   - `python stop.py --backend-port 8010 --frontend-port 3010`
 
 ### Symphony backtest shows old data
 Backtests are cached for up to 24 hours. If you edited the symphony recently, the app checks for edits and re-fetches automatically. You can also close and reopen the symphony detail to trigger a fresh check.
@@ -465,7 +489,7 @@ Everything is in a local SQLite database at `backend/data/portfolio.db`. No data
 - **Your API keys stay on your machine.** They are stored in `config.json`, which is git-ignored and never committed to version control.
 - **The backend only listens on localhost** (`127.0.0.1`). It is not accessible from other devices on your network.
 - **Sensitive endpoints require local auth + origin checks.** Mutating API routes and Finnhub proxy routes require a local token and enforce localhost host/origin constraints.
-- **CORS is restricted** to local frontend origins (`http://localhost:3000`, `http://127.0.0.1:3000`) to reduce browser cross-origin exposure.
+- **CORS is restricted** to the local dashboard origin (localhost + the frontend port you're running) to reduce browser cross-origin exposure.
 - **Finnhub API key is never sent to the browser.** All Finnhub requests (REST quotes and WebSocket streams) are proxied through the backend.
 - **All network traffic goes directly to Composer's API** (`api.composer.trade`) and market-data providers used by enabled features: Finnhub (`finnhub.io`), Stooq (`stooq.com`) for historical benchmark candles, and optionally Polygon (`polygon.io`) for split-event fallback.
 - **No telemetry or analytics.** Nothing is phoned home.

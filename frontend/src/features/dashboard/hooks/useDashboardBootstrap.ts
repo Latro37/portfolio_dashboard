@@ -13,6 +13,10 @@ import { queryKeys } from "@/lib/queryKeys";
 
 type Result = {
   accounts: AccountInfo[];
+  bootstrapLoading: boolean;
+  bootstrapError: string | null;
+  composerConfigOk: boolean;
+  composerConfigError: string | null;
   selectedCredential: string;
   selectedSubAccount: string;
   finnhubConfigured: boolean;
@@ -37,17 +41,31 @@ export function useDashboardBootstrap(): Result {
   const [selectedSubAccountOverride, setSelectedSubAccountOverride] = useState<string | null>(null);
   const [screenshotConfigOverride, setScreenshotConfigOverride] = useState<ScreenshotConfig | null>(null);
 
-  const { data: configData } = useQuery({
+  const configQuery = useQuery({
     queryKey: queryKeys.config(),
     queryFn: getConfigQueryFn,
     staleTime: 300000,
   });
 
-  const { data: accountsData = [] } = useQuery({
+  const accountsQuery = useQuery({
     queryKey: queryKeys.accounts(),
     queryFn: getAccountsQueryFn,
     staleTime: 300000,
   });
+
+  const configData = configQuery.data;
+  const accountsData = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data]);
+
+  const bootstrapLoading = configQuery.isLoading || accountsQuery.isLoading;
+  const bootstrapError = (() => {
+    if (configQuery.error) {
+      return configQuery.error instanceof Error ? configQuery.error.message : String(configQuery.error);
+    }
+    if (accountsQuery.error) {
+      return accountsQuery.error instanceof Error ? accountsQuery.error.message : String(accountsQuery.error);
+    }
+    return null;
+  })();
   const defaultCredential = useMemo(() => {
     if (accountsData.length === 0) return "";
     return accountsData.some((account) => account.credential_name === "__TEST__")
@@ -97,10 +115,16 @@ export function useDashboardBootstrap(): Result {
   const finnhubConfigured =
     configData?.finnhub_configured ?? Boolean(configData?.finnhub_api_key);
   const isTestMode = configData?.test_mode === true;
+  const composerConfigOk = configData?.composer_config_ok ?? true;
+  const composerConfigError = configData?.composer_config_error ?? null;
   const screenshotConfig = screenshotConfigOverride ?? configData?.screenshot ?? null;
 
   return {
     accounts: accountsData,
+    bootstrapLoading,
+    bootstrapError,
+    composerConfigOk,
+    composerConfigError,
     selectedCredential,
     selectedSubAccount,
     finnhubConfigured,

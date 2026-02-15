@@ -350,6 +350,8 @@ export interface AppConfig {
   symphony_export: SymphonyExportStatus | null;
   screenshot: ScreenshotConfig | null;
   test_mode: boolean;
+  composer_config_ok: boolean;
+  composer_config_error: string | null;
 }
 
 export const api = {

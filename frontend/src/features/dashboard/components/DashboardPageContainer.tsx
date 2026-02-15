@@ -16,6 +16,7 @@ import { DashboardErrorScreen } from "@/features/dashboard/components/DashboardE
 import { DashboardLiveToggleButton } from "@/features/dashboard/components/DashboardLiveToggleButton";
 import { DashboardLoadingScreen } from "@/features/dashboard/components/DashboardLoadingScreen";
 import { DashboardSnapshotRenderer } from "@/features/dashboard/components/DashboardSnapshotRenderer";
+import { DashboardSetupScreen } from "@/features/dashboard/components/DashboardSetupScreen";
 import { useDashboardAccountScope } from "@/features/dashboard/hooks/useDashboardAccountScope";
 import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
 import { useDashboardBootstrap } from "@/features/dashboard/hooks/useDashboardBootstrap";
@@ -41,6 +42,9 @@ export default function DashboardPageContainer() {
   const [showSettings, setShowSettings] = useState(false);
   const {
     accounts,
+    bootstrapLoading,
+    bootstrapError,
+    composerConfigError,
     selectedCredential,
     selectedSubAccount,
     finnhubConfigured,
@@ -161,6 +165,30 @@ export default function DashboardPageContainer() {
 
   const { todayDollarChange, todayPctChange, totalValue: symphonyTotalValue } =
     useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
+
+  if (bootstrapLoading) {
+    return <DashboardLoadingScreen />;
+  }
+
+  if (bootstrapError) {
+    return (
+      <DashboardErrorScreen
+        error={bootstrapError}
+        isTestMode={isTestMode}
+        syncing={syncing}
+        onSync={handleSync}
+      />
+    );
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <DashboardSetupScreen
+        isTestMode={isTestMode}
+        composerConfigError={composerConfigError}
+      />
+    );
+  }
 
   if (loading && !summary) {
     return <DashboardLoadingScreen />;

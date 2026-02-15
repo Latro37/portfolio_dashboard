@@ -28,6 +28,7 @@ from app.routers import health
 def session_factory(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("PD_TEST_MODE", "1")
     monkeypatch.setenv("PD_LOCAL_AUTH_TOKEN", "contract-test-token")
+    monkeypatch.delenv("PD_ALLOWED_ORIGINS", raising=False)
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
