@@ -161,9 +161,6 @@ def main():
     else:
         backend_env.pop("PD_TEST_MODE", None)
         backend_env.pop("PD_DATABASE_URL", None)
-        # Clear legacy aliases if present in caller env during transition period.
-        backend_env.pop("CPV_TEST_MODE", None)
-        backend_env.pop("CPV_DATABASE_URL", None)
 
     # Start backend
     print("\nStarting backend...")

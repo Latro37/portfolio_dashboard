@@ -24,7 +24,7 @@ Build and maintain a local-first Portfolio Dashboard for Composer portfolios wit
 3. Treat `frontend/src/components/*` as shared UI and compatibility re-exports, not business orchestration.
 4. Never use destructive git commands (`git reset --hard`, `git checkout --`) unless explicitly requested.
 5. Use seeded test profiles for E2E (`scripts/run-local-tests.ps1 -Profile basic|power`).
-6. Do not remove `CPV_*` env compatibility until a dedicated alias-removal phase is approved.
+6. Use `PD_TEST_MODE` and `PD_DATABASE_URL` only; do not introduce legacy env aliases.
 7. For frontend server-state changes, update `frontend/src/lib/queryKeys.ts`, `frontend/src/lib/queryFns.ts`, and `frontend/src/lib/queryInvalidation.ts` before adding new query usage.
 8. Do not re-introduce ad hoc component-level API caches when equivalent TanStack Query cache behavior can be used.
 
@@ -49,9 +49,7 @@ Use `docs/TEST_MATRIX.md` as the source of truth. Minimum required gates:
 ## Naming and Deprecation Policy
 
 - Prefer `PD_TEST_MODE` and `PD_DATABASE_URL`.
-- Keep `CPV_TEST_MODE` and `CPV_DATABASE_URL` as temporary aliases.
-- If both are set, `PD_*` wins.
-- Alias removal target is the next major refactor cycle after TQ-1.
+- Legacy env aliases are removed.
 
 ## TanStack Query Roadmap Note
 

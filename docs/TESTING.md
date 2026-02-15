@@ -5,7 +5,7 @@ This project supports local-only testing with:
 - deterministic synthetic profiles (`basic`, `power`)
 - Playwright E2E smoke tests
 - optional Playwright visual snapshot tests
-- strict DB isolation via `PD_DATABASE_URL` (legacy `CPV_DATABASE_URL` alias supported)
+- strict DB isolation via `PD_DATABASE_URL`
 
 Related references:
 - `docs/TEST_MATRIX.md` for required validation gates by change scope
@@ -40,10 +40,7 @@ Always set:
 - `PD_TEST_MODE=1`
 - `PD_DATABASE_URL=sqlite:///data/portfolio_test.db`
 
-Backward-compatible aliases still work during migration:
-- `CPV_TEST_MODE`
-- `CPV_DATABASE_URL`
-- removal target: `CPV_*` aliases are planned for removal in the next major refactor cycle after TQ-1.
+Legacy env aliases are removed and unsupported.
 
 Account visibility behavior:
 - Test mode (`--test`): only `__TEST__` accounts are visible/usable.

@@ -87,4 +87,4 @@ Completed slices:
 1. New frontend server-state should default to TanStack Query using shared key and fn contracts.
 2. Add new mutation invalidation paths centrally in `queryInvalidation.ts`.
 3. Avoid reintroducing component-local caches for API reads unless there is a clear UI-state reason.
-4. Keep `PD_*` env vars preferred and maintain `CPV_*` alias compatibility until planned deprecation removal.
+4. Use `PD_*` env vars only and do not reintroduce legacy aliases.

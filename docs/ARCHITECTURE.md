@@ -270,20 +270,14 @@ Primary execution gates:
 
 See `docs/TEST_MATRIX.md` for scope-to-gate mapping.
 
-## Environment Variable Migration
+## Environment Variables
 
 Preferred:
 - `PD_TEST_MODE`
 - `PD_DATABASE_URL`
 
-Legacy temporary aliases:
-- `CPV_TEST_MODE`
-- `CPV_DATABASE_URL`
-
-Resolution rules:
-- If both are set, `PD_*` wins.
-- Using only `CPV_*` logs a deprecation warning.
-- Removal target: next major refactor cycle after TQ-1.
+Legacy aliases:
+- removed after TQ-1 cleanup; do not use or reintroduce.
 
 ## TQ-1 Status
 
