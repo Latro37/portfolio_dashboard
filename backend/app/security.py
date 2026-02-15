@@ -145,6 +145,15 @@ def require_local_origin(request: Request) -> None:
     _enforce_origin(origin=request.headers.get("origin"), require_origin=False)
 
 
+def require_local_strict_origin(request: Request) -> None:
+    """Require localhost host/client and a valid browser Origin header."""
+    _enforce_local_network_boundary(
+        host_header=request.headers.get("host"),
+        client_host=request.client.host if request.client else None,
+    )
+    _enforce_origin(origin=request.headers.get("origin"), require_origin=True)
+
+
 def require_local_auth(request: Request) -> None:
     """Require localhost host/client + allowed origin + valid auth token."""
     require_local_origin(request)

@@ -108,7 +108,7 @@ def test_sync_trigger_skips_test_accounts_contract(client, auth_headers):
 
 
 def test_config_contract(client):
-    res = client.get("/api/config")
+    res = client.get("/api/config", headers={"Origin": "http://localhost:3000"})
     assert res.status_code == 200
     payload = res.json()
     assert set(payload.keys()) == {
@@ -122,6 +122,12 @@ def test_config_contract(client):
     }
     assert payload["test_mode"] is True
     assert payload["local_auth_token"] == "contract-test-token"
+
+
+def test_config_requires_origin_header(client):
+    res = client.get("/api/config")
+    assert res.status_code == 403
+    assert res.json()["detail"] == "Origin header required"
 
 
 def test_config_symphony_export_contract(client, monkeypatch, auth_headers):
