@@ -27,6 +27,23 @@ Build and maintain a local-first Portfolio Dashboard for Composer portfolios wit
 6. Use `PD_TEST_MODE` and `PD_DATABASE_URL` only; do not introduce legacy env aliases.
 7. For frontend server-state changes, update `frontend/src/lib/queryKeys.ts`, `frontend/src/lib/queryFns.ts`, and `frontend/src/lib/queryInvalidation.ts` before adding new query usage.
 8. Do not re-introduce ad hoc component-level API caches when equivalent TanStack Query cache behavior can be used.
+9. Run a docs impact check for every change. If behavior, setup, contracts, commands, security, or legal posture changed, update docs in the same branch.
+10. Every PR and final handoff must include a `Docs impact` line: list updated docs, or state `none` with a concrete reason.
+
+## Documentation Sync Policy
+
+Use `docs/DOCS_UPDATE_CHECKLIST.md` for required docs impact mapping.
+
+When docs are impacted, update the relevant files in the same change, including as applicable:
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING.md`
+- `docs/TEST_MATRIX.md`
+- `docs/CONTRIBUTING.md`
+- `DISCLAIMER.md`
+- `THIRD_PARTY_SERVICES.md`
+- `SECURITY.md`
+- `LICENSE`
 
 ## Test Gate Policy By Change Scope
 
@@ -86,5 +103,5 @@ Do not add alternate server-state frameworks ad hoc; extend the existing query k
 5. Run required gates for that scope.
 6. Commit and push coherent checkpoints at sensible intervals.
 7. Open or update PR with tests and rationale.
-8. Update docs if structure or boundaries changed.
-9. Report exactly what changed, which tests ran, and any residual risk.
+8. Run docs impact check and update docs listed in `docs/DOCS_UPDATE_CHECKLIST.md` as needed.
+9. Report exactly what changed, which tests ran, docs impact, and any residual risk.

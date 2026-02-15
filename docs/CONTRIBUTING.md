@@ -16,10 +16,11 @@ This document defines how to contribute safely to Portfolio Dashboard after the 
 
 1. Understand scope and classify blast radius.
 2. Review `AGENTS.md` and `docs/TEST_MATRIX.md`.
-3. Implement the smallest coherent change.
-4. Run required test gates for scope.
-5. Update docs if boundaries, workflows, or contracts changed.
-6. Commit with a clear, scoped message.
+3. Run `docs/DOCS_UPDATE_CHECKLIST.md` against the planned change.
+4. Implement the smallest coherent change.
+5. Run required test gates for scope.
+6. Update docs per checklist when behavior, contracts, commands, legal, or security posture changed.
+7. Commit with a clear, scoped message.
 
 ## Code Boundaries
 
@@ -66,17 +67,21 @@ Update docs when any of these change:
 - API contracts and expected payload shapes
 - test or run commands
 - deprecation or migration policy
+- security/privacy behavior or credential handling
+- legal/disclaimer/license/third-party terms language
 
 Minimum docs to review after structural changes:
 - `docs/ARCHITECTURE.md`
 - `docs/TESTING.md`
 - `docs/TEST_MATRIX.md`
+- `docs/DOCS_UPDATE_CHECKLIST.md`
 - `AGENTS.md`
 
 ## Pull Request Checklist
 
 - [ ] Boundaries preserved (thin routers, charting contracts, feature hooks).
 - [ ] Required tests for scope passed.
-- [ ] Docs updated for changed architecture or workflows.
+- [ ] Docs updated per `docs/DOCS_UPDATE_CHECKLIST.md`.
+- [ ] Docs impact statement included in PR (`updated files` or `none` with reason).
 - [ ] No unrelated files modified.
 - [ ] Commit messages are scoped and descriptive.
