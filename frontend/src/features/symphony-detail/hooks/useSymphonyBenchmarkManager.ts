@@ -8,6 +8,11 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { showToast } from "@/components/Toast";
+import {
+  MAX_BENCHMARKS,
+  pickBenchmarkColor,
+} from "@/features/charting/benchmarkConfig";
 import { BenchmarkEntry, SymphonyCatalogItem } from "@/lib/api";
 import {
   getBenchmarkHistoryQueryFn,
@@ -16,8 +21,6 @@ import {
   queryRetryOverrides,
 } from "@/lib/queryFns";
 import { queryKeys } from "@/lib/queryKeys";
-
-const BENCHMARK_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
 function clampLabel(value: string): string {
   return value.length > 21 ? `${value.slice(0, 19)}...` : value;
@@ -47,7 +50,7 @@ export function useSymphonyBenchmarkManager(accountId: string): Result {
   const [customTickerInput, setCustomTickerInput] = useState("");
   const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
   const benchmarkDropdownRef = useRef<HTMLDivElement>(null);
-  const maxBenchmarks = 3;
+  const maxBenchmarks = MAX_BENCHMARKS;
   const catalogQuery = useQuery({
     queryKey: queryKeys.symphonyCatalog(false),
     queryFn: () => getSymphonyCatalogQueryFn(false),
@@ -84,13 +87,13 @@ export function useSymphonyBenchmarkManager(accountId: string): Result {
 
   const addBenchmark = useCallback(
     (ticker: string) => {
-      if (benchmarks.length >= maxBenchmarks) return;
       if (benchmarks.some((entry) => entry.ticker === ticker)) return;
+      if (benchmarks.length >= maxBenchmarks) {
+        showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+        return;
+      }
 
-      const color =
-        BENCHMARK_COLORS.find(
-          (candidate) => !benchmarks.some((entry) => entry.color === candidate),
-        ) || BENCHMARK_COLORS[0];
+      const color = pickBenchmarkColor(benchmarks.map((entry) => entry.color));
 
       const placeholder: BenchmarkEntry = {
         ticker,
@@ -153,7 +156,7 @@ export function useSymphonyBenchmarkManager(accountId: string): Result {
           ),
         );
     },
-    [benchmarks, accountId, queryClient],
+    [benchmarks, accountId, maxBenchmarks, queryClient],
   );
 
   const removeBenchmark = useCallback((ticker: string) => {

@@ -3,6 +3,7 @@
 import { type RefObject } from "react";
 import { RefreshCw } from "lucide-react";
 
+import { showToast } from "@/components/Toast";
 import { BenchmarkEntry, SymphonyCatalogItem } from "@/lib/api";
 
 type Props = {
@@ -69,6 +70,7 @@ export function SymphonyBacktestBenchmarkRow({
             onClick={() => {
               if (isActive) onRemoveBenchmark(ticker);
               else if (benchmarks.length < maxBenchmarks) onAddBenchmark(ticker);
+              else showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
             }}
             className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
               isActive
@@ -89,7 +91,13 @@ export function SymphonyBacktestBenchmarkRow({
 
       {!customInputVisible ? (
         <button
-          onClick={() => onCustomInputVisibleChange(true)}
+          onClick={() => {
+            if (benchmarks.length >= maxBenchmarks) {
+              showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+              return;
+            }
+            onCustomInputVisibleChange(true);
+          }}
           disabled={benchmarks.length >= maxBenchmarks}
           className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium ${
             benchmarks.length >= maxBenchmarks
@@ -106,7 +114,11 @@ export function SymphonyBacktestBenchmarkRow({
             onSubmit={(e) => {
               e.preventDefault();
               const raw = customTickerInput.trim();
-              if (!raw || benchmarks.length >= maxBenchmarks) return;
+              if (!raw) return;
+              if (benchmarks.length >= maxBenchmarks) {
+                showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+                return;
+              }
               const symMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
               if (symMatch) onAddBenchmark(`symphony:${symMatch[1]}`);
               else onAddBenchmark(raw.toUpperCase());
@@ -159,6 +171,10 @@ export function SymphonyBacktestBenchmarkRow({
                   className="w-full cursor-pointer px-3 py-1.5 text-left text-xs hover:bg-muted/60 flex items-center justify-between gap-2"
                   onMouseDown={(e) => {
                     e.preventDefault();
+                    if (benchmarks.length >= maxBenchmarks) {
+                      showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+                      return;
+                    }
                     onAddBenchmark(`symphony:${item.symphony_id}`);
                     onCustomTickerInputChange("");
                     onCustomInputVisibleChange(false);

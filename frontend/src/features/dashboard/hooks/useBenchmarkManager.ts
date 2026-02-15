@@ -1,6 +1,11 @@
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { showToast } from "@/components/Toast";
+import {
+  MAX_BENCHMARKS,
+  pickBenchmarkColor,
+} from "@/features/charting/benchmarkConfig";
 import { BenchmarkEntry } from "@/lib/api";
 import {
   getBenchmarkHistoryQueryFn,
@@ -8,8 +13,6 @@ import {
   queryRetryOverrides,
 } from "@/lib/queryFns";
 import { queryKeys } from "@/lib/queryKeys";
-
-const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
 function clampLabel(value: string): string {
   return value.length > 21 ? `${value.slice(0, 19)}...` : value;
@@ -21,10 +24,12 @@ export function useBenchmarkManager(resolvedAccountId?: string) {
 
   const handleBenchmarkAdd = useCallback(
     (ticker: string) => {
-      if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
-      const color =
-        BENCH_COLORS.find((candidate) => !benchmarks.some((b) => b.color === candidate)) ||
-        BENCH_COLORS[0];
+      if (benchmarks.some((b) => b.ticker === ticker)) return;
+      if (benchmarks.length >= MAX_BENCHMARKS) {
+        showToast(`You can add up to ${MAX_BENCHMARKS} benchmarks.`, "error");
+        return;
+      }
+      const color = pickBenchmarkColor(benchmarks.map((entry) => entry.color));
       const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
       setBenchmarks((previous) => [...previous, placeholder]);
 

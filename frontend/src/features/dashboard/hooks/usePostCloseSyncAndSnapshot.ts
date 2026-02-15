@@ -14,12 +14,14 @@ import { showToast } from "@/components/Toast";
 import { api, ScreenshotConfig, Summary } from "@/lib/api";
 import { invalidateAfterSync } from "@/lib/queryInvalidation";
 import { isAfterClose, todayET } from "@/lib/marketHours";
+import {
+  BENCHMARK_COLORS,
+  MAX_BENCHMARKS,
+} from "@/features/charting/benchmarkConfig";
 import type {
   DashboardPeriodReturns,
   DashboardSnapshotData,
 } from "@/features/dashboard/types";
-
-const SNAPSHOT_BENCHMARK_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
 type Args = {
   resolvedAccountId?: string;
@@ -124,7 +126,7 @@ export function usePostCloseSyncAndSnapshot({
           }
         }
 
-        const benchmarkTickers = (activeConfig.benchmarks || []).slice(0, 3);
+        const benchmarkTickers = (activeConfig.benchmarks || []).slice(0, MAX_BENCHMARKS);
         const snapshotBenchmarks: NonNullable<DashboardSnapshotData["benchmarks"]> = [];
         if (benchmarkTickers.length > 0 && activeConfig.chart_mode !== "portfolio") {
           const benchmarkResults = await Promise.all(
@@ -146,9 +148,7 @@ export function usePostCloseSyncAndSnapshot({
                 ticker: benchmarkTickers[index],
                 data: result.data,
                 color:
-                  SNAPSHOT_BENCHMARK_COLORS[
-                    index % SNAPSHOT_BENCHMARK_COLORS.length
-                  ],
+                  BENCHMARK_COLORS[index % BENCHMARK_COLORS.length],
               });
             }
           });

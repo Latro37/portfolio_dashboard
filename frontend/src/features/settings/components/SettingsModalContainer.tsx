@@ -5,6 +5,7 @@ import { X, FolderOpen, Check, Loader2, Camera } from "lucide-react";
 import { useSettingsModalState } from "@/features/settings/hooks/useSettingsModalState";
 import { CHART_MODES, PERIOD_OPTIONS } from "@/features/settings/options";
 import { METRIC_OPTIONS } from "@/features/dashboard/snapshot/metricCards";
+import { MAX_BENCHMARKS } from "@/features/charting/benchmarkConfig";
 
 interface Props {
   onClose: () => void;
@@ -222,7 +223,7 @@ export function SettingsModal({ onClose }: Props) {
             <div className="space-y-2 mb-2">
               <label className="text-sm text-foreground/80">
                 Benchmark Overlays{" "}
-                <span className="text-muted-foreground text-xs">(up to 3 tickers, e.g. SPY)</span>
+                <span className="text-muted-foreground text-xs">(up to 10 tickers, e.g. SPY)</span>
               </label>
               <div className="flex flex-wrap gap-1.5">
                 {(ss.benchmarks || []).map((t) => (
@@ -240,7 +241,7 @@ export function SettingsModal({ onClose }: Props) {
                     </button>
                   </span>
                 ))}
-                {(ss.benchmarks || []).length < 3 && (
+                {(ss.benchmarks || []).length < MAX_BENCHMARKS && (
                   <input
                     type="text"
                     placeholder="+ Add ticker"
