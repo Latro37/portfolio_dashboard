@@ -59,7 +59,7 @@ export function HoldingsPie({ holdings }: Props) {
               }}
               itemStyle={{ color: "#f4f4f5" }}
               labelStyle={{ color: "#a1a1aa" }}
-              formatter={(value: number | string, name: string) => [`${Number(value).toFixed(1)}%`, name]}
+              formatter={(value, name) => [`${Number(value ?? 0).toFixed(1)}%`, String(name ?? "")]}
             />
           </PieChart>
         </ResponsiveContainer>

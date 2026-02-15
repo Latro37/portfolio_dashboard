@@ -1,10 +1,13 @@
+[CmdletBinding()]
 param(
     [ValidateSet("basic", "power")]
     [string]$Profile = "basic",
     [switch]$Visual,
     [switch]$UpdateSnapshots,
     [switch]$Headed,
-    [switch]$SkipPytest
+    [switch]$SkipPytest,
+    [Alias("?")]
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,8 +16,23 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"
 
-$env:CPV_TEST_MODE = "1"
-$env:CPV_DATABASE_URL = "sqlite:///data/portfolio_test.db"
+if ($Help) {
+    Write-Host "Usage: .\scripts\run-local-tests.ps1 [options]"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -Profile <basic|power>   Synthetic dataset profile (default: basic)"
+    Write-Host "  -Visual                  Run visual regression suite instead of E2E smoke tests"
+    Write-Host "  -UpdateSnapshots         With -Visual, update local visual baselines"
+    Write-Host "  -Headed                  Run headed browser E2E (ignored when -Visual is set)"
+    Write-Host "  -SkipPytest              Skip backend metric tests before E2E/visual tests"
+    Write-Host "  -Help or -?              Show this help and exit without running tests"
+    Write-Host ""
+    Write-Host "Note: this script seeds the test DB and starts temporary backend/frontend processes."
+    return
+}
+
+$env:PD_TEST_MODE = "1"
+$env:PD_DATABASE_URL = "sqlite:///data/portfolio_test.db"
 $env:NEXT_PUBLIC_API_URL = "http://localhost:8000/api"
 $env:PW_BASE_URL = "http://localhost:3000"
 
