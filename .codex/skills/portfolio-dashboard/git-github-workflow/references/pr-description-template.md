@@ -9,6 +9,10 @@
 - In scope:
 - Out of scope:
 
+## Coordination (Optional)
+- Depends on:
+- Notes for parallel work / expected conflicts:
+
 ## Significant Decisions and Rationale
 1. Decision:
 - Alternatives considered:

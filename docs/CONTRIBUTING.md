@@ -47,6 +47,39 @@ Use scoped commit messages such as:
 
 Keep each commit focused on one concern.
 
+## Working in Parallel (Multiple Agents)
+
+If multiple agents or engineers are contributing at the same time, prefer workflows that reduce merge conflicts and avoid shared working-directory state.
+
+### Recommended: `git worktree` per branch
+
+`git worktree` lets each agent work in an isolated folder while sharing the same `.git` repository.
+
+PowerShell example:
+
+```powershell
+git fetch --prune origin
+git switch master
+git pull --ff-only
+
+mkdir ..\\pd-worktrees -ErrorAction SilentlyContinue | Out-Null
+git worktree add ..\\pd-worktrees\\agent-alice-feat-metrics -b agent/alice/feat-metrics
+```
+
+### Branch naming and sync rules
+
+- Use one branch per logical change.
+- Prefer agent-scoped names when running parallel: `agent/<name>/<type>-<topic>`.
+- Keep branches current with `git fetch --prune origin` and `git rebase origin/master`.
+- Only force-push after rebasing, and only with lease: `git push --force-with-lease`.
+
+### Stacked PRs (optional)
+
+Use stacked PRs only when there is a real dependency:
+- PR-B is opened against PR-A's branch.
+- PR-B explicitly lists dependency in the PR description (see PR template "Coordination").
+- After PR-A merges, retarget PR-B to `master` and rebase onto `origin/master`.
+
 ## Contribution License
 
 By submitting a contribution, you agree that your contribution is licensed under this repository's [MIT License](../LICENSE).
