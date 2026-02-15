@@ -46,6 +46,10 @@ Use scoped commit messages such as:
 
 Keep each commit focused on one concern.
 
+## Contribution License
+
+By submitting a contribution, you agree that your contribution is licensed under this repository's [MIT License](../LICENSE).
+
 ## Minimum Validation Before Push
 
 - Backend changes: `python -m pytest backend/tests -q`
