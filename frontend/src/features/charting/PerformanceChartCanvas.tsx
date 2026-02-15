@@ -61,10 +61,16 @@ type EndLabelSeries = {
 
 const CHART_HEIGHT = 320;
 const CHART_MARGIN = { top: 5, right: 120, bottom: 5, left: 5 };
-const END_LABEL_GAP = 14;
+const CHART_MARGIN_NO_LABELS = { ...CHART_MARGIN, right: 20 };
+
+const END_LABEL_GAP = 16;
+const END_LABEL_FONT_SIZE = 11;
+const END_LABEL_FONT_WEIGHT = 700;
 
 function shortLabel(label: string): string {
-  return label.length > 10 ? `${label.slice(0, 9)}…` : label;
+  const maxChars = 10;
+  if (label.length <= maxChars) return label;
+  return `${label.slice(0, maxChars - 3)}...`;
 }
 
 export function PerformanceChartCanvas({
@@ -106,26 +112,7 @@ export function PerformanceChartCanvas({
   }, [tradingData]);
 
   const activeEndLabels = useMemo<EndLabelSeries[]>(() => {
-    if (mode === "portfolio") {
-      const labels: EndLabelSeries[] = [];
-      if (showDeposits) {
-        labels.push({
-          dataKey: "net_deposits",
-          label: "Deposits",
-          color: "#6366f1",
-          formatter: formatValue,
-        });
-      }
-      if (showPortfolio) {
-        labels.push({
-          dataKey: "portfolio_value",
-          label: "Portfolio",
-          color: "#10b981",
-          formatter: formatValue,
-        });
-      }
-      return labels;
-    }
+    if (mode === "portfolio") return [];
 
     if (mode === "twr") {
       const labels: EndLabelSeries[] = [
@@ -202,9 +189,6 @@ export function PerformanceChartCanvas({
     return labels;
   }, [
     mode,
-    showDeposits,
-    showPortfolio,
-    formatValue,
     overlayKey,
     showOverlay,
     overlayColor,
@@ -213,7 +197,7 @@ export function PerformanceChartCanvas({
     drawdownOverlayKey,
   ]);
 
-  const endLabelYByKey = useMemo(() => {
+  const endLabelOffsetByKey = useMemo(() => {
     const numericValues: number[] = [];
     activeEndLabels.forEach((series) => {
       for (let i = 0; i < tradingData.length; i += 1) {
@@ -233,8 +217,9 @@ export function PerformanceChartCanvas({
       domainMax = Math.max(domainMax, 0);
     }
 
-    const minY = CHART_MARGIN.top + 4;
-    const maxY = CHART_HEIGHT - CHART_MARGIN.bottom - 4;
+    const labelHalfHeight = END_LABEL_FONT_SIZE / 2;
+    const minY = CHART_MARGIN.top + 4 + labelHalfHeight;
+    const maxY = CHART_HEIGHT - CHART_MARGIN.bottom - 4 - labelHalfHeight;
 
     const candidates = activeEndLabels
       .map((series) => {
@@ -249,7 +234,17 @@ export function PerformanceChartCanvas({
       })
       .filter((candidate): candidate is { id: string; rawY: number } => candidate !== null);
 
-    return stackLabelPositions(candidates, minY, maxY, END_LABEL_GAP);
+    const stackedYByKey = stackLabelPositions(candidates, minY, maxY, END_LABEL_GAP);
+
+    const offsets: Record<string, number> = {};
+    candidates.forEach((candidate) => {
+      const stackedY = stackedYByKey[candidate.id];
+      if (typeof stackedY === "number") {
+        offsets[candidate.id] = stackedY - candidate.rawY;
+      }
+    });
+
+    return offsets;
   }, [activeEndLabels, lastIndexesByKey, mode, tradingData]);
 
   const createEndLabel = (
@@ -259,8 +254,8 @@ export function PerformanceChartCanvas({
     formatter: (value: number) => string,
   ) => {
     const lastIndex = lastIndexesByKey[dataKey];
-    const adjustedY = endLabelYByKey[dataKey];
-    if (lastIndex === undefined || adjustedY === undefined) return undefined;
+    const yOffset = endLabelOffsetByKey[dataKey];
+    if (lastIndex === undefined || yOffset === undefined) return undefined;
 
     function renderEndLabel(props: {
       index?: number;
@@ -271,18 +266,25 @@ export function PerformanceChartCanvas({
       if (
         props.index !== lastIndex ||
         typeof props.x !== "number" ||
+        typeof props.y !== "number" ||
         typeof props.value !== "number"
       ) {
         return null;
       }
+
+      const labelHalfHeight = END_LABEL_FONT_SIZE / 2;
+      const minY = CHART_MARGIN.top + 4 + labelHalfHeight;
+      const maxY = CHART_HEIGHT - CHART_MARGIN.bottom - 4 - labelHalfHeight;
+      const y = Math.min(maxY, Math.max(minY, props.y + yOffset));
       return (
         <text
           x={props.x + 8}
-          y={adjustedY}
+          y={y}
           fill={color}
-          fontSize={10}
-          fontWeight={600}
+          fontSize={END_LABEL_FONT_SIZE}
+          fontWeight={END_LABEL_FONT_WEIGHT}
           textAnchor="start"
+          dominantBaseline="middle"
         >
           {`${shortLabel(label)} ${formatter(props.value)}`}
         </text>
@@ -303,7 +305,7 @@ export function PerformanceChartCanvas({
   if (mode === "portfolio") {
     return (
       <ResponsiveContainer width="100%" height={320}>
-        <AreaChart data={tradingData} margin={CHART_MARGIN}>
+        <AreaChart data={tradingData} margin={CHART_MARGIN_NO_LABELS}>
           <defs>
             <linearGradient id={`pvGrad${uid}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -318,10 +320,10 @@ export function PerformanceChartCanvas({
           <YAxis tickFormatter={formatValue} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
           <Tooltip content={renderPortfolioTooltip} />
           {showDeposits && (
-            <Area type="monotone" dataKey="net_deposits" stroke="#6366f1" strokeWidth={1.5} fill={`url(#depGrad${uid})`} dot={false} label={createEndLabel("net_deposits", "Deposits", "#6366f1", formatValue)} />
+            <Area type="monotone" dataKey="net_deposits" stroke="#6366f1" strokeWidth={1.5} fill={`url(#depGrad${uid})`} dot={false} />
           )}
           {showPortfolio && (
-            <Area type="monotone" dataKey="portfolio_value" stroke="#10b981" strokeWidth={2} fill={`url(#pvGrad${uid})`} dot={false} label={createEndLabel("portfolio_value", "Portfolio", "#10b981", formatValue)} />
+            <Area type="monotone" dataKey="portfolio_value" stroke="#10b981" strokeWidth={2} fill={`url(#pvGrad${uid})`} dot={false} />
           )}
         </AreaChart>
       </ResponsiveContainer>
