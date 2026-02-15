@@ -73,7 +73,7 @@ export function SettingsModal({ onClose }: Props) {
                   type="text"
                   value={localPath}
                   onChange={(e) => { setLocalPath(e.target.value); setSaved(false); setError(""); }}
-                  placeholder="C:\Users\you\Documents\SymphonyBackups"
+                  placeholder="C:\\Users\\you\\Documents\\SymphonyBackups"
                   className="flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
                 <button
@@ -129,7 +129,7 @@ export function SettingsModal({ onClose }: Props) {
                 type="text"
                 value={ss.local_path}
                 onChange={(e) => { setSs((p) => ({ ...p, local_path: e.target.value })); setSsSaved(false); }}
-                placeholder="C:\Users\you\Documents\PortfolioSnapshots"
+                placeholder="C:\\Users\\you\\Documents\\PortfolioSnapshots"
                 className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
             </div>
@@ -236,7 +236,7 @@ export function SettingsModal({ onClose }: Props) {
                       onClick={() => { setSs((p) => ({ ...p, benchmarks: (p.benchmarks || []).filter((b) => b !== t) })); setSsSaved(false); }}
                       className="cursor-pointer text-muted-foreground hover:text-foreground ml-0.5"
                     >
-                      ✕
+                      x
                     </button>
                   </span>
                 ))}
@@ -293,7 +293,7 @@ export function SettingsModal({ onClose }: Props) {
                           className="rounded border-border accent-emerald-600"
                         />
                         {isAutoDisabled && (
-                          <span className="absolute inset-0 flex items-center justify-center text-red-500 text-[10px] font-bold pointer-events-none">✕</span>
+                          <span className="absolute inset-0 flex items-center justify-center text-red-500 text-[10px] font-bold pointer-events-none">x</span>
                         )}
                       </span>
                       <span className={`text-xs ${isAutoDisabled ? "text-red-400/70" : "text-foreground/80"}`}>{m.label}</span>
@@ -321,4 +321,3 @@ export function SettingsModal({ onClose }: Props) {
     </div>
   );
 }
-
