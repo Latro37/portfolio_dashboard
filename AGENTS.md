@@ -81,6 +81,21 @@ When the agent has full repository access and push capability, run the end-to-en
 
 Human-in-the-loop control occurs at PR review and approval. Do not bypass required review or merge protections.
 
+## Multi-Agent Git Workflow
+
+When multiple agents (or humans) need to work in this repository concurrently:
+
+1. Use one branch per logical change, and scope branches per agent when helpful:
+   - `agent/<name>/<type>-<topic>` (recommended)
+   - or `feat/<topic>-<agent>`
+2. Prefer `git worktree` so each agent has an isolated working directory and cannot trample uncommitted changes:
+   - Example:
+     - `mkdir ..\\pd-worktrees -ErrorAction SilentlyContinue | Out-Null`
+     - `git worktree add ..\\pd-worktrees\\agent-alice-fix-sync -b agent/alice/fix-sync`
+3. Keep branches current via `git fetch --prune origin` and `git rebase origin/master`.
+4. Use stacked PRs only when there is a true dependency, and call it out explicitly in the PR description (see PR template "Coordination").
+5. Avoid long-lived `git stash` entries; stashes are shared across worktrees. If you must stash, use a message identifying the agent and topic.
+
 ## Naming and Deprecation Policy
 
 - Prefer `PD_TEST_MODE` and `PD_DATABASE_URL`.

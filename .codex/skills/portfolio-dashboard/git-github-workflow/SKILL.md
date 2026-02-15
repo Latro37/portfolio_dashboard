@@ -27,12 +27,12 @@ When running in full access mode, execute the full branch->edit->commit->push->P
 - Read issue requirements and acceptance criteria.
 - Run `git status -sb`; require a clean or intentionally dirty worktree.
 - Run `git fetch --prune origin` to sync remote refs.
-- Confirm the base branch, usually `main`.
+- Confirm the base branch. In this repo it is `master`.
 
 ### 2. Create Branch
 
 - Branch from latest base:
-`git switch main && git pull --ff-only && git switch -c <type>/<scope>-<topic>`
+`git switch master && git pull --ff-only && git switch -c <type>/<scope>-<topic>`
 - Prefer prefixes: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`, `test/`.
 - Include issue id when available, for example: `feat/1234-position-sizing-alerts`.
 - Keep one branch per logical change.
@@ -55,7 +55,7 @@ Use `references/commit-message-patterns.md` for message patterns.
 ### 4. Sync Frequently
 
 - Rebase branch before push or PR:
-`git fetch origin && git rebase origin/main`
+`git fetch origin && git rebase origin/master`
 - Resolve conflicts immediately and rerun tests.
 - Use force push only after rebase, and only with lease:
 `git push --force-with-lease`
@@ -65,11 +65,11 @@ Use `references/commit-message-patterns.md` for message patterns.
 
 - Push branch: `git push -u origin <branch>`
 - Open PR in GitHub UI or CLI:
-`gh pr create --fill --base main --head <branch>`
+`gh pr create --fill --base master --head <branch>`
 - For non-trivial work, open a draft PR early and update it as checkpoints land.
 - Draft PR body from `references/pr-description-template.md`.
 - **PowerShell note (PR body formatting):** Prefer `gh pr create/edit --body-file <path>` over `--body "<string>"`.
-  - Passing multi-line bodies via `--body` in PowerShell can render literal `\n` sequences in GitHub’s UI depending on quoting/escaping.
+  - Passing multi-line bodies via `--body` in PowerShell can render literal `\n` sequences in GitHub's UI depending on quoting/escaping.
   - Use a here-string to build the Markdown body and write it to a temp file, then pass `--body-file`.
 - Include in every PR:
 1. Problem statement and solution summary
@@ -105,10 +105,49 @@ Use `references/commit-message-patterns.md` for message patterns.
 - Prefer squash merge for iterative branch history unless repository policy says otherwise.
 - Treat PR review as the required human-in-the-loop approval gate.
 - After merge:
-1. `git switch main && git pull --ff-only`
+1. `git switch master && git pull --ff-only`
 2. `git branch -d <branch>`
 3. `git push origin --delete <branch>` if remote branch is not auto-deleted
 - Close linked issue and record deferred follow-up work.
+
+## Parallel Work (Multiple Agents)
+
+Use this when multiple agents (or humans) need to work in the same repository concurrently.
+
+### Preferred: One Worktree Per Agent/Task
+
+Use `git worktree` so each agent has an isolated working directory (independent uncommitted changes, build artifacts, and `node_modules`).
+
+PowerShell example:
+
+```powershell
+git fetch --prune origin
+git switch master
+git pull --ff-only
+
+# Create a sibling folder to hold worktrees (outside the repo folder).
+mkdir ..\\pd-worktrees -ErrorAction SilentlyContinue | Out-Null
+
+# Create a new branch and worktree for an agent/task.
+git worktree add ..\\pd-worktrees\\agent-alice-feat-metrics-export -b agent/alice/feat-metrics-export
+
+# In that new worktree directory:
+cd ..\\pd-worktrees\\agent-alice-feat-metrics-export
+git status -sb
+```
+
+Notes:
+- Keep branches agent-scoped: `agent/<name>/<type>-<topic>` or `feat/<topic>-<agent>`.
+- Avoid `git stash` for long-lived work; stashes are shared across worktrees. If you must stash, name it: `git stash push -m "agent/alice: <topic>"`.
+- Only `--force-with-lease` your own branch, and never rewrite a branch another agent is actively based on without coordinating first.
+
+### Optional: Stacked PRs for Dependent Work
+
+If Agent B depends on Agent A:
+- Agent A opens PR-A to `master`.
+- Agent B branches from PR-A's branch and opens PR-B with base = PR-A branch.
+- PR-B should clearly state dependency (see PR template "Coordination").
+- After PR-A merges, retarget PR-B to `master` and rebase onto `origin/master`.
 
 ## Quality Gates for Every PR
 
