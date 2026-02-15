@@ -1,4 +1,4 @@
-"""One-command launcher for Composer Portfolio Visualizer.
+﻿"""One-command launcher for Portfolio Dashboard.
 
 Starts both the Python backend (FastAPI) and the Next.js frontend.
 Usage: python start.py [--test]
@@ -140,7 +140,7 @@ def open_browser_when_ready(url, timeout=30):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Composer Portfolio Visualizer launcher")
+    parser = argparse.ArgumentParser(description="Portfolio Dashboard launcher")
     parser.add_argument("--test", action="store_true", help="Enable __TEST__ demo account with synthetic data")
     args = parser.parse_args()
 
@@ -148,17 +148,20 @@ def main():
     install_deps()
 
     print("=" * 50)
-    print("  Composer Portfolio Visualizer")
+    print("  Portfolio Dashboard")
     if args.test:
         print("  (Test mode enabled)")
     print("=" * 50)
 
-    # Build env for backend — propagate test mode flag
+    # Build env for backend and propagate test mode flags.
     backend_env = os.environ.copy()
     if args.test:
-        backend_env["CPV_TEST_MODE"] = "1"
-        backend_env["CPV_DATABASE_URL"] = "sqlite:///data/portfolio_test.db"
+        backend_env["PD_TEST_MODE"] = "1"
+        backend_env["PD_DATABASE_URL"] = "sqlite:///data/portfolio_test.db"
     else:
+        backend_env.pop("PD_TEST_MODE", None)
+        backend_env.pop("PD_DATABASE_URL", None)
+        # Clear legacy aliases if present in caller env during transition period.
         backend_env.pop("CPV_TEST_MODE", None)
         backend_env.pop("CPV_DATABASE_URL", None)
 
@@ -229,3 +232,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
