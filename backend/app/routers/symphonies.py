@@ -94,7 +94,7 @@ def get_symphony_performance(
 def get_symphony_summary(
     symphony_id: str,
     account_id: str = Query(..., description="Sub-account ID that owns this symphony"),
-    period: Optional[str] = Query(None, description="Period filter: 1D,1W,1M,3M,6M,YTD,1Y,ALL"),
+    period: Optional[str] = Query(None, description="Period filter: 1W,1M,3M,6M,YTD,1Y,ALL"),
     start_date: Optional[str] = Query(None, description="Custom start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="Custom end date YYYY-MM-DD"),
     db: Session = Depends(get_db),

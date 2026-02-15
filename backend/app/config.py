@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 # Project root: two levels up from this file (backend/app/config.py -> project root)
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_DEFAULT_SYMPHONY_EXPORT_DIR = os.path.join(_PROJECT_ROOT, "symphony_exports")
+_DEFAULT_DAILY_SNAPSHOT_DIR = os.path.join(_PROJECT_ROOT, "daily_snapshots")
 
 
 def is_test_mode() -> bool:
@@ -78,7 +80,8 @@ _config_json_cache: Optional[dict] = None
 def _load_config_json() -> dict:
     """Load and cache config.json.
 
-    Returns a dict with keys 'accounts' (list) and optionally 'finnhub_api_key', 'settings', etc.
+    Returns a dict with key 'composer_accounts' (or legacy 'accounts') and optionally
+    'finnhub_api_key', 'settings', etc.
     """
     global _config_json_cache
     if _config_json_cache is not None:
@@ -91,13 +94,17 @@ def _load_config_json() -> dict:
             "Copy config.json.example to config.json and fill in your Composer API credentials."
         )
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        # Be liberal in what we accept: Windows editors often add a UTF-8 BOM.
+        with open(config_path, "r", encoding="utf-8-sig") as f:
             raw = json.load(f)
     except json.JSONDecodeError as e:
         raise ValueError(f"config.json is not valid JSON (line {e.lineno}). Check syntax.") from None
 
-    if not isinstance(raw, dict) or "accounts" not in raw:
-        raise ValueError("config.json must be a JSON object with an 'accounts' key.")
+    if not isinstance(raw, dict) or ("composer_accounts" not in raw and "accounts" not in raw):
+        raise ValueError(
+            "config.json must be a JSON object with a 'composer_accounts' key "
+            "(or legacy 'accounts')."
+        )
 
     _config_json_cache = raw
     return _config_json_cache
@@ -109,9 +116,9 @@ def load_accounts() -> List[AccountCredentials]:
     Raises FileNotFoundError with a helpful message if the file is missing.
     """
     data = _load_config_json()
-    account_list = data["accounts"]
+    account_list = data.get("composer_accounts") or data.get("accounts")
     if not isinstance(account_list, list) or len(account_list) == 0:
-        raise ValueError("config.json must contain a non-empty 'accounts' array.")
+        raise ValueError("config.json must contain a non-empty 'composer_accounts' array.")
     try:
         accounts = [AccountCredentials(**entry) for entry in account_list]
     except Exception:
@@ -158,7 +165,7 @@ def _save_config_json(data: dict):
 
 
 def load_symphony_export_config() -> Optional[dict]:
-    """Return the symphony_export config block, or None if not configured.
+    """Return the symphony_export config block.
 
     Always re-reads config.json from disk so that external edits
     are picked up without restart.
@@ -170,10 +177,13 @@ def load_symphony_export_config() -> Optional[dict]:
         data = _load_config_json()
         cfg = data.get("symphony_export")
         if not cfg or not isinstance(cfg, dict):
-            return None
+            return {"local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
+        local_path = str(cfg.get("local_path") or "").strip()
+        if not local_path:
+            return {**cfg, "local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
         return cfg
     except Exception:
-        return None
+        return {"local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
 
 
 def save_symphony_export_path(local_path: str):
@@ -186,7 +196,7 @@ def save_symphony_export_path(local_path: str):
 
 
 def load_screenshot_config() -> Optional[dict]:
-    """Return the screenshot config block, or None if not configured.
+    """Return the daily snapshot config block.
 
     Always re-reads config.json from disk.
     """
@@ -194,18 +204,26 @@ def load_screenshot_config() -> Optional[dict]:
     try:
         _config_json_cache = None
         data = _load_config_json()
-        cfg = data.get("screenshot")
+        # New key: daily_snapshot. Back-compat: screenshot.
+        cfg = data.get("daily_snapshot")
+        if not cfg:
+            cfg = data.get("screenshot")
         if not cfg or not isinstance(cfg, dict):
-            return None
+            return {"enabled": False, "local_path": _DEFAULT_DAILY_SNAPSHOT_DIR}
+        local_path = str(cfg.get("local_path") or "").strip()
+        if not local_path:
+            return {**cfg, "local_path": _DEFAULT_DAILY_SNAPSHOT_DIR}
         return cfg
     except Exception:
-        return None
+        return {"enabled": False, "local_path": _DEFAULT_DAILY_SNAPSHOT_DIR}
 
 
 def save_screenshot_config(config: dict):
-    """Persist the screenshot config block into config.json."""
+    """Persist the daily snapshot config block into config.json."""
     global _config_json_cache
     _config_json_cache = None
     data = _load_config_json()
-    data["screenshot"] = config
+    data["daily_snapshot"] = config
+    # Clean up legacy key if present.
+    data.pop("screenshot", None)
     _save_config_json(data)

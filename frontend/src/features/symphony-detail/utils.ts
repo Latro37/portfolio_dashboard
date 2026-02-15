@@ -61,11 +61,6 @@ export function isWeekday(dateStr: string): boolean {
 export function periodStartDate(period: SymphonyDetailPeriod): string {
   const now = new Date();
   switch (period) {
-    case "1D": {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 1);
-      return d.toISOString().slice(0, 10);
-    }
     case "1W": {
       const d = new Date(now);
       d.setDate(d.getDate() - 7);

@@ -1,6 +1,6 @@
 import type { ChartMode } from "@/features/charting/types";
 
-const PERIODS = ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
+const PERIODS = ["1W", "1M", "3M", "YTD", "1Y", "ALL"] as const;
 
 type Props = {
   mode: ChartMode;

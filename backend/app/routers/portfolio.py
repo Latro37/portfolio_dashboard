@@ -90,7 +90,7 @@ def list_accounts(db: Session = Depends(get_db)):
 @router.get("/summary", response_model=PortfolioSummary)
 def get_summary(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
-    period: Optional[str] = Query(None, description="1D,1W,1M,3M,YTD,1Y,ALL"),
+    period: Optional[str] = Query(None, description="1W,1M,3M,YTD,1Y,ALL"),
     start_date: Optional[str] = Query(None, description="Custom start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="Custom end date YYYY-MM-DD"),
     db: Session = Depends(get_db),
@@ -140,7 +140,7 @@ def get_summary_live(
 @router.get("/performance", response_model=List[PerformancePoint])
 def get_performance(
     account_id: Optional[str] = Query(None, description="Sub-account ID or all:<credential_name>"),
-    period: Optional[str] = Query(None, description="1D,1W,1M,3M,YTD,1Y,ALL"),
+    period: Optional[str] = Query(None, description="1W,1M,3M,YTD,1Y,ALL"),
     start_date: Optional[str] = Query(None, description="Custom start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="Custom end date YYYY-MM-DD"),
     db: Session = Depends(get_db),

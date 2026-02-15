@@ -1,6 +1,7 @@
 "use client";
 
 import { type RefObject } from "react";
+import { RefreshCw } from "lucide-react";
 
 import { BenchmarkEntry, SymphonyCatalogItem } from "@/lib/api";
 
@@ -144,8 +145,9 @@ export function SymphonyBacktestBenchmarkRow({
               onClick={onRefreshCatalog}
               className="cursor-pointer rounded-md bg-muted/50 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
               title="Refresh symphony list"
+              aria-label="Refresh symphony list"
             >
-              R
+              <RefreshCw className="h-3.5 w-3.5" />
             </button>
           </form>
           {catalogDropdownOpen && catalogMatches.length > 0 && (
