@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { api, CashFlowRow, TransactionRow } from "@/lib/api";
+import { api, CashFlowRow } from "@/lib/api";
+import { getCashFlowsQueryFn, getTransactionsQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Args = {
   accountId?: string;
@@ -10,10 +13,7 @@ type Args = {
 const PAGE_SIZE = 50;
 
 export function useDetailTabsData({ accountId, onDataChange }: Args) {
-  const [transactions, setTransactions] = useState<TransactionRow[]>([]);
-  const [txTotal, setTxTotal] = useState(0);
-  const [cashFlows, setCashFlows] = useState<CashFlowRow[]>([]);
-  const [txPage, setTxPage] = useState(0);
+  const [txPagesByAccount, setTxPagesByAccount] = useState<Record<string, number>>({});
 
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualDate, setManualDate] = useState("");
@@ -25,6 +25,34 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     accountId && accountId !== "all" && !accountId.startsWith("all:")
       ? accountId
       : undefined;
+
+  const pageScopeKey = accountId ?? "__all__";
+  const txPage = txPagesByAccount[pageScopeKey] ?? 0;
+  const txOffset = txPage * PAGE_SIZE;
+  const transactionsQuery = useQuery({
+    queryKey: queryKeys.transactions({
+      accountId,
+      limit: PAGE_SIZE,
+      offset: txOffset,
+    }),
+    queryFn: () =>
+      getTransactionsQueryFn({
+        accountId,
+        limit: PAGE_SIZE,
+        offset: txOffset,
+      }),
+    staleTime: 60000,
+  });
+
+  const cashFlowsQuery = useQuery({
+    queryKey: queryKeys.cashFlows(accountId),
+    queryFn: () => getCashFlowsQueryFn(accountId),
+    staleTime: 60000,
+  });
+
+  const transactions = transactionsQuery.data?.transactions ?? [];
+  const txTotal = transactionsQuery.data?.total ?? 0;
+  const cashFlows: CashFlowRow[] = cashFlowsQuery.data ?? [];
 
   const handleAddManual = async () => {
     if (!resolvedSingleAccountId || !manualDate || !manualAmount) return;
@@ -41,23 +69,16 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     setManualAmount("");
     setManualDesc("");
     setShowManualForm(false);
-    api.getCashFlows(accountId).then((data) => setCashFlows(data));
+    await cashFlowsQuery.refetch();
+    await transactionsQuery.refetch();
     onDataChange?.();
   };
 
-  useEffect(() => {
-    api.getTransactions(accountId, PAGE_SIZE, 0).then((data) => {
-      setTransactions(data.transactions);
-      setTxTotal(data.total);
-    });
-    api.getCashFlows(accountId).then((data) => setCashFlows(data));
-  }, [accountId]);
-
   const loadTxPage = (page: number) => {
-    setTxPage(page);
-    api.getTransactions(accountId, PAGE_SIZE, page * PAGE_SIZE).then((data) => {
-      setTransactions(data.transactions);
-    });
+    setTxPagesByAccount((previous) => ({
+      ...previous,
+      [pageScopeKey]: page,
+    }));
   };
 
   const totalPages = Math.ceil(txTotal / PAGE_SIZE);
