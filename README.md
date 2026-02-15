@@ -32,7 +32,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Performance chart** — Interactive chart with TWR, MWR, Portfolio Value, and Drawdown views. Adjustable time periods (1D–All) and custom date ranges.
 - **Live vs Backtest overlays** — Compare your live symphony results directly against the Composer backtest, charted side by side. Easily see any discrepancies.
 - **Benchmark overlays** — Compare your performance against SPY, QQQ, TQQQ, any ticker symbol, or other Composer symphonies. Up to 3 benchmarks at once.
-- **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. No need to look up IDs or URLs.
+- **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. Includes invested symphonies plus your Composer watchlist and drafts.
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
 - **Backtest caching** — Symphony backtests are cached locally and automatically re-fetched when you edit the symphony in Composer.
 - **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change.
@@ -320,7 +320,7 @@ Compare your performance against up to 3 benchmarks simultaneously:
 
 - **Predefined tickers** — Click **SPY**, **QQQ**, or **TQQQ** to toggle them on/off
 - **Custom ticker** — Click the **+** button, type any valid ticker symbol (e.g. `AAPL`, `BTC-USD`), and press Go
-- **Symphony by name** — Click **+**, start typing a symphony name (2+ characters), and select from the dropdown
+- **Symphony by name** — Click **+**, start typing a symphony name (2+ characters), and select from the dropdown. Results come from invested symphonies plus your watchlist and drafts.
 - **Symphony by URL/ID** — Paste a Composer symphony URL (e.g. `https://app.composer.trade/symphony/abc123/details`) or just the ID
 
 Benchmark lines are color-coded (orange, white, pink). Click an active benchmark button to remove it.
@@ -519,5 +519,4 @@ If you find a security issue, see [SECURITY.md](SECURITY.md) for reporting guida
 ## License
 
 Licensed under the MIT License. See [LICENSE](LICENSE).
-
 

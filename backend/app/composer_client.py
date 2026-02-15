@@ -12,6 +12,7 @@ from app.config import get_settings, AccountCredentials
 
 logger = logging.getLogger(__name__)
 _DEFAULT_HTTP_TIMEOUT = 30
+_COMPOSER_ORIGIN = "public-api"
 
 # Map Composer account_type strings to friendly display names
 ACCOUNT_TYPE_DISPLAY = {
@@ -36,7 +37,10 @@ class ComposerClient:
         self.__headers = {
             "x-api-key-id": api_key_id,
             "Authorization": f"Bearer {api_secret}",
+            # Required for backtest-api / stagehand-api endpoints (watchlist, drafts, etc).
+            "x-origin": _COMPOSER_ORIGIN,
             "accept": "application/json",
+            "Content-Type": "application/json",
         }
 
     @property
@@ -62,7 +66,7 @@ class ComposerClient:
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error(
-                "RATE LIMITED (429) on GET %s — Retry-After: %s, body: %s",
+                "RATE LIMITED (429) on GET %s - Retry-After: %s, body: %s",
                 endpoint, retry_after, resp.text[:500],
             )
         resp.raise_for_status()
@@ -75,7 +79,7 @@ class ComposerClient:
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error(
-                "RATE LIMITED (429) on GET %s — Retry-After: %s, body: %s",
+                "RATE LIMITED (429) on GET %s - Retry-After: %s, body: %s",
                 endpoint, retry_after, resp.text[:500],
             )
         resp.raise_for_status()
@@ -219,7 +223,7 @@ class ComposerClient:
         return rows
 
     # ------------------------------------------------------------------
-    # Non-trade activity (CSV) — deposits, fees, dividends
+    # Non-trade activity (CSV) - deposits, fees, dividends
     # ------------------------------------------------------------------
 
     def get_non_trade_activity(self, account_id: str, since: str = "2020-01-01", until: str = None) -> List[Dict]:
@@ -334,8 +338,8 @@ class ComposerClient:
         Returns the full backtest response with dvm_capital, stats, benchmarks, etc.
 
         Slippage & spread parameters:
-          - slippage_percent: 0.0005 (5 bps)  — Composer default is 1 bps (0.0001)
-          - spread_markup:    0.001  (10 bps)  — Composer default is 0
+          - slippage_percent: 0.0005 (5 bps)  - Composer default is 1 bps (0.0001)
+          - spread_markup:    0.001  (10 bps)  - Composer default is 0
           Our more conservative friction (5 bps/trade vs Composer's 1 bps) better
           approximates real-world execution costs.  This means backtest results from
           this app will be slightly lower than Composer's UI for the same period
@@ -354,7 +358,7 @@ class ComposerClient:
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
             logger.error(
-                "RATE LIMITED (429) on POST backtest %s — Retry-After: %s",
+                "RATE LIMITED (429) on POST backtest %s - Retry-After: %s",
                 symphony_id, retry_after,
             )
         if not resp.ok:
@@ -383,7 +387,7 @@ class ComposerClient:
         resp = requests.post(url, headers=self.headers, json=body, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
-            logger.error("RATE LIMITED (429) on POST dry-run — Retry-After: %s", retry_after)
+            logger.error("RATE LIMITED (429) on POST dry-run - Retry-After: %s", retry_after)
         if not resp.ok:
             logger.error("Dry-run failed (%s): %s", resp.status_code, resp.text[:500])
         resp.raise_for_status()
@@ -403,7 +407,7 @@ class ComposerClient:
         resp = requests.post(url, headers=self.headers, json=body, timeout=_DEFAULT_HTTP_TIMEOUT)
         if resp.status_code == 429:
             retry_after = resp.headers.get("Retry-After", "unknown")
-            logger.error("RATE LIMITED (429) on POST trade-preview %s — Retry-After: %s", symphony_id, retry_after)
+            logger.error("RATE LIMITED (429) on POST trade-preview %s - Retry-After: %s", symphony_id, retry_after)
         if not resp.ok:
             logger.error("Trade preview %s failed (%s): %s", symphony_id, resp.status_code, resp.text[:500])
         resp.raise_for_status()
@@ -413,10 +417,8 @@ class ComposerClient:
 
     # ------------------------------------------------------------------
     # Watchlist & Drafts (backtest-api subdomain)
-    # NOTE: These endpoints require Composer's web session auth (API
-    #       Gateway), not API-key auth.  They will return 404 when
-    #       called with API keys.  Kept as stubs for future use if
-    #       Composer adds API-key support.
+    # NOTE: These endpoints use the same API key id + API secret, but require
+    # an x-origin header (public-api).
     # ------------------------------------------------------------------
 
     @property
@@ -428,38 +430,41 @@ class ComposerClient:
         """Fetch the user's watchlisted symphonies from backtest-api.
 
         Returns list of dicts with at least 'id' and 'name' keys.
-        Silently returns [] if the endpoint is unavailable (common — requires web session auth).
         """
         url = f"{self._backtest_api_base}/api/v1/watchlist"
-        try:
-            resp = requests.get(url, headers=self.headers, timeout=_DEFAULT_HTTP_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-            items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
-            logger.info("Watchlist: %d symphonies", len(items))
-            return items
-        except Exception as e:
-            logger.debug("Watchlist unavailable (expected with API-key auth): %s", e)
-            return []
+        resp = requests.get(url, headers=self.headers, timeout=_DEFAULT_HTTP_TIMEOUT)
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "unknown")
+            logger.error(
+                "RATE LIMITED (429) on GET watchlist - Retry-After: %s, body: %s",
+                retry_after,
+                resp.text[:500],
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
+        logger.info("Watchlist: %d symphonies", len(items))
+        return items
 
     def get_drafts(self) -> List[Dict]:
         """Fetch the user's draft symphonies from backtest-api.
 
         Returns list of dicts with at least 'id' and 'name' keys.
-        Silently returns [] if the endpoint is unavailable (common — requires web session auth).
         """
         url = f"{self._backtest_api_base}/api/v1/user/symphonies/drafts"
-        try:
-            resp = requests.get(url, headers=self.headers, timeout=_DEFAULT_HTTP_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-            items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
-            logger.info("Drafts: %d symphonies", len(items))
-            return items
-        except Exception as e:
-            logger.debug("Drafts unavailable (expected with API-key auth): %s", e)
-            return []
-
+        resp = requests.get(url, headers=self.headers, timeout=_DEFAULT_HTTP_TIMEOUT)
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "unknown")
+            logger.error(
+                "RATE LIMITED (429) on GET drafts - Retry-After: %s, body: %s",
+                retry_after,
+                resp.text[:500],
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get("symphonies", data.get("items", []))
+        logger.info("Drafts: %d symphonies", len(items))
+        return items
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

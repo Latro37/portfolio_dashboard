@@ -9,7 +9,7 @@ async function fetchJSON<T>(path: string): Promise<T> {
   if (res.status === 429) {
     const body = await res.text().catch(() => "");
     console.error(
-      `[RATE LIMITED] 429 on ${path} — Retry-After: ${res.headers.get("Retry-After") ?? "unknown"}, body: ${body.slice(0, 500)}`
+      `[RATE LIMITED] 429 on ${path} - Retry-After: ${res.headers.get("Retry-After") ?? "unknown"}, body: ${body.slice(0, 500)}`
     );
     throw new Error(`Rate limited on ${path}. Try again later.`);
   }

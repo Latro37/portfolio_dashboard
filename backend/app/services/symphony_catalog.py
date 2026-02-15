@@ -22,6 +22,7 @@ def _refresh_symphony_catalog(db: Session) -> None:
     accounts_creds = load_accounts()
     now = datetime.utcnow()
     entries: Dict[str, tuple] = {}
+    had_errors = False
 
     for creds in accounts_creds:
         client = ComposerClient.from_credentials(creds)
@@ -37,6 +38,7 @@ def _refresh_symphony_catalog(db: Session) -> None:
                         entries[sid] = (sid, name, "invested", creds.name)
             except Exception as exc:
                 logger.warning("Catalog: failed invested fetch for %s/%s: %s", creds.name, acct.id, exc)
+                had_errors = True
 
         try:
             watchlist = client.get_watchlist()
@@ -47,6 +49,7 @@ def _refresh_symphony_catalog(db: Session) -> None:
                     entries[sid] = (sid, name, "watchlist", creds.name)
         except Exception as exc:
             logger.warning("Catalog: failed watchlist fetch for %s: %s", creds.name, exc)
+            had_errors = True
 
         try:
             drafts = client.get_drafts()
@@ -57,6 +60,7 @@ def _refresh_symphony_catalog(db: Session) -> None:
                     entries[sid] = (sid, name, "draft", creds.name)
         except Exception as exc:
             logger.warning("Catalog: failed drafts fetch for %s: %s", creds.name, exc)
+            had_errors = True
 
     for sid, name, source, cred_name in entries.values():
         existing = db.query(SymphonyCatalogEntry).filter_by(symphony_id=sid).first()
@@ -75,6 +79,15 @@ def _refresh_symphony_catalog(db: Session) -> None:
                     updated_at=now,
                 )
             )
+
+    if not had_errors:
+        valid_ids = list(entries.keys())
+        if valid_ids:
+            db.query(SymphonyCatalogEntry).filter(
+                ~SymphonyCatalogEntry.symphony_id.in_(valid_ids)
+            ).delete(synchronize_session=False)
+        else:
+            db.query(SymphonyCatalogEntry).delete(synchronize_session=False)
 
     db.commit()
     logger.info("Symphony catalog refreshed: %d entries", len(entries))

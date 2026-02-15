@@ -2,8 +2,13 @@ import { Dispatch, SetStateAction, useCallback, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AccountInfo, ScreenshotConfig } from "@/lib/api";
-import { invalidateAfterConfigWrite } from "@/lib/queryInvalidation";
-import { getAccountsQueryFn, getConfigQueryFn } from "@/lib/queryFns";
+import {
+  invalidateAfterConfigWrite,
+} from "@/lib/queryInvalidation";
+import {
+  getAccountsQueryFn,
+  getConfigQueryFn,
+} from "@/lib/queryFns";
 import { queryKeys } from "@/lib/queryKeys";
 import { api } from "@/lib/api";
 import { defaultScreenshot } from "@/features/settings/options";
