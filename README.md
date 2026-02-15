@@ -388,18 +388,27 @@ python -m venv .venv
 # - macOS/Linux:          deactivate
 
 python -m pip install -r requirements.txt
+
+# If you use a non-default frontend port, set PD_ALLOWED_ORIGINS to match it.
+# Example (frontend on 3010):
+# - Windows (PowerShell): $env:PD_ALLOWED_ORIGINS="http://localhost:3010,http://127.0.0.1:3010"
+# - Windows (cmd.exe):    set PD_ALLOWED_ORIGINS=http://localhost:3010,http://127.0.0.1:3010
+# - macOS/Linux:          export PD_ALLOWED_ORIGINS="http://localhost:3010,http://127.0.0.1:3010"
+
 python -m uvicorn app.main:app --port 8000
 # optionally, use a custom port e.g. --port 8080
+```
 
-# Terminal 2 — Frontend
+Frontend (Terminal 2):
+```bash
 cd frontend
 npm install
 npm run dev
-# optionally, use a custom port e.g. npm run dev -- -p 3010 (then restart the backend with PD_ALLOWED_ORIGINS for that port)
+# optionally, use a custom port e.g. npm run dev -- -p 3010
 ```
 Then open **http://localhost:3000** (or your chosen frontend port) in your browser.
 
-If you use a non-default frontend port, either start via `python start.py --frontend-port <port>` (recommended) or set `PD_ALLOWED_ORIGINS` when running the backend to match that port (example: `http://localhost:<port>,http://127.0.0.1:<port>`).
+If you use a non-default frontend port, make sure the backend `PD_ALLOWED_ORIGINS` matches it (see backend commands above). Tip: `python start.py --frontend-port <port>` wires this automatically.
 
 ### Stopping the App
 
