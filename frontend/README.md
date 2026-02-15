@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend Guide
 
-## Getting Started
+## Purpose
 
-First, run the development server:
+This frontend renders the Portfolio Dashboard UI and consumes FastAPI backend endpoints exposed under `/api`.
+
+## Stack
+
+- Next.js App Router
+- TypeScript
+- Tailwind CSS
+- Recharts
+- Playwright (E2E + visual)
+- Vitest (unit tests)
+
+## Folder Layout
+
+- `src/app/*`: app shell and entry page
+- `src/features/dashboard/*`: dashboard orchestration hooks, container, snapshot pipeline
+- `src/features/symphony-detail/*`: symphony detail container, tabs, and stateful hooks
+- `src/features/trade-preview/*`: trade preview data hook and container
+- `src/features/settings/*`: settings modal state and container
+- `src/features/charting/*`: shared chart contracts, transforms, controls, and tooltip math
+- `src/components/*`: shared UI and compatibility re-export facades
+- `src/lib/*`: API client and utilities
+
+## Boundary Rules
+
+1. Keep orchestration and side effects in feature hooks/containers.
+2. Keep shared chart math in `src/features/charting/*` only.
+3. Keep `src/components/*` focused on presentational/shared UI and stable re-export paths.
+4. Do not duplicate benchmark rebasing/drawdown logic across views.
+
+## Development Commands
+
+From `frontend/`:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run lint
+npm run test:unit
+npm run test:e2e:basic
+npm run test:e2e:power
+npm run test:visual
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## E2E and Visual Orchestration
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Preferred from repository root:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Profile basic
+powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Profile power
+powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Visual
+```
 
-## Learn More
+Use script orchestration unless backend/frontend are already running manually.
 
-To learn more about Next.js, take a look at the following resources:
+## Common Workflow
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Make a focused feature change.
+2. Run `npm run lint`.
+3. Run root script profile for integrated checks.
+4. For charting changes, run visual regression.
+5. Update docs if boundaries or behavior expectations changed.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Related Docs
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `../AGENTS.md`
+- `../docs/ARCHITECTURE.md`
+- `../docs/TESTING.md`
+- `../docs/TEST_MATRIX.md`
+- `../docs/TQ1_TANSTACK_QUERY_BLUEPRINT.md`
