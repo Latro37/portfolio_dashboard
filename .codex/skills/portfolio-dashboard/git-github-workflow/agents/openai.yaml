@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Workflow"
+  short_description: "Daily Git and GitHub delivery workflow guide"
+  default_prompt: "Use $git-github-workflow to run a safe branch-to-PR workflow with clear tests and rationale."

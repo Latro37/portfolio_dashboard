@@ -1,0 +1,117 @@
+---
+name: git-github-workflow
+description: Best-practice Git and GitHub workflow guidance for day-to-day software delivery. Use when Codex needs to plan or execute branch setup, commit and push hygiene, pull request authoring, test plan reporting, review iteration, merge strategy, and post-merge cleanup with clear rationale documentation.
+---
+
+# GitHub Delivery Workflow
+
+## Overview
+
+Run a consistent workflow from issue pickup to merged pull request.
+Keep history readable, PRs reviewable, and significant decisions traceable.
+
+## Workflow
+
+### 1. Start Safely
+
+- Read issue requirements and acceptance criteria.
+- Run `git status -sb`; require a clean or intentionally dirty worktree.
+- Run `git fetch --prune origin` to sync remote refs.
+- Confirm the base branch, usually `main`.
+
+### 2. Create Branch
+
+- Branch from latest base:
+`git switch main && git pull --ff-only && git switch -c <type>/<scope>-<topic>`
+- Prefer prefixes: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`, `test/`.
+- Include issue id when available, for example: `feat/1234-position-sizing-alerts`.
+- Keep one branch per logical change.
+
+### 3. Implement with Commit Hygiene
+
+- Commit only logically related changes.
+- Keep commits atomic and buildable; split large work before commit.
+- Write commit messages in imperative style.
+- Prefer format: `type(scope): short summary`.
+- Keep subject lines under 72 characters.
+- Explain why in the body when the change is non-obvious.
+- Before commit:
+1. Review staged diff: `git diff --staged`
+2. Run relevant lint/tests
+3. Confirm no secrets or generated noise
+
+Use `references/commit-message-patterns.md` for message patterns.
+
+### 4. Sync Frequently
+
+- Rebase branch before push or PR:
+`git fetch origin && git rebase origin/main`
+- Resolve conflicts immediately and rerun tests.
+- Use force push only after rebase, and only with lease:
+`git push --force-with-lease`
+- Avoid merge commits on feature branches unless repository policy requires them.
+
+### 5. Push and Open Pull Request
+
+- Push branch: `git push -u origin <branch>`
+- Open PR in GitHub UI or CLI:
+`gh pr create --fill --base main --head <branch>`
+- Draft PR body from `references/pr-description-template.md`.
+- Include in every PR:
+1. Problem statement and solution summary
+2. Scope and explicit non-goals
+3. Significant decisions with rationale
+4. Test plan with exact commands and observed results
+5. Risks and rollback notes when relevant
+6. Screenshots or logs for UI/behavior changes
+
+### 6. Document Significant Decisions
+
+- Record tradeoffs in the PR under "Significant decisions and rationale."
+- For high-impact choices, create a separate entry using
+`references/decision-rationale-template.md`.
+- Capture:
+1. Context and constraints
+2. Alternatives considered
+3. Chosen option and reasoning
+4. Consequences and follow-up work
+
+### 7. Manage Review Iterations
+
+- Address comments in focused follow-up commits.
+- Keep PR discussion current:
+1. Resolve threads with concrete responses
+2. Post a short change summary after major updates
+3. Update test plan when behavior changes
+- Re-request review after substantial updates.
+
+### 8. Merge and Clean Up
+
+- Merge only after approvals and required CI checks pass.
+- Prefer squash merge for iterative branch history unless repository policy says otherwise.
+- After merge:
+1. `git switch main && git pull --ff-only`
+2. `git branch -d <branch>`
+3. `git push origin --delete <branch>` if remote branch is not auto-deleted
+- Close linked issue and record deferred follow-up work.
+
+## Quality Gates for Every PR
+
+- Ensure lint/tests pass at the required scope.
+- Ensure the test plan is reproducible by another engineer.
+- Ensure non-trivial decisions include clear rationale.
+- Ensure no unrelated file edits or secret material are present.
+- Ensure branch is current with base at merge time.
+
+## Stop Conditions
+
+- Stop and clarify when acceptance criteria are missing or conflicting.
+- Stop and clarify when unrelated local changes appear in target files.
+- Stop and clarify when required tests cannot run in the current environment.
+- Stop and clarify before rewriting shared history on protected branches.
+
+## References
+
+- PR template: `references/pr-description-template.md`
+- Decision rationale template: `references/decision-rationale-template.md`
+- Commit message patterns: `references/commit-message-patterns.md`
