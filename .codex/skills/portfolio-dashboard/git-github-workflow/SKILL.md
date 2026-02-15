@@ -68,6 +68,9 @@ Use `references/commit-message-patterns.md` for message patterns.
 `gh pr create --fill --base main --head <branch>`
 - For non-trivial work, open a draft PR early and update it as checkpoints land.
 - Draft PR body from `references/pr-description-template.md`.
+- **PowerShell note (PR body formatting):** Prefer `gh pr create/edit --body-file <path>` over `--body "<string>"`.
+  - Passing multi-line bodies via `--body` in PowerShell can render literal `\n` sequences in GitHub’s UI depending on quoting/escaping.
+  - Use a here-string to build the Markdown body and write it to a temp file, then pass `--body-file`.
 - Include in every PR:
 1. Problem statement and solution summary
 2. Scope and explicit non-goals
