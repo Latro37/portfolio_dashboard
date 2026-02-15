@@ -7,6 +7,10 @@ This project supports local-only testing with:
 - optional Playwright visual snapshot tests
 - strict DB isolation via `PD_DATABASE_URL` (legacy `CPV_DATABASE_URL` alias supported)
 
+Related references:
+- `docs/TEST_MATRIX.md` for required validation gates by change scope
+- `docs/OPERATIONS_RUNBOOK.md` for troubleshooting and safe recovery
+
 ## One-time Setup
 
 ### Backend dependencies
