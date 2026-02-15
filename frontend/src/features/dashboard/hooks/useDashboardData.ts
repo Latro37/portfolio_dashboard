@@ -172,9 +172,13 @@ export function useDashboardData({
   }, [performanceQuery.data]);
 
   const summary =
-    summaryOverride !== undefined ? summaryOverride : summaryQuery.data ?? null;
+    summaryOverride !== undefined
+      ? summaryOverride
+      : summaryQuery.data ?? null;
   const holdings =
-    holdingsOverride !== undefined ? holdingsOverride : holdingsQuery.data ?? null;
+    holdingsOverride !== undefined
+      ? holdingsOverride
+      : holdingsQuery.data ?? null;
   const performance =
     performanceOverride !== undefined
       ? performanceOverride
@@ -190,16 +194,18 @@ export function useDashboardData({
   const queryError = summaryQuery.error?.message ?? holdingsQuery.error?.message ?? null;
   const error = manualError ?? queryError;
 
+  const hasSummaryData = summaryQuery.data != null;
+  const hasHoldingsData = holdingsQuery.data != null;
+  const hasPerformanceData = performanceQuery.data != null;
+  const hasSymphonyData = symphoniesQuery.data != null;
+
   const hasPendingCriticalRead =
     Boolean(resolvedAccountId) &&
-    (summaryQuery.isLoading ||
-      holdingsQuery.isLoading ||
-      performanceQuery.isLoading ||
-      symphoniesQuery.isLoading ||
-      summaryQuery.isFetching ||
-      holdingsQuery.isFetching ||
-      performanceQuery.isFetching ||
-      symphoniesQuery.isFetching);
+    ((!hasSummaryData && (summaryQuery.isLoading || summaryQuery.isFetching)) ||
+      (!hasHoldingsData && (holdingsQuery.isLoading || holdingsQuery.isFetching)) ||
+      (!hasPerformanceData &&
+        (performanceQuery.isLoading || performanceQuery.isFetching)) ||
+      (!hasSymphonyData && (symphoniesQuery.isLoading || symphoniesQuery.isFetching)));
   const loading = !resolvedAccountId || hasPendingCriticalRead || (manualLoading && hasPendingCriticalRead);
 
   const setSummary: Dispatch<SetStateAction<Summary | null>> = useCallback(

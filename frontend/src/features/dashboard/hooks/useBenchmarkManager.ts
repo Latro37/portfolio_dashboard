@@ -1,6 +1,13 @@
 import { useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { api, BenchmarkEntry } from "@/lib/api";
+import { BenchmarkEntry } from "@/lib/api";
+import {
+  getBenchmarkHistoryQueryFn,
+  getSymphonyBenchmarkQueryFn,
+  queryRetryOverrides,
+} from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 const BENCH_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
@@ -9,40 +16,81 @@ function clampLabel(value: string): string {
 }
 
 export function useBenchmarkManager(resolvedAccountId?: string) {
+  const queryClient = useQueryClient();
   const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
 
   const handleBenchmarkAdd = useCallback(
     (ticker: string) => {
       if (benchmarks.length >= 3 || benchmarks.some((b) => b.ticker === ticker)) return;
-      const color = BENCH_COLORS.find((c) => !benchmarks.some((b) => b.color === c)) || BENCH_COLORS[0];
+      const color =
+        BENCH_COLORS.find((candidate) => !benchmarks.some((b) => b.color === candidate)) ||
+        BENCH_COLORS[0];
       const placeholder: BenchmarkEntry = { ticker, label: ticker, data: [], color };
-      setBenchmarks((prev) => [...prev, placeholder]);
+      setBenchmarks((previous) => [...previous, placeholder]);
 
       if (ticker.startsWith("symphony:")) {
-        const symId = ticker.slice(9);
-        api
-          .getSymphonyBenchmark(symId)
-          .then((res) => {
-            const label = clampLabel(res.name || symId);
-            setBenchmarks((prev) =>
-              prev.map((b) => (b.ticker === ticker ? { ...b, label, data: res.data } : b)),
+        const symphonyId = ticker.slice(9);
+        void queryClient
+          .fetchQuery({
+            queryKey: queryKeys.symphonyBenchmark({
+              symphonyId,
+              accountId: resolvedAccountId ?? "",
+            }),
+            queryFn: () => getSymphonyBenchmarkQueryFn(symphonyId),
+            staleTime: 900000,
+            ...queryRetryOverrides.symphonyBenchmark,
+          })
+          .then((response) => {
+            const label = clampLabel(response.name || symphonyId);
+            setBenchmarks((previous) =>
+              previous.map((entry) =>
+                entry.ticker === ticker
+                  ? { ...entry, label, data: response.data }
+                  : entry,
+              ),
             );
           })
-          .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
-      } else {
-        api
-          .getBenchmarkHistory(ticker, undefined, undefined, resolvedAccountId)
-          .then((res) =>
-            setBenchmarks((prev) => prev.map((b) => (b.ticker === ticker ? { ...b, data: res.data } : b))),
-          )
-          .catch(() => setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker)));
+          .catch(() =>
+            setBenchmarks((previous) =>
+              previous.filter((entry) => entry.ticker !== ticker),
+            ),
+          );
+        return;
       }
+
+      void queryClient
+        .fetchQuery({
+          queryKey: queryKeys.benchmarkHistory({
+            ticker,
+            accountId: resolvedAccountId,
+          }),
+          queryFn: () =>
+            getBenchmarkHistoryQueryFn({
+              ticker,
+              accountId: resolvedAccountId,
+            }),
+          staleTime: 900000,
+        })
+        .then((response) =>
+          setBenchmarks((previous) =>
+            previous.map((entry) =>
+              entry.ticker === ticker ? { ...entry, data: response.data } : entry,
+            ),
+          ),
+        )
+        .catch(() =>
+          setBenchmarks((previous) =>
+            previous.filter((entry) => entry.ticker !== ticker),
+          ),
+        );
     },
-    [benchmarks, resolvedAccountId],
+    [benchmarks, queryClient, resolvedAccountId],
   );
 
   const handleBenchmarkRemove = useCallback((ticker: string) => {
-    setBenchmarks((prev) => prev.filter((b) => b.ticker !== ticker));
+    setBenchmarks((previous) =>
+      previous.filter((entry) => entry.ticker !== ticker),
+    );
   }, []);
 
   return {
