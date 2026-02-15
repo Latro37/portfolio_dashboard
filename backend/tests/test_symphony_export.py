@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models import SyncState
+from app.models import Account, SyncState
 from app.services import symphony_export
 
 
@@ -64,6 +64,16 @@ def test_export_all_symphonies_includes_drafts_and_avoids_name_collisions(
 
     client = _StubClient()
     account_id = "acct-001"
+    db_session.add(
+        Account(
+            id=account_id,
+            credential_name="Primary",
+            account_type="INDIVIDUAL",
+            display_name="Test",
+            status="ACTIVE",
+        )
+    )
+    db_session.commit()
 
     symphony_export.export_all_symphonies(db_session, client, account_id=account_id)
 
@@ -85,10 +95,11 @@ def test_export_all_symphonies_includes_drafts_and_avoids_name_collisions(
     assert inv_state.value == "2025-01-01T00:00:00Z"
 
     # Hash-based state is used when versions are unavailable.
+    draft_state_account_id = "__DRAFTS__:Primary"
     for sid in ("draft-1", "draft-2"):
         row = (
             db_session.query(SyncState)
-            .filter_by(account_id=account_id, key=f"symphony_export_hash:{sid}")
+            .filter_by(account_id=draft_state_account_id, key=f"symphony_export_hash:{sid}")
             .first()
         )
         assert row is not None
@@ -101,4 +112,3 @@ def test_export_all_symphonies_includes_drafts_and_avoids_name_collisions(
 
     monkeypatch.setattr(symphony_export, "_save_local", _unexpected_save)
     symphony_export.export_all_symphonies(db_session, client, account_id=account_id)
-

@@ -13,13 +13,14 @@ from sqlalchemy.orm import Session
 
 from app.composer_client import ComposerClient
 from app.config import load_symphony_export_config
-from app.models import SyncState
+from app.models import Account, SyncState
 from app.services.local_paths import LocalPathError, resolve_local_write_path
 
 logger = logging.getLogger(__name__)
 
 # Characters not allowed in file/folder names (Windows + Unix)
 _UNSAFE_CHARS = re.compile(r'[\\/:*?"<>|]+')
+_DRAFTS_STATE_ACCOUNT_PREFIX = "__DRAFTS__:"
 
 
 def _sanitize_name(name: str) -> str:
@@ -102,16 +103,18 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         return
 
     # Export should include invested symphonies *and* the user's drafts.
-    # Drafts are user-scoped and fetched via backtest-api.
-    symphony_targets: Dict[str, str] = {}
+    # Drafts are user-scoped; during sync we run once per account, so draft export
+    # state must be shared across all sub-accounts under the same credential.
+    invested_targets: Dict[str, str] = {}
+    draft_targets: Dict[str, str] = {}
 
     try:
         symphonies = client.get_symphony_stats(account_id) or []
         for s in symphonies:
             sym_id = s.get("id", "")
             sym_name = s.get("name", "Unknown")
-            if sym_id and sym_id not in symphony_targets:
-                symphony_targets[sym_id] = sym_name
+            if sym_id and sym_id not in invested_targets:
+                invested_targets[sym_id] = sym_name
     except Exception as e:
         logger.warning("Failed to fetch symphony stats for export (%s): %s", account_id, e)
 
@@ -120,14 +123,24 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         for s in drafts:
             sym_id = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
             sym_name = s.get("name", "Unknown")
-            if sym_id and sym_id not in symphony_targets:
-                symphony_targets[sym_id] = sym_name
+            if sym_id and sym_id not in invested_targets and sym_id not in draft_targets:
+                draft_targets[sym_id] = sym_name
     except Exception as e:
         logger.warning("Failed to fetch drafts for export (%s): %s", account_id, e)
 
+    # Drafts are credential-scoped, not account-scoped.
+    drafts_state_account_id = account_id
+    try:
+        acct = db.query(Account).filter_by(id=account_id).first()
+        if acct and acct.credential_name:
+            drafts_state_account_id = f"{_DRAFTS_STATE_ACCOUNT_PREFIX}{acct.credential_name}"
+    except Exception as exc:
+        logger.warning("Failed to resolve credential scope for drafts export (%s): %s", account_id, exc)
+
     exported = 0
 
-    for sym_id, sym_name in symphony_targets.items():
+    def _export_one(sym_id: str, sym_name: str, *, state_account_id: str) -> bool:
+        nonlocal exported
         sym_name = sym_name or "Unknown"
 
         # Use versions endpoint for lightweight change detection
@@ -135,7 +148,7 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
             versions = client.get_symphony_versions(sym_id)
         except Exception as e:
             logger.warning("Failed to fetch versions for symphony %s: %s", sym_id, e)
-            continue
+            return False
 
         latest_ts = ""
         if versions:
@@ -146,14 +159,14 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         # Check if we already exported this version (timestamp-based)
         state_key_ts = f"symphony_export:{sym_id}"
         if latest_ts:
-            last_exported = _get_sync_state(db, account_id, state_key_ts)
+            last_exported = _get_sync_state(db, state_account_id, state_key_ts)
             if last_exported and last_exported >= latest_ts:
-                continue
+                return False
 
         # Fetch full structure via /score
         score = client.get_symphony_score(sym_id)
         if not score:
-            continue
+            return False
 
         # Drafts (and occasionally invested symphonies) can return an empty versions list;
         # use a content hash fallback so we still export once and only re-export on actual
@@ -162,25 +175,32 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         if not latest_ts:
             canonical = json.dumps(score, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
             score_hash = hashlib.sha256(canonical).hexdigest()
-            last_hash = _get_sync_state(db, account_id, state_key_hash)
+            last_hash = _get_sync_state(db, state_account_id, state_key_hash)
             if last_hash and last_hash == score_hash:
-                continue
+                return False
 
             _save_local(local_path, sym_name, score, symphony_id=sym_id)
-            _set_sync_state(db, account_id, state_key_hash, score_hash)
+            _set_sync_state(db, state_account_id, state_key_hash, score_hash)
         else:
             _save_local(local_path, sym_name, score, symphony_id=sym_id)
 
             if latest_ts:
-                _set_sync_state(db, account_id, state_key_ts, latest_ts)
+                _set_sync_state(db, state_account_id, state_key_ts, latest_ts)
 
         exported += 1
         time.sleep(0.3)  # gentle rate limit between version fetches
+        return True
+
+    for sym_id, sym_name in invested_targets.items():
+        _export_one(sym_id, sym_name, state_account_id=account_id)
+
+    for sym_id, sym_name in draft_targets.items():
+        _export_one(sym_id, sym_name, state_account_id=drafts_state_account_id)
 
     logger.info(
         "Symphony export for %s: %d exported, %d total",
         account_id,
         exported,
-        len(symphony_targets),
+        len(invested_targets) + len(draft_targets),
     )
 
