@@ -369,13 +369,24 @@ python start.py --no-venv
 ```
 
 **Option B: Manual start** (two terminals)
+Backend (Terminal 1):
 ```bash
-# Terminal 1 — Backend
 cd backend
-pip install -r requirements.txt
-python -m uvicorn app.main:app --port 8000
 
-# Terminal 2 — Frontend
+# Optional (recommended): install into a venv at backend/.venv (matches start.py default)
+python -m venv .venv
+
+# Activate the venv:
+# - Windows (PowerShell): .\.venv\Scripts\Activate.ps1
+# - Windows (cmd.exe):    .\.venv\Scripts\activate.bat
+# - macOS/Linux:          source .venv/bin/activate
+
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --port 8000
+```
+
+Frontend (Terminal 2):
+```bash
 cd frontend
 npm install
 npm run dev
