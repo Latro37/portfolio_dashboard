@@ -1,11 +1,15 @@
 import {
   type Dispatch,
   type SetStateAction,
-  useEffect,
+  useCallback,
+  useMemo,
   useState,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { api, AccountInfo, ScreenshotConfig } from "@/lib/api";
+import { AccountInfo, ScreenshotConfig } from "@/lib/api";
+import { getAccountsQueryFn, getConfigQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Result = {
   accounts: AccountInfo[];
@@ -19,61 +23,84 @@ type Result = {
   setSelectedSubAccount: Dispatch<SetStateAction<string>>;
 };
 
+function applySetStateAction<T>(
+  previous: T,
+  value: SetStateAction<T>,
+): T {
+  return typeof value === "function"
+    ? (value as (prevState: T) => T)(previous)
+    : value;
+}
+
 export function useDashboardBootstrap(): Result {
-  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
-  const [selectedCredential, setSelectedCredential] = useState("");
-  const [selectedSubAccount, setSelectedSubAccount] = useState("");
-  const [finnhubConfigured, setFinnhubConfigured] = useState(false);
-  const [isTestMode, setIsTestMode] = useState(false);
-  const [screenshotConfig, setScreenshotConfig] = useState<ScreenshotConfig | null>(
-    null,
+  const [selectedCredentialOverride, setSelectedCredentialOverride] = useState<string | null>(null);
+  const [selectedSubAccountOverride, setSelectedSubAccountOverride] = useState<string | null>(null);
+  const [screenshotConfigOverride, setScreenshotConfigOverride] = useState<ScreenshotConfig | null>(null);
+
+  const { data: configData } = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfigQueryFn,
+    staleTime: 300000,
+  });
+
+  const { data: accountsData = [] } = useQuery({
+    queryKey: queryKeys.accounts(),
+    queryFn: getAccountsQueryFn,
+    staleTime: 300000,
+  });
+  const defaultCredential = useMemo(() => {
+    if (accountsData.length === 0) return "";
+    return accountsData.some((account) => account.credential_name === "__TEST__")
+      ? "__TEST__"
+      : accountsData[0].credential_name;
+  }, [accountsData]);
+
+  const selectedCredential = selectedCredentialOverride ?? defaultCredential;
+
+  const defaultSubAccount = useMemo(() => {
+    if (!selectedCredential) return "";
+    const subAccounts = accountsData.filter(
+      (account) => account.credential_name === selectedCredential,
+    );
+    return subAccounts.length > 1 ? "all" : subAccounts[0]?.id || "";
+  }, [accountsData, selectedCredential]);
+
+  const selectedSubAccount = selectedSubAccountOverride ?? defaultSubAccount;
+
+  const setSelectedCredential: Dispatch<SetStateAction<string>> = useCallback(
+    (value) => {
+      setSelectedCredentialOverride((previous) =>
+        applySetStateAction(previous ?? selectedCredential, value),
+      );
+    },
+    [selectedCredential],
   );
 
-  useEffect(() => {
-    let active = true;
+  const setSelectedSubAccount: Dispatch<SetStateAction<string>> = useCallback(
+    (value) => {
+      setSelectedSubAccountOverride((previous) =>
+        applySetStateAction(previous ?? selectedSubAccount, value),
+      );
+    },
+    [selectedSubAccount],
+  );
 
-    api
-      .getConfig()
-      .then((config) => {
-        if (!active) return;
-        setFinnhubConfigured(config.finnhub_configured ?? !!config.finnhub_api_key);
-        setIsTestMode(config.test_mode === true);
-        if (config.screenshot) {
-          setScreenshotConfig(config.screenshot);
-        }
-      })
-      .catch(() => undefined);
+  const setScreenshotConfig: Dispatch<SetStateAction<ScreenshotConfig | null>> = useCallback(
+    (value) => {
+      setScreenshotConfigOverride((previous) =>
+        applySetStateAction(previous ?? configData?.screenshot ?? null, value),
+      );
+    },
+    [configData?.screenshot],
+  );
 
-    api
-      .getAccounts()
-      .then((loadedAccounts) => {
-        if (!active) return;
-        setAccounts(loadedAccounts);
-        if (loadedAccounts.length === 0) return;
-
-        const preferredCredential = loadedAccounts.some(
-          (account) => account.credential_name === "__TEST__",
-        )
-          ? "__TEST__"
-          : loadedAccounts[0].credential_name;
-        setSelectedCredential(preferredCredential);
-
-        const subAccounts = loadedAccounts.filter(
-          (account) => account.credential_name === preferredCredential,
-        );
-        setSelectedSubAccount(
-          subAccounts.length > 1 ? "all" : subAccounts[0]?.id || "",
-        );
-      })
-      .catch(() => undefined);
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  const finnhubConfigured =
+    configData?.finnhub_configured ?? Boolean(configData?.finnhub_api_key);
+  const isTestMode = configData?.test_mode === true;
+  const screenshotConfig = screenshotConfigOverride ?? configData?.screenshot ?? null;
 
   return {
-    accounts,
+    accounts: accountsData,
     selectedCredential,
     selectedSubAccount,
     finnhubConfigured,

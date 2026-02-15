@@ -1,6 +1,11 @@
-import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
+import { Dispatch, SetStateAction, useCallback, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, AccountInfo, ScreenshotConfig } from "@/lib/api";
+import { AccountInfo, ScreenshotConfig } from "@/lib/api";
+import { invalidateAfterConfigWrite } from "@/lib/queryInvalidation";
+import { getAccountsQueryFn, getConfigQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
+import { api } from "@/lib/api";
 import { defaultScreenshot } from "@/features/settings/options";
 
 type AccountOption = { value: string; label: string };
@@ -64,101 +69,144 @@ function buildAccountOptions(accounts: AccountInfo[]): AccountOption[] {
   return options;
 }
 
-export function useSettingsModalState(): Result {
-  const [localPath, setLocalPath] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
+function applySetStateAction<T>(previous: T, value: SetStateAction<T>): T {
+  return typeof value === "function"
+    ? (value as (prevState: T) => T)(previous)
+    : value;
+}
 
-  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
-  const [ss, setSs] = useState<ScreenshotConfig>({ ...defaultScreenshot });
-  const [ssSaving, setSsSaving] = useState(false);
+export function useSettingsModalState(): Result {
+  const queryClient = useQueryClient();
+  const [localPathOverride, setLocalPathOverride] = useState<string | undefined>(
+    undefined,
+  );
+  const [savingError, setSavingError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  const [ssOverride, setSsOverride] = useState<ScreenshotConfig | undefined>(
+    undefined,
+  );
   const [ssSaved, setSsSaved] = useState(false);
   const [ssError, setSsError] = useState("");
   const [todayDollarAutoDisabled, setTodayDollarAutoDisabled] = useState(false);
 
-  useEffect(() => {
-    api
-      .getConfig()
-      .then((cfg) => {
-        setLocalPath(cfg.symphony_export?.local_path || "");
-        if (cfg.screenshot) {
-          setSs({ ...defaultScreenshot, ...cfg.screenshot });
-        }
-      })
-      .catch(() => {});
+  const configQuery = useQuery({
+    queryKey: queryKeys.config(),
+    queryFn: getConfigQueryFn,
+    staleTime: 300000,
+  });
+  const accountsQuery = useQuery({
+    queryKey: queryKeys.accounts(),
+    queryFn: getAccountsQueryFn,
+    staleTime: 300000,
+  });
 
-    api.getAccounts().then(setAccounts).catch(() => {});
+  const saveExportMutation = useMutation({
+    mutationFn: (nextLocalPath: string) => api.saveSymphonyExportPath(nextLocalPath),
+    onSuccess: async () => {
+      await invalidateAfterConfigWrite(queryClient);
+    },
+  });
+
+  const saveScreenshotMutation = useMutation({
+    mutationFn: (nextConfig: ScreenshotConfig) => api.saveScreenshotConfig(nextConfig),
+    onSuccess: async () => {
+      await invalidateAfterConfigWrite(queryClient);
+    },
+  });
+
+  const baseLocalPath = configQuery.data?.symphony_export?.local_path || "";
+  const localPath = localPathOverride ?? baseLocalPath;
+  const baseScreenshot = useMemo(
+    () => ({ ...defaultScreenshot, ...(configQuery.data?.screenshot ?? {}) }),
+    [configQuery.data?.screenshot],
+  );
+  const ss = ssOverride ?? baseScreenshot;
+
+  const setLocalPath = useCallback((value: string) => {
+    setLocalPathOverride(value);
   }, []);
 
-  const handleSave = async () => {
+  const setSs: Dispatch<SetStateAction<ScreenshotConfig>> = useCallback(
+    (value) => {
+      setSsOverride((previous) =>
+        applySetStateAction(previous ?? baseScreenshot, value),
+      );
+    },
+    [baseScreenshot],
+  );
+
+  const handleSave = useCallback(async () => {
     if (!localPath.trim()) {
-      setError("Path cannot be empty");
+      setSavingError("Path cannot be empty");
       return;
     }
-    setSaving(true);
-    setError("");
+    setSavingError("");
     setSaved(false);
     try {
-      await api.saveSymphonyExportPath(localPath.trim());
+      await saveExportMutation.mutateAsync(localPath.trim());
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
-      setError("Failed to save export path");
-    } finally {
-      setSaving(false);
+      setSavingError("Failed to save export path");
     }
-  };
+  }, [localPath, saveExportMutation]);
 
-  const handleSaveScreenshot = async () => {
+  const handleSaveScreenshot = useCallback(async () => {
     if (ss.enabled && !ss.local_path.trim()) {
       setSsError("Save folder is required when enabled");
       return;
     }
-    setSsSaving(true);
     setSsError("");
     setSsSaved(false);
     try {
-      await api.saveScreenshotConfig({ ...ss, local_path: ss.local_path.trim() });
+      await saveScreenshotMutation.mutateAsync({
+        ...ss,
+        local_path: ss.local_path.trim(),
+      });
       setSsSaved(true);
       setTimeout(() => setSsSaved(false), 2000);
     } catch {
       setSsError("Failed to save screenshot settings");
-    } finally {
-      setSsSaving(false);
     }
-  };
+  }, [ss, saveScreenshotMutation]);
 
-  const toggleMetric = (key: string) => {
-    if (key === "today_dollar" && todayDollarAutoDisabled) {
-      setTodayDollarAutoDisabled(false);
-    }
-    setSs((prev) => {
-      const has = prev.metrics.includes(key);
-      return {
-        ...prev,
-        metrics: has
-          ? prev.metrics.filter((metric) => metric !== key)
-          : [...prev.metrics, key],
-      };
-    });
-    setSsSaved(false);
-  };
+  const toggleMetric = useCallback(
+    (key: string) => {
+      if (key === "today_dollar" && todayDollarAutoDisabled) {
+        setTodayDollarAutoDisabled(false);
+      }
+      setSs((previous) => {
+        const hasMetric = previous.metrics.includes(key);
+        return {
+          ...previous,
+          metrics: hasMetric
+            ? previous.metrics.filter((metric) => metric !== key)
+            : [...previous.metrics, key],
+        };
+      });
+      setSsSaved(false);
+    },
+    [todayDollarAutoDisabled, setSs],
+  );
 
-  const accountOptions = useMemo(() => buildAccountOptions(accounts), [accounts]);
+  const accountOptions = useMemo(
+    () => buildAccountOptions(accountsQuery.data ?? []),
+    [accountsQuery.data],
+  );
 
   return {
     localPath,
     setLocalPath,
-    saving,
+    saving: saveExportMutation.isPending,
     saved,
     setSaved,
-    error,
-    setError,
+    error: savingError,
+    setError: setSavingError,
     handleSave,
     ss,
     setSs,
-    ssSaving,
+    ssSaving: saveScreenshotMutation.isPending,
     ssSaved,
     setSsSaved,
     ssError,

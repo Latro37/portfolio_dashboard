@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { api, SymphonyTradePreview } from "@/lib/api";
+import { SymphonyTradePreview } from "@/lib/api";
+import { getSymphonyTradePreviewQueryFn } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Args = {
   symphonyId: string;
@@ -18,45 +21,30 @@ export function useSymphonyTradePreviewState({
   symphonyId,
   accountId,
 }: Args): Result {
-  const [tradePreview, setTradePreview] = useState<SymphonyTradePreview | null>(null);
-  const [tradePreviewRefreshedAt, setTradePreviewRefreshedAt] = useState<Date | null>(null);
-  const [loadingTradePreview, setLoadingTradePreview] = useState(true);
-
-  const loadTradePreview = useCallback(
-    () =>
-      api
-        .getSymphonyTradePreview(symphonyId, accountId)
-        .then((data) => {
-          setTradePreview(data);
-          setTradePreviewRefreshedAt(new Date());
-        })
-        .catch(() => setTradePreview(null)),
-    [symphonyId, accountId],
-  );
+  const tradePreviewQuery = useQuery({
+    queryKey: queryKeys.symphonyTradePreview({ symphonyId, accountId }),
+    queryFn: async () => {
+      try {
+        return await getSymphonyTradePreviewQueryFn({ symphonyId, accountId });
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 30000,
+  });
+  const refetchTradePreview = tradePreviewQuery.refetch;
 
   const fetchTradePreview = useCallback(async () => {
-    setLoadingTradePreview(true);
-    try {
-      await loadTradePreview();
-    } finally {
-      setLoadingTradePreview(false);
-    }
-  }, [loadTradePreview]);
-
-  useEffect(() => {
-    let active = true;
-    loadTradePreview().finally(() => {
-      if (active) setLoadingTradePreview(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [loadTradePreview]);
+    await refetchTradePreview();
+  }, [refetchTradePreview]);
 
   return {
-    tradePreview,
-    tradePreviewRefreshedAt,
-    loadingTradePreview,
+    tradePreview: tradePreviewQuery.data ?? null,
+    tradePreviewRefreshedAt:
+      tradePreviewQuery.data != null
+        ? new Date(tradePreviewQuery.dataUpdatedAt)
+        : null,
+    loadingTradePreview: tradePreviewQuery.isLoading || tradePreviewQuery.isFetching,
     fetchTradePreview,
   };
 }

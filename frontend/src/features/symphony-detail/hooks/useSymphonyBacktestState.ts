@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, SymphonyBacktest } from "@/lib/api";
+import { SymphonyBacktest } from "@/lib/api";
+import { getSymphonyBacktestQueryFn, queryRetryOverrides } from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 type Args = {
   symphonyId: string;
@@ -17,43 +20,46 @@ export function useSymphonyBacktestState({
   symphonyId,
   accountId,
 }: Args): Result {
-  const [backtest, setBacktest] = useState<SymphonyBacktest | null>(null);
-  const [loadingBacktest, setLoadingBacktest] = useState(true);
-
-  const loadBacktest = useCallback(
-    (forceRefresh = false) =>
-      api
-        .getSymphonyBacktest(symphonyId, accountId, forceRefresh)
-        .then(setBacktest)
-        .catch(() => setBacktest(null)),
-    [symphonyId, accountId],
-  );
+  const queryClient = useQueryClient();
+  const [manualLoading, setManualLoading] = useState(false);
+  const key = queryKeys.symphonyBacktest({ symphonyId, accountId });
+  const backtestQuery = useQuery({
+    queryKey: key,
+    queryFn: async () => {
+      try {
+        return await getSymphonyBacktestQueryFn({ symphonyId, accountId });
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 900000,
+    ...queryRetryOverrides.symphonyBacktest,
+  });
+  const refetchBacktest = backtestQuery.refetch;
 
   const fetchBacktest = useCallback(
     async (forceRefresh = false) => {
-      setLoadingBacktest(true);
+      setManualLoading(true);
       try {
-        await loadBacktest(forceRefresh);
+        if (forceRefresh) {
+          const fresh = await getSymphonyBacktestQueryFn(
+            { symphonyId, accountId },
+            true,
+          ).catch(() => null);
+          queryClient.setQueryData(key, fresh);
+          return;
+        }
+        await refetchBacktest();
       } finally {
-        setLoadingBacktest(false);
+        setManualLoading(false);
       }
     },
-    [loadBacktest],
+    [symphonyId, accountId, queryClient, key, refetchBacktest],
   );
 
-  useEffect(() => {
-    let active = true;
-    loadBacktest().finally(() => {
-      if (active) setLoadingBacktest(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [loadBacktest]);
-
   return {
-    backtest,
-    loadingBacktest,
+    backtest: backtestQuery.data ?? null,
+    loadingBacktest: backtestQuery.isLoading || backtestQuery.isFetching || manualLoading,
     fetchBacktest,
   };
 }

@@ -24,7 +24,9 @@ Build and maintain a local-first Portfolio Dashboard for Composer portfolios wit
 3. Treat `frontend/src/components/*` as shared UI and compatibility re-exports, not business orchestration.
 4. Never use destructive git commands (`git reset --hard`, `git checkout --`) unless explicitly requested.
 5. Use seeded test profiles for E2E (`scripts/run-local-tests.ps1 -Profile basic|power`).
-6. Do not remove `CPV_*` env compatibility until the TQ-1 follow-up phase is complete.
+6. Do not remove `CPV_*` env compatibility until a dedicated alias-removal phase is approved.
+7. For frontend server-state changes, update `frontend/src/lib/queryKeys.ts`, `frontend/src/lib/queryFns.ts`, and `frontend/src/lib/queryInvalidation.ts` before adding new query usage.
+8. Do not re-introduce ad hoc component-level API caches when equivalent TanStack Query cache behavior can be used.
 
 ## Test Gate Policy By Change Scope
 
@@ -51,13 +53,13 @@ Use `docs/TEST_MATRIX.md` as the source of truth. Minimum required gates:
 - If both are set, `PD_*` wins.
 - Alias removal target is the next major refactor cycle after TQ-1.
 
-## Deferred Roadmap Note
+## TanStack Query Roadmap Note
 
-TanStack Query migration is intentionally deferred and tracked in:
-- `docs/ARCHITECTURE.md` under Deferred Phase TQ-1
+TQ-1 baseline migration has been adopted. Query conventions and follow-ups are tracked in:
+- `docs/ARCHITECTURE.md` under TanStack Query Server-State Layer
 - `docs/TQ1_TANSTACK_QUERY_BLUEPRINT.md`
 
-Do not start TQ-1 work ad hoc; follow the blueprint entry criteria and migration slices.
+Do not add alternate server-state frameworks ad hoc; extend the existing query key/fn/invalidation contracts.
 
 ## Default Workflow
 

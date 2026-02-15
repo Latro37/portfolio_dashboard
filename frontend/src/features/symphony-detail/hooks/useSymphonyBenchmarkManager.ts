@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-
 import {
-  api,
-  BenchmarkEntry,
-  SymphonyCatalogItem,
-} from "@/lib/api";
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { BenchmarkEntry, SymphonyCatalogItem } from "@/lib/api";
+import {
+  getBenchmarkHistoryQueryFn,
+  getSymphonyBenchmarkQueryFn,
+  getSymphonyCatalogQueryFn,
+  queryRetryOverrides,
+} from "@/lib/queryFns";
+import { queryKeys } from "@/lib/queryKeys";
 
 const BENCHMARK_COLORS = ["#f97316", "#e4e4e7", "#ec4899"] as const;
 
@@ -30,29 +41,24 @@ type Result = {
 };
 
 export function useSymphonyBenchmarkManager(accountId: string): Result {
+  const queryClient = useQueryClient();
   const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
   const [customInputVisible, setCustomInputVisible] = useState(false);
   const [customTickerInput, setCustomTickerInput] = useState("");
-  const [symphonyCatalog, setSymphonyCatalog] = useState<SymphonyCatalogItem[]>([]);
-  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [catalogDropdownOpen, setCatalogDropdownOpen] = useState(false);
   const benchmarkDropdownRef = useRef<HTMLDivElement>(null);
   const maxBenchmarks = 3;
-
-  const fetchCatalog = useCallback(async (refresh = false) => {
-    try {
-      const items = await api.getSymphonyCatalog(refresh);
-      setSymphonyCatalog(items);
-    } finally {
-      setCatalogLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (customInputVisible && !catalogLoaded) {
-      fetchCatalog().catch(() => undefined);
-    }
-  }, [customInputVisible, catalogLoaded, fetchCatalog]);
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.symphonyCatalog(false),
+    queryFn: () => getSymphonyCatalogQueryFn(false),
+    enabled: customInputVisible,
+    staleTime: 900000,
+  });
+  const symphonyCatalog = useMemo(
+    () => catalogQuery.data ?? [],
+    [catalogQuery.data],
+  );
+  const catalogLoaded = !customInputVisible || catalogQuery.status !== "pending";
 
   useEffect(() => {
     if (!catalogDropdownOpen) return;
@@ -92,16 +98,21 @@ export function useSymphonyBenchmarkManager(accountId: string): Result {
         data: [],
         color,
       };
-      setBenchmarks((prev) => [...prev, placeholder]);
+      setBenchmarks((previous) => [...previous, placeholder]);
 
       if (ticker.startsWith("symphony:")) {
         const symphonyId = ticker.slice(9);
-        api
-          .getSymphonyBenchmark(symphonyId)
+        void queryClient
+          .fetchQuery({
+            queryKey: queryKeys.symphonyBenchmark({ symphonyId, accountId }),
+            queryFn: () => getSymphonyBenchmarkQueryFn(symphonyId),
+            staleTime: 900000,
+            ...queryRetryOverrides.symphonyBenchmark,
+          })
           .then((response) => {
             const label = clampLabel(response.name || symphonyId);
-            setBenchmarks((prev) =>
-              prev.map((entry) =>
+            setBenchmarks((previous) =>
+              previous.map((entry) =>
                 entry.ticker === ticker
                   ? { ...entry, label, data: response.data }
                   : entry,
@@ -109,39 +120,54 @@ export function useSymphonyBenchmarkManager(accountId: string): Result {
             );
           })
           .catch(() =>
-            setBenchmarks((prev) =>
-              prev.filter((entry) => entry.ticker !== ticker),
+            setBenchmarks((previous) =>
+              previous.filter((entry) => entry.ticker !== ticker),
             ),
           );
         return;
       }
 
-      api
-        .getBenchmarkHistory(ticker, undefined, undefined, accountId)
+      void queryClient
+        .fetchQuery({
+          queryKey: queryKeys.benchmarkHistory({
+            ticker,
+            accountId,
+          }),
+          queryFn: () =>
+            getBenchmarkHistoryQueryFn({
+              ticker,
+              accountId,
+            }),
+          staleTime: 900000,
+        })
         .then((response) =>
-          setBenchmarks((prev) =>
-            prev.map((entry) =>
+          setBenchmarks((previous) =>
+            previous.map((entry) =>
               entry.ticker === ticker ? { ...entry, data: response.data } : entry,
             ),
           ),
         )
         .catch(() =>
-          setBenchmarks((prev) =>
-            prev.filter((entry) => entry.ticker !== ticker),
+          setBenchmarks((previous) =>
+            previous.filter((entry) => entry.ticker !== ticker),
           ),
         );
     },
-    [benchmarks, accountId],
+    [benchmarks, accountId, queryClient],
   );
 
   const removeBenchmark = useCallback((ticker: string) => {
-    setBenchmarks((prev) => prev.filter((entry) => entry.ticker !== ticker));
+    setBenchmarks((previous) => previous.filter((entry) => entry.ticker !== ticker));
   }, []);
 
   const refreshSymphonyCatalog = useCallback(async () => {
-    setCatalogLoaded(false);
-    await fetchCatalog(true);
-  }, [fetchCatalog]);
+    const items = await queryClient.fetchQuery({
+      queryKey: queryKeys.symphonyCatalog(true),
+      queryFn: () => getSymphonyCatalogQueryFn(true),
+      staleTime: 900000,
+    });
+    queryClient.setQueryData(queryKeys.symphonyCatalog(false), items);
+  }, [queryClient]);
 
   return {
     benchmarks,
