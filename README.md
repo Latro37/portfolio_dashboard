@@ -26,7 +26,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 ## Features
 
 - **Multi-account support** — Track multiple Composer accounts (e.g. yours + spouse's) from a single dashboard. Switch between accounts or view them aggregated together.
-- **Full historical backfill** — On first sync, the app downloads your entire transaction history, holdings, deposits, fees, and dividends.
+- **Full historical backfill** — On first sync, the app loads dashboard-critical history first, then backfills transactions and cash flows (deposits/withdrawals/fees/dividends) in the background.
 - **Incremental updates** — After the initial sync, only new data is fetched. If the app hasn't run for days, it automatically fills in the gaps.
 - **20+ portfolio metrics** — Sharpe ratio, Sortino ratio, Calmar ratio, TWR, MWR, max drawdown, win rate, volatility, annualized return, and more. All computed live from your data.
 - **Performance chart** — Interactive chart with TWR, MWR, Portfolio Value, and Drawdown views. Adjustable time periods (1W–All) and custom date ranges.
@@ -35,7 +35,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. Includes invested symphonies plus your Composer watchlist and drafts.
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
 - **Backtest caching** — Symphony backtests are cached locally and automatically re-fetched when you edit the symphony in Composer.
-- **Symphony structure export** — Automatically saves your symphony logic trees as JSON files whenever they change (draft exports are temporarily disabled to keep startup fast).
+- **Symphony structure export** — Exports invested symphonies plus drafts to local JSON in a background job (does not block sync) and shows a toast with extraction progress.
 - **Daily snapshot** — Captures a clean portfolio summary image after market close (or manually via the camera button). Configurable chart type, metrics, date range, and benchmark overlays.
 - **Trade preview** — See what trades are pending before the next rebalance.
 - **Live intraday data** — During market hours, your portfolio value updates in real time.
@@ -80,7 +80,7 @@ Get up and running in under 5 minutes.
    ```
    The browser opens automatically.
 
-4. **Sync your data.** Click the **Update** button in the top-right corner. The initial sync takes 30–60 seconds depending on your account history. After that, your dashboard is live.
+4. **Sync your data.** Click the **Update** button in the top-right corner. The first sync loads the dashboard as soon as core data is ready, then continues backfilling transactions/cash flows in the background. If Symphony Export is enabled, a lower-right toast shows JSON extraction progress.
 
 That's it! You're ready to go with the basic features. If you want to take advantage of all the features, see the [Detailed Setup](#detailed-setup) section.
 
@@ -90,7 +90,7 @@ That's it! You're ready to go with the basic features. If you want to take advan
 
 ### First Sync
 
-When you click **Update** for the first time, the app downloads your complete Composer history:
+When you click **Update** for the first time, the app syncs your complete Composer history (in two phases):
 
 - **Transactions** — Every buy and sell order
 - **Portfolio values** — Daily portfolio value snapshots
@@ -98,7 +98,9 @@ When you click **Update** for the first time, the app downloads your complete Co
 - **Holdings** — Current positions and historical position reconstruction
 - **Symphony data** — Per-symphony daily values and metadata
 
-This typically takes **30–60 seconds** depending on your account age and trading frequency.
+The dashboard renders as soon as the core portfolio + symphony history is ready. Transactions and cash flows may continue syncing in the background and will populate the Transactions / Non-Trade Activity tabs when ready.
+
+If you have Symphony Export enabled, symphony JSON extraction runs in the background and shows a lower-right toast with an extracted counter. The toast auto-dismisses when complete.
 
 ### After the First Sync
 
@@ -459,6 +461,8 @@ The configured folder can be any local path. Relative paths resolve under `setti
 
 This is useful as a backup of your symphony logic in case Composer should ever go dark, and for tracking changes over time.
 
+Export runs in the background and does not block the dashboard from loading. While an export is running, the dashboard shows a lower-right toast with a live extracted counter and auto-dismisses when complete.
+
 ### Daily Snapshot
 
 Configure an automatic portfolio screenshot captured after market close each day:
@@ -489,6 +493,8 @@ Click the **Update** button in the top-right corner. The app doesn't fetch data 
 
 ### The sync seems stuck or is taking a long time
 The first sync can take 30–60 seconds. If it takes longer than 2 minutes, check the terminal window running the backend for error messages.
+
+Note: on first sync, the dashboard may appear before transactions and cash flows have finished backfilling. Those tabs will populate automatically once the background phase completes.
 
 ### Port 8000 or 3000 is already in use
 A previous session may not have shut down cleanly.

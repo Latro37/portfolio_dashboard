@@ -40,7 +40,7 @@ Implemented baseline. TQ-1 migrated frontend server-state flows to TanStack Quer
 The canonical key registry lives in `frontend/src/lib/queryKeys.ts` and includes:
 
 - Accounts/config: `accounts`, `config`
-- Portfolio: `summary`, `summary-live`, `performance`, `holdings`, `holdings-history`, `transactions`, `cash-flows`, `sync-status`
+- Portfolio: `summary`, `summary-live`, `performance`, `holdings`, `holdings-history`, `transactions`, `cash-flows`, `sync-status`, `symphony-export-job-status`
 - Symphony: `symphonies`, `symphony-summary`, `symphony-summary-live`, `symphony-performance`, `symphony-backtest`, `symphony-allocations`, `symphony-trade-preview`, `symphony-benchmark`
 - Trade preview and benchmarks: `trade-preview`, `benchmark-history`, `symphony-catalog`
 
@@ -53,6 +53,7 @@ The canonical key registry lives in `frontend/src/lib/queryKeys.ts` and includes
 - symphony summary/live/performance/backtest/allocations/trade-preview/benchmark families
 - `trade-preview`
 - `symphony-catalog`
+- `symphony-export-job-status`
 
 2. Manual cash-flow mutation invalidates account-scoped:
 - `summary`
