@@ -72,6 +72,23 @@ def is_syncing() -> bool:
     return _syncing
 
 
+def _recompute_after_manual_cash_flow(
+    db: Session,
+    account_id: str,
+) -> None:
+    """Recompute portfolio totals/metrics after manual cash-flow mutations."""
+    from app.services.sync import (
+        _recompute_metrics,
+        _roll_forward_cash_flow_totals,
+    )
+
+    try:
+        _roll_forward_cash_flow_totals(db, account_id, preserve_baseline=True)
+        _recompute_metrics(db, account_id)
+    except Exception as exc:
+        logger.warning("Post-manual cash-flow local recompute failed for %s: %s", account_id, exc)
+
+
 def add_manual_cash_flow_data(
     db: Session,
     body: ManualCashFlowRequest,
@@ -101,15 +118,14 @@ def add_manual_cash_flow_data(
     )
     db.commit()
 
-    # Recompute account-level portfolio history/metrics after mutation.
+    # Recompute account-level portfolio totals/metrics after mutation.
     try:
-        client = get_client_for_account_fn(db, body.account_id)
-        from app.services.sync import _recompute_metrics, _sync_portfolio_history
-
-        _sync_portfolio_history(db, client, body.account_id)
-        _recompute_metrics(db, body.account_id)
+        _recompute_after_manual_cash_flow(
+            db,
+            body.account_id,
+        )
     except Exception as exc:
-        logger.warning("Post-manual-entry recompute failed: %s", exc)
+        logger.warning("Post-manual-entry recompute orchestration failed: %s", exc)
     finally:
         # Avoid serving stale live overlay summaries after manual cash-flow edits.
         invalidate_portfolio_live_cache(account_ids=[body.account_id])
@@ -141,15 +157,14 @@ def delete_manual_cash_flow_data(
     db.delete(row)
     db.commit()
 
-    # Recompute account-level portfolio history/metrics after mutation.
+    # Recompute account-level portfolio totals/metrics after mutation.
     try:
-        client = get_client_for_account_fn(db, account_id)
-        from app.services.sync import _recompute_metrics, _sync_portfolio_history
-
-        _sync_portfolio_history(db, client, account_id)
-        _recompute_metrics(db, account_id)
+        _recompute_after_manual_cash_flow(
+            db,
+            account_id,
+        )
     except Exception as exc:
-        logger.warning("Post-manual-delete recompute failed: %s", exc)
+        logger.warning("Post-manual-delete recompute orchestration failed: %s", exc)
     finally:
         # Avoid serving stale live overlay summaries after manual cash-flow edits.
         invalidate_portfolio_live_cache(account_ids=[account_id])

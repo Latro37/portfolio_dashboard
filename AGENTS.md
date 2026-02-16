@@ -92,9 +92,14 @@ When multiple agents (or humans) need to work in this repository concurrently:
    - Example:
      - `mkdir ..\\pd-worktrees -ErrorAction SilentlyContinue | Out-Null`
      - `git worktree add ..\\pd-worktrees\\agent-alice-fix-sync -b agent/alice/fix-sync`
-3. Keep branches current via `git fetch --prune origin` and `git rebase origin/master`.
-4. Use stacked PRs only when there is a true dependency, and call it out explicitly in the PR description (see PR template "Coordination").
-5. Avoid long-lived `git stash` entries; stashes are shared across worktrees. If you must stash, use a message identifying the agent and topic.
+3. Keep branches current via `git fetch --prune origin` and regular syncs from `origin/master`.
+4. Use a branch sync cadence to reduce late conflicts: sync from `origin/master` at least daily, before opening a PR, and again right before requesting final review.
+5. Pick the sync strategy by branch ownership:
+   - Solo/local branch: `git rebase origin/master`.
+   - Shared branch or actively reviewed PR branch: `git merge origin/master` (avoid force-pushing shared history).
+6. Resolve conflicts immediately after each sync and rerun required tests before pushing.
+7. Use stacked PRs only when there is a true dependency, and call it out explicitly in the PR description (see PR template "Coordination").
+8. Avoid long-lived `git stash` entries; stashes are shared across worktrees. If you must stash, use a message identifying the agent and topic.
 
 ## Naming and Deprecation Policy
 

@@ -54,12 +54,17 @@ Use `references/commit-message-patterns.md` for message patterns.
 
 ### 4. Sync Frequently
 
-- Rebase branch before push or PR:
-`git fetch origin && git rebase origin/master`
-- Resolve conflicts immediately and rerun tests.
+- Keep a sync cadence to avoid late conflict bursts:
+  - sync from `origin/master` at least daily
+  - sync before opening/updating a PR
+  - sync again before requesting final review
+- Choose strategy by ownership:
+  - solo/local branch: `git fetch origin && git rebase origin/master`
+  - shared branch or actively reviewed PR branch: `git fetch origin && git merge origin/master`
+- Resolve conflicts immediately after each sync and rerun required tests.
 - Use force push only after rebase, and only with lease:
 `git push --force-with-lease`
-- Avoid merge commits on feature branches unless repository policy requires them.
+- Prefer merge-from-master (not rebase) once a branch is shared to avoid rewriting history other contributors are based on.
 
 ### 5. Push and Open Pull Request
 

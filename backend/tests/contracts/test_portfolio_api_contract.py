@@ -244,6 +244,30 @@ def test_manual_cash_flow_contract(client, auth_headers):
     assert payload["type"] == "withdrawal"
     assert payload["amount"] == -123.45
 
+
+def test_manual_cash_flow_updates_summary_and_performance_immediately(client, auth_headers):
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-03",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+
+    summary_res = client.get("/api/summary?account_id=test-account-001&period=ALL")
+    assert summary_res.status_code == 200
+    assert summary_res.json()["net_deposits"] == 100250.0
+
+    perf_res = client.get("/api/performance?account_id=test-account-001&period=ALL")
+    assert perf_res.status_code == 200
+    assert [row["net_deposits"] for row in perf_res.json()] == [100000.0, 100250.0, 100250.0]
+
+
 def test_manual_cash_flow_invalidates_live_caches(client, auth_headers, monkeypatch):
     calls = {"portfolio": [], "symphony": []}
 
@@ -333,6 +357,42 @@ def test_delete_manual_cash_flow_contract(client, auth_headers):
     assert after_delete.status_code == 200
     after_ids = {row["id"] for row in after_delete.json()}
     assert manual_id not in after_ids
+
+
+def test_delete_manual_cash_flow_updates_summary_and_performance_immediately(client, auth_headers):
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-03",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+
+    before_delete_summary = client.get("/api/summary?account_id=test-account-001&period=ALL")
+    assert before_delete_summary.status_code == 200
+    assert before_delete_summary.json()["net_deposits"] == 100250.0
+
+    list_res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert list_res.status_code == 200
+    manual_rows = [row for row in list_res.json() if row["is_manual"]]
+    assert len(manual_rows) == 1
+    manual_id = manual_rows[0]["id"]
+
+    delete_res = client.delete(f"/api/cash-flows/manual/{manual_id}", headers=auth_headers)
+    assert delete_res.status_code == 200
+
+    summary_res = client.get("/api/summary?account_id=test-account-001&period=ALL")
+    assert summary_res.status_code == 200
+    assert summary_res.json()["net_deposits"] == 100000.0
+
+    perf_res = client.get("/api/performance?account_id=test-account-001&period=ALL")
+    assert perf_res.status_code == 200
+    assert [row["net_deposits"] for row in perf_res.json()] == [100000.0, 100000.0, 100000.0]
 
 
 def test_delete_manual_cash_flow_invalidates_live_caches(client, auth_headers, monkeypatch):

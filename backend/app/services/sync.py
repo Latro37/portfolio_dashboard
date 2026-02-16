@@ -414,26 +414,45 @@ def _sync_cash_flows(db: Session, client: ComposerClient, account_id: str, since
     logger.info("Cash flows synced for %s: %d new", account_id, new_count)
 
 
-def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str):
-    """Fetch portfolio history and upsert into daily_portfolio table."""
-    history = client.get_portfolio_history(account_id)
+def _roll_forward_cash_flow_totals(
+    db: Session,
+    account_id: str,
+    *,
+    preserve_baseline: bool = True,
+) -> int:
+    """Recompute cumulative cash-flow totals into existing DailyPortfolio rows.
 
-    # Load cash flows for cumulative calculations
-    all_cf = db.query(CashFlow).filter_by(account_id=account_id).order_by(CashFlow.date).all()
+    When `preserve_baseline` is True, the first portfolio row's existing totals
+    are treated as a baseline offset. This keeps fallback net-deposit values
+    stable for accounts where Composer non-trade reports are unavailable.
+    """
+    daily_rows = (
+        db.query(DailyPortfolio)
+        .filter_by(account_id=account_id)
+        .order_by(DailyPortfolio.date)
+        .all()
+    )
+    if not daily_rows:
+        return 0
 
-    # Build cumulative deposit/fee/dividend by date
+    all_cf = (
+        db.query(CashFlow)
+        .filter_by(account_id=account_id)
+        .order_by(CashFlow.date)
+        .all()
+    )
+
     cum_deposits = 0.0
     cum_fees = 0.0
     cum_dividends = 0.0
     cum_by_date = {}
 
-    cf_by_date = {}
+    cf_by_date: dict[str, list[CashFlow]] = {}
     for cf in all_cf:
         ds = str(cf.date)
         cf_by_date.setdefault(ds, []).append(cf)
 
-    all_dates_sorted = sorted(cf_by_date.keys())
-    for ds in all_dates_sorted:
+    for ds in sorted(cf_by_date.keys()):
         for cf in cf_by_date[ds]:
             if cf.type == "deposit":
                 cum_deposits += cf.amount
@@ -452,26 +471,65 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
             "total_dividends": round(cum_dividends, 2),
         }
 
-    # If no cash flows found, fall back to total-stats API for net_deposits
-    if not all_cf:
-        try:
-            total_stats = client.get_total_stats(account_id)
-            fallback_deposits = float(total_stats.get("net_deposits", 0))
-            logger.info(
-                "No cash flow data for %s — using total-stats net_deposits=%.2f as fallback",
-                account_id, fallback_deposits,
-            )
-        except Exception:
-            fallback_deposits = 0.0
-    else:
-        fallback_deposits = None
-
-    # Forward-fill cumulative values for dates without cash flow events.
-    # Apply each cash-flow date once its date is <= the current portfolio-history date
-    # so weekend/holiday manual entries roll into the next market day.
-    last_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
     cash_flow_dates = sorted(cum_by_date.keys())
+
+    baseline_net_deposits = 0.0
+    baseline_total_fees = 0.0
+    baseline_total_dividends = 0.0
+    if preserve_baseline:
+        first_ds = daily_rows[0].date.isoformat()
+        baseline_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
+        baseline_idx = 0
+        while baseline_idx < len(cash_flow_dates) and cash_flow_dates[baseline_idx] <= first_ds:
+            baseline_cum = cum_by_date[cash_flow_dates[baseline_idx]]
+            baseline_idx += 1
+
+        baseline_net_deposits = round(
+            float(daily_rows[0].net_deposits or 0.0) - baseline_cum["net_deposits"],
+            2,
+        )
+        baseline_total_fees = round(
+            float(daily_rows[0].total_fees or 0.0) - baseline_cum["total_fees"],
+            2,
+        )
+        baseline_total_dividends = round(
+            float(daily_rows[0].total_dividends or 0.0) - baseline_cum["total_dividends"],
+            2,
+        )
+
+    updated_count = 0
+    last_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
     cash_flow_idx = 0
+    for row in daily_rows:
+        ds = row.date.isoformat()
+        while cash_flow_idx < len(cash_flow_dates) and cash_flow_dates[cash_flow_idx] <= ds:
+            last_cum = cum_by_date[cash_flow_dates[cash_flow_idx]]
+            cash_flow_idx += 1
+
+        next_net_deposits = round(baseline_net_deposits + last_cum["net_deposits"], 2)
+        next_total_fees = round(baseline_total_fees + last_cum["total_fees"], 2)
+        next_total_dividends = round(
+            baseline_total_dividends + last_cum["total_dividends"],
+            2,
+        )
+
+        if row.net_deposits != next_net_deposits:
+            row.net_deposits = next_net_deposits
+            updated_count += 1
+        if row.total_fees != next_total_fees:
+            row.total_fees = next_total_fees
+            updated_count += 1
+        if row.total_dividends != next_total_dividends:
+            row.total_dividends = next_total_dividends
+            updated_count += 1
+
+    db.commit()
+    return updated_count
+
+
+def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str):
+    """Fetch portfolio history and upsert into daily_portfolio table."""
+    history = client.get_portfolio_history(account_id)
 
     # Try to get current cash balance
     try:
@@ -480,6 +538,7 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
         cash_balance = 0.0
 
     new_count = 0
+    today = datetime.now().strftime("%Y-%m-%d")
     history_sorted = sorted(history, key=lambda item: str(item.get("date", "")))
     for entry in history_sorted:
         ds_raw = str(entry.get("date", ""))
@@ -489,40 +548,46 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
             continue
         ds = d.isoformat()
 
-        # Get cumulative values
-        while cash_flow_idx < len(cash_flow_dates) and cash_flow_dates[cash_flow_idx] <= ds:
-            last_cum = cum_by_date[cash_flow_dates[cash_flow_idx]]
-            cash_flow_idx += 1
-
-        # Use fallback deposits if no cash flow data exists
-        deposits_val = fallback_deposits if fallback_deposits is not None else last_cum["net_deposits"]
-        fees_val = last_cum["total_fees"]
-        dividends_val = last_cum["total_dividends"]
-
         existing = db.query(DailyPortfolio).filter_by(account_id=account_id, date=d).first()
         if existing:
             existing.portfolio_value = entry["portfolio_value"]
-            existing.net_deposits = deposits_val
-            existing.total_fees = fees_val
-            existing.total_dividends = dividends_val
             # Only set cash_balance for today
-            if ds == datetime.now().strftime("%Y-%m-%d"):
+            if ds == today:
                 existing.cash_balance = cash_balance
         else:
             db.add(DailyPortfolio(
                 account_id=account_id,
                 date=d,
                 portfolio_value=entry["portfolio_value"],
-                cash_balance=cash_balance if ds == datetime.now().strftime("%Y-%m-%d") else 0.0,
-                net_deposits=deposits_val,
-                total_fees=fees_val,
-                total_dividends=dividends_val,
+                cash_balance=cash_balance if ds == today else 0.0,
+                net_deposits=0.0,
+                total_fees=0.0,
+                total_dividends=0.0,
             ))
             new_count += 1
 
     db.commit()
-    logger.info("Daily portfolio synced for %s: %d new rows", account_id, new_count)
 
+    _roll_forward_cash_flow_totals(db, account_id, preserve_baseline=False)
+
+    # If no cash flows found, fall back to total-stats API for net_deposits
+    has_cash_flows = db.query(CashFlow.id).filter(CashFlow.account_id == account_id).first() is not None
+    if not has_cash_flows:
+        try:
+            total_stats = client.get_total_stats(account_id)
+            fallback_deposits = float(total_stats.get("net_deposits", 0))
+            for row in db.query(DailyPortfolio).filter_by(account_id=account_id).all():
+                row.net_deposits = round(fallback_deposits, 2)
+            db.commit()
+            logger.info(
+                "No cash flow data for %s - using total-stats net_deposits=%.2f as fallback",
+                account_id,
+                fallback_deposits,
+            )
+        except Exception:
+            pass
+
+    logger.info("Daily portfolio synced for %s: %d new rows", account_id, new_count)
 
 def _sync_holdings_history(db: Session, client: ComposerClient, account_id: str):
     """Reconstruct holdings from transactions and store snapshots."""

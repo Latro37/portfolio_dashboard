@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import CashFlow, DailyPortfolio
-from app.services.sync import _sync_portfolio_history
+from app.services.sync import _roll_forward_cash_flow_totals, _sync_portfolio_history
 
 
 @pytest.fixture
@@ -117,3 +117,84 @@ def test_sync_portfolio_history_carries_cumulative_cash_flow_between_dates(
         .all()
     )
     assert [r.net_deposits for r in rows] == [100.0, 100.0, 75.0]
+
+
+def test_roll_forward_cash_flow_totals_preserves_baseline_without_cash_flows(
+    db_session: Session,
+):
+    account_id = "acct-3"
+    db_session.add_all(
+        [
+            DailyPortfolio(
+                account_id=account_id,
+                date=date(2024, 1, 5),
+                portfolio_value=1_000.0,
+                net_deposits=500.0,
+                total_fees=0.0,
+                total_dividends=0.0,
+            ),
+            DailyPortfolio(
+                account_id=account_id,
+                date=date(2024, 1, 8),
+                portfolio_value=1_020.0,
+                net_deposits=500.0,
+                total_fees=0.0,
+                total_dividends=0.0,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    _roll_forward_cash_flow_totals(db_session, account_id, preserve_baseline=True)
+
+    rows = (
+        db_session.query(DailyPortfolio)
+        .filter_by(account_id=account_id)
+        .order_by(DailyPortfolio.date)
+        .all()
+    )
+    assert [r.net_deposits for r in rows] == [500.0, 500.0]
+
+
+def test_roll_forward_cash_flow_totals_applies_cash_flows_on_top_of_baseline(
+    db_session: Session,
+):
+    account_id = "acct-4"
+    db_session.add_all(
+        [
+            DailyPortfolio(
+                account_id=account_id,
+                date=date(2024, 1, 5),
+                portfolio_value=1_000.0,
+                net_deposits=500.0,
+                total_fees=0.0,
+                total_dividends=0.0,
+            ),
+            DailyPortfolio(
+                account_id=account_id,
+                date=date(2024, 1, 8),
+                portfolio_value=1_020.0,
+                net_deposits=500.0,
+                total_fees=0.0,
+                total_dividends=0.0,
+            ),
+            CashFlow(
+                account_id=account_id,
+                date=date(2024, 1, 6),  # weekend deposit should roll to Monday
+                type="deposit",
+                amount=100.0,
+                description="Manual weekend deposit",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    _roll_forward_cash_flow_totals(db_session, account_id, preserve_baseline=True)
+
+    rows = (
+        db_session.query(DailyPortfolio)
+        .filter_by(account_id=account_id)
+        .order_by(DailyPortfolio.date)
+        .all()
+    )
+    assert [r.net_deposits for r in rows] == [500.0, 600.0]
