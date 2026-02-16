@@ -26,6 +26,8 @@ from app.config import get_settings
 from app.market_hours import is_after_close, get_allocation_target_date
 
 logger = logging.getLogger(__name__)
+_INITIAL_SYNC_STEP_RETRIES = 2
+_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS = 2.0
 
 # Map Composer non-trade type codes to our DB types
 _CASH_FLOW_TYPE_MAP = {
@@ -74,12 +76,57 @@ def set_sync_state(db: Session, account_id: str, key: str, value: str):
     db.commit()
 
 
-def _safe_step(label: str, fn, *args, **kwargs):
-    """Run a sync step, logging and continuing on failure."""
-    try:
-        fn(*args, **kwargs)
-    except Exception as e:
-        logger.warning("Sync step '%s' failed (continuing): %s", label, e)
+def _safe_step(
+    label: str,
+    fn,
+    *args,
+    retries: int = 0,
+    retry_delay_seconds: float = 0.0,
+    raise_on_failure: bool = False,
+    **kwargs,
+):
+    """Run a sync step with optional retries.
+
+    Returns True on success. When `raise_on_failure` is False, returns False
+    after final failure and allows the caller to continue.
+    """
+    max_attempts = max(1, int(retries) + 1)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            fn(*args, **kwargs)
+            return True
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.warning(
+                    "Sync step '%s' failed on attempt %d/%d: %s. Retrying in %.1fs...",
+                    label,
+                    attempt,
+                    max_attempts,
+                    e,
+                    retry_delay_seconds,
+                )
+                if retry_delay_seconds > 0:
+                    time.sleep(retry_delay_seconds)
+                continue
+
+            if raise_on_failure:
+                logger.error(
+                    "Sync step '%s' failed after %d attempts: %s",
+                    label,
+                    max_attempts,
+                    e,
+                )
+                raise
+
+            logger.warning(
+                "Sync step '%s' failed after %d attempts (continuing): %s",
+                label,
+                max_attempts,
+                e,
+            )
+            return False
+
+    return False
 
 
 def _refresh_symphony_catalog_safe(db: Session):
@@ -168,18 +215,88 @@ def full_backfill_core(db: Session, client: ComposerClient, account_id: str):
     # Required for first-view chart/metrics stability: run synchronously.
     # If non-trade report retrieval fails for this account type, continue with
     # fallback net-deposit behavior instead of aborting the entire sync.
-    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since="2020-01-01")
-    _sync_portfolio_history(db, client, account_id)
-    _recompute_metrics(db, account_id)
+    _safe_step(
+        "cash_flows",
+        _sync_cash_flows,
+        db,
+        client,
+        account_id,
+        since="2020-01-01",
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "portfolio_history",
+        _sync_portfolio_history,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+        raise_on_failure=True,
+    )
+    _safe_step(
+        "metrics",
+        _recompute_metrics,
+        db,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+        raise_on_failure=True,
+    )
 
     # Remaining first-view data can degrade gracefully if individual steps fail.
-    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
-    _safe_step("benchmark", _sync_benchmark, db, account_id)
+    _safe_step(
+        "holdings_history",
+        _sync_holdings_history,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "benchmark",
+        _sync_benchmark,
+        db,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
 
-    _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
-    _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
-    _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
-    _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
+    _safe_step(
+        "symphony_allocations",
+        _sync_symphony_allocations,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "symphony_daily",
+        _sync_symphony_daily_backfill,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "symphony_metrics",
+        _recompute_symphony_metrics,
+        db,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "symphony_catalog",
+        _refresh_symphony_catalog_safe,
+        db,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
 
     set_sync_state(db, account_id, "initial_backfill_core_done", "true")
     logger.info("First-sync core backfill complete for account %s", account_id)
@@ -193,8 +310,25 @@ def finish_initial_backfill_activity(db: Session, client: ComposerClient, accoun
     """
     logger.info("Starting first-sync trade-activity backfill for account %s...", account_id)
 
-    _safe_step("transactions", _sync_transactions, db, client, account_id, since="2020-01-01")
-    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
+    _safe_step(
+        "transactions",
+        _sync_transactions,
+        db,
+        client,
+        account_id,
+        since="2020-01-01",
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "holdings_history",
+        _sync_holdings_history,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
 
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
