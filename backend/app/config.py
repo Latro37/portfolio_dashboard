@@ -20,6 +20,16 @@ def is_test_mode() -> bool:
     return os.environ.get("PD_TEST_MODE", "").strip() == "1"
 
 
+def is_first_start_test_mode() -> bool:
+    """Return True when first-start simulation mode is enabled."""
+    return os.environ.get("PD_FIRST_START_TEST_MODE", "").strip() == "1"
+
+
+def get_first_start_run_id() -> str:
+    """Return the current first-start simulation run id, if provided."""
+    return os.environ.get("PD_FIRST_START_RUN_ID", "").strip()
+
+
 class AccountCredentials(BaseModel):
     """One Composer account's credentials from config.json."""
     name: str
@@ -87,7 +97,7 @@ def _load_config_json() -> dict:
     if _config_json_cache is not None:
         return _config_json_cache
 
-    config_path = os.path.join(_PROJECT_ROOT, "config.json")
+    config_path = _config_json_path()
     if not os.path.exists(config_path):
         raise FileNotFoundError(
             f"config.json not found at {config_path}. "
@@ -142,7 +152,7 @@ def validate_composer_config() -> tuple[bool, Optional[str]]:
     if is_test_mode():
         return True, None
 
-    config_path = os.path.join(_PROJECT_ROOT, "config.json")
+    config_path = _config_json_path()
     if not os.path.exists(config_path):
         return (
             False,
@@ -236,7 +246,12 @@ def load_polygon_key() -> Optional[str]:
 
 
 def _config_json_path() -> str:
-    """Return path to config.json."""
+    """Return path to config.json (or PD_CONFIG_PATH override)."""
+    env_path = os.environ.get("PD_CONFIG_PATH", "").strip()
+    if env_path:
+        if os.path.isabs(env_path):
+            return env_path
+        return os.path.join(_PROJECT_ROOT, env_path)
     return os.path.join(_PROJECT_ROOT, "config.json")
 
 
@@ -255,7 +270,7 @@ def load_symphony_export_config() -> Optional[dict]:
 
     Always re-reads config.json from disk so that external edits
     are picked up without restart.
-    Returns dict with keys: local_path (str), google_drive (dict|None).
+    Returns dict with keys: enabled (bool), local_path (str), google_drive (dict|None).
     """
     global _config_json_cache
     try:
@@ -263,21 +278,28 @@ def load_symphony_export_config() -> Optional[dict]:
         data = _load_config_json()
         cfg = data.get("symphony_export")
         if not cfg or not isinstance(cfg, dict):
-            return {"local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
+            return {"enabled": True, "local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
         local_path = str(cfg.get("local_path") or "").strip()
+        enabled = bool(cfg.get("enabled", True))
         if not local_path:
-            return {**cfg, "local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
-        return cfg
+            return {**cfg, "enabled": enabled, "local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
+        return {**cfg, "enabled": enabled, "local_path": local_path}
     except Exception:
-        return {"local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
+        return {"enabled": True, "local_path": _DEFAULT_SYMPHONY_EXPORT_DIR}
 
 
 def save_symphony_export_path(local_path: str):
     """Persist the symphony export local_path into config.json."""
+    save_symphony_export_config(local_path=local_path, enabled=True)
+
+
+def save_symphony_export_config(*, local_path: str, enabled: bool):
+    """Persist symphony export config into config.json."""
     data = _load_config_json()
     if "symphony_export" not in data or not isinstance(data.get("symphony_export"), dict):
         data["symphony_export"] = {}
     data["symphony_export"]["local_path"] = local_path
+    data["symphony_export"]["enabled"] = bool(enabled)
     _save_config_json(data)
 
 

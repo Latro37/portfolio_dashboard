@@ -24,4 +24,25 @@ describe("query invalidation contracts", () => {
     expect(queryClient.getQueryState(sameAccountKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherAccountKey)?.isInvalidated).toBe(false);
   });
+
+  test("manual cash-flow invalidates aggregate account scopes", async () => {
+    const queryClient = new QueryClient();
+
+    const editedAccountSummary = queryKeys.summary({ accountId: "acct-1", period: "ALL" });
+    const aggregateAllSummary = queryKeys.summary({ accountId: "all", period: "ALL" });
+    const aggregateCredentialSummary = queryKeys.summary({
+      accountId: "all:Primary",
+      period: "ALL",
+    });
+
+    queryClient.setQueryData(editedAccountSummary, { data: {} });
+    queryClient.setQueryData(aggregateAllSummary, { data: {} });
+    queryClient.setQueryData(aggregateCredentialSummary, { data: {} });
+
+    await invalidateAfterManualCashFlow(queryClient, "acct-1");
+
+    expect(queryClient.getQueryState(editedAccountSummary)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(aggregateAllSummary)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(aggregateCredentialSummary)?.isInvalidated).toBe(true);
+  });
 });

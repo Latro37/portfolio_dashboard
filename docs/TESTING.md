@@ -46,6 +46,7 @@ Account visibility behavior:
 - Test mode (`--test`): only `__TEST__` accounts are visible/usable.
 - Normal mode (no `--test`): `__TEST__` accounts are hidden and blocked.
 - Sync in test mode is intentionally disabled (no real Composer account sync into test DB).
+- First-start simulation mode (`--first-start-test`): runs against an isolated sandbox config/database/local storage that is wiped and recreated on each launch.
 
 ## Seed Profiles
 
@@ -82,6 +83,13 @@ cd frontend
 npm run test:e2e:basic
 npm run test:e2e:power
 ```
+
+### Repeatable first-start simulation (manual UX checks)
+```bash
+python start.py --first-start-test
+```
+
+This mode is useful for validating one-time onboarding behavior repeatedly without polluting normal local user data.
 
 ### Optional visual tests
 ```bash

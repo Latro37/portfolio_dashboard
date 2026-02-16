@@ -111,13 +111,20 @@ def test_symphony_export_status_contract(client):
         "message",
         "error",
     }
-    assert payload["status"] in {"idle", "running", "complete", "error"}
+    assert payload["status"] in {"idle", "running", "cancelling", "complete", "cancelled", "error"}
     assert isinstance(payload["exported"], int)
     assert isinstance(payload["processed"], int)
     assert payload["total"] is None or isinstance(payload["total"], int)
     assert isinstance(payload["message"], str)
     assert payload["job_id"] is None or isinstance(payload["job_id"], str)
     assert payload["error"] is None or isinstance(payload["error"], str)
+
+
+def test_symphony_export_cancel_contract(client, auth_headers):
+    res = client.post("/api/symphony-export/cancel", headers=auth_headers)
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload == {"ok": False}
 
 
 def test_sync_trigger_skips_test_accounts_contract(client, auth_headers):
@@ -141,13 +148,21 @@ def test_config_contract(client):
         "symphony_export",
         "screenshot",
         "test_mode",
+        "first_start_test_mode",
+        "first_start_run_id",
         "composer_config_ok",
         "composer_config_error",
     }
     assert payload["test_mode"] is True
+    assert payload["first_start_test_mode"] is False
+    assert payload["first_start_run_id"] is None
     assert payload["local_auth_token"] == "contract-test-token"
     assert payload["composer_config_ok"] is True
     assert payload["composer_config_error"] is None
+    if payload["symphony_export"] is not None:
+        assert set(payload["symphony_export"].keys()) == {"enabled", "local_path"}
+        assert isinstance(payload["symphony_export"]["enabled"], bool)
+        assert isinstance(payload["symphony_export"]["local_path"], str)
 
 
 def test_config_requires_origin_header(client):
@@ -157,21 +172,24 @@ def test_config_requires_origin_header(client):
 
 
 def test_config_symphony_export_contract(client, monkeypatch, auth_headers):
-    captured = {"path": ""}
+    captured = {"path": "", "enabled": None}
 
-    def _save(path: str):
-        captured["path"] = path
+    def _save(*, local_path: str, enabled: bool):
+        captured["path"] = local_path
+        captured["enabled"] = enabled
 
-    monkeypatch.setattr(portfolio_admin, "save_symphony_export_path", _save)
+    monkeypatch.setattr(portfolio_admin, "save_symphony_export_config", _save)
     res = client.post(
         "/api/config/symphony-export",
-        json={"local_path": "exports"},
+        json={"local_path": "exports", "enabled": False},
         headers=auth_headers,
     )
     assert res.status_code == 200
     payload = res.json()
     assert payload["ok"] is True
+    assert payload["enabled"] is False
     assert payload["local_path"] == captured["path"]
+    assert captured["enabled"] is False
     assert payload["local_path"].endswith(
         os.path.join("data", "local_storage", "exports")
     )
@@ -225,6 +243,29 @@ def test_manual_cash_flow_contract(client, auth_headers):
     assert payload["date"] == "2025-01-05"
     assert payload["type"] == "withdrawal"
     assert payload["amount"] == -123.45
+
+
+def test_manual_cash_flow_updates_summary_and_performance_immediately(client, auth_headers):
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-03",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+
+    summary_res = client.get("/api/summary?account_id=test-account-001&period=ALL")
+    assert summary_res.status_code == 200
+    assert summary_res.json()["net_deposits"] == 100250.0
+
+    perf_res = client.get("/api/performance?account_id=test-account-001&period=ALL")
+    assert perf_res.status_code == 200
+    assert [row["net_deposits"] for row in perf_res.json()] == [100000.0, 100250.0, 100250.0]
 
 
 def test_manual_cash_flow_invalidates_live_caches(client, auth_headers, monkeypatch):
@@ -281,7 +322,8 @@ def test_cash_flows_row_contract(client):
         "account_name",
         "is_manual",
     }
-    assert payload[0]["is_manual"] is False
+    assert isinstance(payload[0]["id"], int)
+    assert isinstance(payload[0]["is_manual"], bool)
 
 
 def test_delete_manual_cash_flow_contract(client, auth_headers):
@@ -289,10 +331,10 @@ def test_delete_manual_cash_flow_contract(client, auth_headers):
         "/api/cash-flows/manual",
         json={
             "account_id": "test-account-001",
-            "date": "2025-01-05",
+            "date": "2025-01-06",
             "type": "deposit",
-            "amount": 250.00,
-            "description": "Manual contribution",
+            "amount": 10.0,
+            "description": "Manual correction to delete",
         },
         headers=auth_headers,
     )
@@ -315,6 +357,42 @@ def test_delete_manual_cash_flow_contract(client, auth_headers):
     assert after_delete.status_code == 200
     after_ids = {row["id"] for row in after_delete.json()}
     assert manual_id not in after_ids
+
+
+def test_delete_manual_cash_flow_updates_summary_and_performance_immediately(client, auth_headers):
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-03",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+
+    before_delete_summary = client.get("/api/summary?account_id=test-account-001&period=ALL")
+    assert before_delete_summary.status_code == 200
+    assert before_delete_summary.json()["net_deposits"] == 100250.0
+
+    list_res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert list_res.status_code == 200
+    manual_rows = [row for row in list_res.json() if row["is_manual"]]
+    assert len(manual_rows) == 1
+    manual_id = manual_rows[0]["id"]
+
+    delete_res = client.delete(f"/api/cash-flows/manual/{manual_id}", headers=auth_headers)
+    assert delete_res.status_code == 200
+
+    summary_res = client.get("/api/summary?account_id=test-account-001&period=ALL")
+    assert summary_res.status_code == 200
+    assert summary_res.json()["net_deposits"] == 100000.0
+
+    perf_res = client.get("/api/performance?account_id=test-account-001&period=ALL")
+    assert perf_res.status_code == 200
+    assert [row["net_deposits"] for row in perf_res.json()] == [100000.0, 100000.0, 100000.0]
 
 
 def test_delete_manual_cash_flow_invalidates_live_caches(client, auth_headers, monkeypatch):

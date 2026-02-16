@@ -15,6 +15,8 @@ export function SettingsModal({ onClose }: Props) {
   const {
     localPath,
     setLocalPath,
+    exportEnabled,
+    setExportEnabled,
     saving,
     saved,
     setSaved,
@@ -63,6 +65,29 @@ export function SettingsModal({ onClose }: Props) {
               Symphony Export
             </h3>
 
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-foreground/80">Enable local symphony export</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={exportEnabled}
+                onClick={() => {
+                  setExportEnabled(!exportEnabled);
+                  setSaved(false);
+                  setError("");
+                }}
+                className={`cursor-pointer relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  exportEnabled ? "bg-emerald-600" : "bg-muted-foreground/30"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    exportEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </label>
+
             {/* Local Path */}
             <div className="space-y-2">
               <label className="text-sm text-foreground/80 flex items-center gap-1.5">
@@ -75,6 +100,7 @@ export function SettingsModal({ onClose }: Props) {
                   value={localPath}
                   onChange={(e) => { setLocalPath(e.target.value); setSaved(false); setError(""); }}
                   placeholder="C:\\Users\\you\\Documents\\SymphonyBackups"
+                  disabled={!exportEnabled}
                   className="flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
                 <button

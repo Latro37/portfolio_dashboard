@@ -229,6 +229,7 @@ graph TD
 - `GET /api/sync/status`
 - `POST /api/sync`
 - `GET /api/symphony-export/status`
+- `POST /api/symphony-export/cancel`
 - `GET /api/config`
 - `POST /api/config/symphony-export`
 - `POST /api/config/screenshot`
@@ -236,9 +237,10 @@ graph TD
 - `GET /api/benchmark-history`
 
 Notes:
-- `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning.
-- On first sync, `POST /api/sync` may return once core dashboard data is ready while transactions/cash flows continue syncing in the background. `GET /api/sync/status` remains the canonical "is background work still running?" signal.
-- Symphony structure export runs in a background job and is observable via `GET /api/symphony-export/status`.
+- `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning. It also includes `symphony_export.enabled` and first-start simulation flags (`first_start_test_mode`, `first_start_run_id`).
+- `GET /api/cash-flows` returns row identifiers and manual-source metadata (`id`, `is_manual`) so the dashboard can delete user-added manual entries safely.
+- On first sync, `POST /api/sync` blocks until non-trade activity is applied and portfolio history/metrics are recomputed, so first-view charts and metrics are stable.
+- Symphony structure export runs in a background job and is observable via `GET /api/symphony-export/status` (`idle|running|cancelling|complete|cancelled|error`). Users can request cancellation via `POST /api/symphony-export/cancel`.
 
 ### Symphony routes
 
@@ -288,6 +290,9 @@ Preferred:
 
 Optional:
 - `PD_ALLOWED_ORIGINS` (comma-separated strict allowlist for browser Origin/CORS; loopback-only origins are honored)
+- `PD_CONFIG_PATH` (override `config.json` path, used by first-start simulation mode)
+- `PD_FIRST_START_TEST_MODE` (signals isolated first-start simulation mode to the frontend/backend)
+- `PD_FIRST_START_RUN_ID` (per-launch identifier for first-start simulation mode)
 
 Legacy aliases:
 - removed after TQ-1 cleanup; do not use or reintroduce.

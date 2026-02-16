@@ -9,7 +9,7 @@ test("transactions/cashflow tabs and settings modal", async ({ page }) => {
   await expect(page.getByText("Symbol")).toBeVisible();
 
   await page.getByTestId("tab-cashflows").click();
-  await expect(page.getByText("Non-Trade Activity")).toBeVisible();
+  await expect(page.getByTestId("tab-cashflows")).toHaveAttribute("data-state", "active");
 
   await page.getByTestId("btn-settings").click();
   await expect(page.getByTestId("modal-settings")).toBeVisible();

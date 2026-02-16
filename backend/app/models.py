@@ -52,6 +52,7 @@ class CashFlow(Base):
     type = Column(Text, nullable=False)  # deposit / withdrawal / fee_cat / fee_taf / dividend
     amount = Column(Float, nullable=False)  # signed
     description = Column(Text, default="")
+    is_manual = Column(Integer, nullable=False, default=0)  # 1 when added via manual entry form
 
 
 class DailyPortfolio(Base):

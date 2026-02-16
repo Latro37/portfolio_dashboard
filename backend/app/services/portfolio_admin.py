@@ -7,21 +7,23 @@ import os
 import re
 import time
 from datetime import date as date_cls
-from threading import Lock, Thread
+from threading import Lock
 from typing import Callable, Optional
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.config import (
+    get_first_start_run_id,
+    is_first_start_test_mode,
     is_test_mode,
     load_finnhub_key,
     load_polygon_key,
     load_screenshot_config,
     load_symphony_export_config,
+    save_symphony_export_config,
     validate_composer_config,
     save_screenshot_config,
-    save_symphony_export_path,
 )
 from app.models import Account, CashFlow
 from app.schemas import ManualCashFlowRequest
@@ -36,7 +38,11 @@ from app.services.sync import (
     get_sync_state,
     incremental_update,
 )
-from app.services.symphony_export_jobs import get_symphony_export_job_status, start_symphony_export_job
+from app.services.symphony_export_jobs import (
+    cancel_symphony_export_job,
+    get_symphony_export_job_status,
+    start_symphony_export_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +52,43 @@ _syncing = False
 _sync_message = ""
 _sync_error: Optional[str] = None
 
+
+def _start_symphony_export_job_if_enabled(account_ids: list[str]) -> None:
+    if not account_ids:
+        return
+
+    export_cfg = load_symphony_export_config() or {}
+    if not bool(export_cfg.get("enabled", True)):
+        logger.info("Symphony export disabled by config; skipping background export job")
+        return
+
+    try:
+        start_symphony_export_job(account_ids)
+    except Exception as exc:
+        logger.warning("Failed to start symphony export job: %s", exc)
+
+
 def is_syncing() -> bool:
     return _syncing
+
+
+def _recompute_after_manual_cash_flow(
+    db: Session,
+    account_id: str,
+) -> None:
+    """Recompute portfolio totals/metrics after manual cash-flow mutations."""
+    from app.services.sync import (
+        _recompute_metrics,
+        _roll_forward_cash_flow_totals,
+    )
+
+    try:
+        # Match sync-path behavior so manual-entry recompute yields the same
+        # totals as a subsequent manual sync.
+        _roll_forward_cash_flow_totals(db, account_id, preserve_baseline=False)
+        _recompute_metrics(db, account_id)
+    except Exception as exc:
+        logger.warning("Post-manual cash-flow local recompute failed for %s: %s", account_id, exc)
 
 
 def add_manual_cash_flow_data(
@@ -74,19 +115,19 @@ def add_manual_cash_flow_data(
             type=cf_type,
             amount=amount,
             description=encode_manual_description(body.description),
+            is_manual=1,
         )
     )
     db.commit()
 
-    # Recompute account-level portfolio history/metrics after mutation.
+    # Recompute account-level portfolio totals/metrics after mutation.
     try:
-        client = get_client_for_account_fn(db, body.account_id)
-        from app.services.sync import _recompute_metrics, _sync_portfolio_history
-
-        _sync_portfolio_history(db, client, body.account_id)
-        _recompute_metrics(db, body.account_id)
+        _recompute_after_manual_cash_flow(
+            db,
+            body.account_id,
+        )
     except Exception as exc:
-        logger.warning("Post-manual-entry recompute failed: %s", exc)
+        logger.warning("Post-manual-entry recompute orchestration failed: %s", exc)
     finally:
         # Avoid serving stale live overlay summaries after manual cash-flow edits.
         invalidate_portfolio_live_cache(account_ids=[body.account_id])
@@ -114,24 +155,24 @@ def delete_manual_cash_flow_data(
         raise HTTPException(400, "Only manual deposit/withdrawal entries can be deleted")
 
     account_id = row.account_id
+    deleted_id = int(row.id)
     db.delete(row)
     db.commit()
 
-    # Recompute account-level portfolio history/metrics after mutation.
+    # Recompute account-level portfolio totals/metrics after mutation.
     try:
-        client = get_client_for_account_fn(db, account_id)
-        from app.services.sync import _recompute_metrics, _sync_portfolio_history
-
-        _sync_portfolio_history(db, client, account_id)
-        _recompute_metrics(db, account_id)
+        _recompute_after_manual_cash_flow(
+            db,
+            account_id,
+        )
     except Exception as exc:
-        logger.warning("Post-manual-delete recompute failed: %s", exc)
+        logger.warning("Post-manual-delete recompute orchestration failed: %s", exc)
     finally:
         # Avoid serving stale live overlay summaries after manual cash-flow edits.
         invalidate_portfolio_live_cache(account_ids=[account_id])
         invalidate_symphony_live_cache(account_id=account_id)
 
-    return {"status": "ok", "deleted_id": cash_flow_id}
+    return {"status": "ok", "deleted_id": deleted_id}
 
 
 def get_sync_status_data(db: Session, account_id: str) -> dict:
@@ -154,6 +195,10 @@ def get_symphony_export_job_status_data() -> dict:
     return get_symphony_export_job_status()
 
 
+def cancel_symphony_export_job_data() -> dict:
+    return {"ok": cancel_symphony_export_job()}
+
+
 def trigger_sync_data(
     db: Session,
     *,
@@ -171,7 +216,6 @@ def trigger_sync_data(
         _sync_message = "Starting sync..."
         _sync_error = None
 
-    handed_off = False
     try:
         selected_account = account_id if account_id else "all"
         ids = resolve_account_ids_fn(db, selected_account)
@@ -186,8 +230,6 @@ def trigger_sync_data(
                 "reason": "No sync-eligible accounts",
             }
 
-        deferred_activity_ids: list[str] = []
-
         for aid in sync_ids:
             client = get_client_for_account_fn(db, aid)
             state = get_sync_state(db, aid)
@@ -197,29 +239,23 @@ def trigger_sync_data(
                     _sync_message = f"Syncing incremental updates for {aid}..."
                 incremental_update(db, client, aid)
             else:
-                # First sync: core backfill now, heavy activity reports in background.
+                # First sync: complete core first, then finish trade activity before returning.
                 if state.get("initial_backfill_core_done") == "true":
-                    deferred_activity_ids.append(aid)
+                    with _sync_state_lock:
+                        _sync_message = f"Completing first-run trade activity for {aid}..."
+                    finish_initial_backfill_activity(db, client, aid)
                 else:
                     with _sync_state_lock:
                         _sync_message = f"Syncing first-run core data for {aid}..."
                     full_backfill_core(db, client, aid)
-                    deferred_activity_ids.append(aid)
+                    with _sync_state_lock:
+                        _sync_message = f"Completing first-run trade activity for {aid}..."
+                    finish_initial_backfill_activity(db, client, aid)
 
             if len(sync_ids) > 1:
                 time.sleep(1)
 
-        # Always run symphony export in the background (invested + drafts).
-        try:
-            start_symphony_export_job(sync_ids)
-        except Exception as exc:
-            logger.warning("Failed to start symphony export job: %s", exc)
-
-        if deferred_activity_ids:
-            handed_off = True
-            _start_background_first_sync(deferred_activity_ids)
-            return {"status": "complete", "synced_accounts": len(sync_ids)}
-
+        _start_symphony_export_job_if_enabled(sync_ids)
         return {"status": "complete", "synced_accounts": len(sync_ids)}
     except HTTPException:
         raise
@@ -229,52 +265,9 @@ def trigger_sync_data(
             _sync_error = f"Sync failed: {exc}"
         raise HTTPException(500, f"Sync failed: {exc}")
     finally:
-        if not handed_off:
-            with _sync_state_lock:
-                _syncing = False
-                _sync_message = ""
-
-
-def _start_background_first_sync(account_ids: list[str]) -> None:
-    """Spawn background continuation for the first sync (transactions + cash flows)."""
-
-    thread = Thread(
-        target=_run_background_first_sync,
-        name="first-sync-activity-backfill",
-        daemon=True,
-        args=(list(account_ids),),
-    )
-    thread.start()
-
-
-def _run_background_first_sync(account_ids: list[str]) -> None:
-    global _syncing, _sync_message, _sync_error
-
-    # Import here to avoid router import cycles.
-    from app.services.account_clients import get_client_for_account
-    from app.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        for aid in account_ids:
-            with _sync_state_lock:
-                _sync_message = f"Background: syncing transactions/cash flows for {aid}..."
-            client = get_client_for_account(db, aid)
-            finish_initial_backfill_activity(db, client, aid)
-            time.sleep(1)
-
-        with _sync_state_lock:
-            _sync_message = ""
-            _sync_error = None
-    except Exception as exc:
-        logger.error("Background first-sync continuation failed: %s", exc, exc_info=True)
-        with _sync_state_lock:
-            _sync_error = f"Background sync failed: {exc}"
-            _sync_message = ""
-    finally:
         with _sync_state_lock:
             _syncing = False
-        db.close()
+            _sync_message = ""
 
 
 def get_app_config_data() -> dict:
@@ -282,9 +275,13 @@ def get_app_config_data() -> dict:
     export_cfg = load_symphony_export_config()
     export_status = None
     if export_cfg:
-        export_status = {"local_path": export_cfg.get("local_path", "")}
+        export_status = {
+            "enabled": bool(export_cfg.get("enabled", True)),
+            "local_path": export_cfg.get("local_path", ""),
+        }
 
     screenshot_cfg = load_screenshot_config()
+    first_start_mode = is_first_start_test_mode()
     return {
         "finnhub_api_key": None,
         "finnhub_configured": load_finnhub_key() is not None,
@@ -293,18 +290,22 @@ def get_app_config_data() -> dict:
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
         "test_mode": is_test_mode(),
+        "first_start_test_mode": first_start_mode,
+        "first_start_run_id": get_first_start_run_id() if first_start_mode else None,
         "composer_config_ok": composer_ok,
         "composer_config_error": composer_err,
     }
 
 
-def save_symphony_export_config_data(local_path: str) -> dict:
+def save_symphony_export_config_data(local_path: str, enabled: bool) -> dict:
+    current = load_symphony_export_config() or {}
+    candidate = (local_path or "").strip() or str(current.get("local_path") or "").strip()
     try:
-        normalized = resolve_local_write_path(local_path)
+        normalized = resolve_local_write_path(candidate)
     except LocalPathError as exc:
         raise HTTPException(400, str(exc))
-    save_symphony_export_path(normalized)
-    return {"ok": True, "local_path": normalized}
+    save_symphony_export_config(local_path=normalized, enabled=bool(enabled))
+    return {"ok": True, "local_path": normalized, "enabled": bool(enabled)}
 
 
 def save_screenshot_config_data(config: dict) -> dict:

@@ -26,6 +26,8 @@ from app.config import get_settings
 from app.market_hours import is_after_close, get_allocation_target_date
 
 logger = logging.getLogger(__name__)
+_INITIAL_SYNC_STEP_RETRIES = 2
+_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS = 2.0
 
 # Map Composer non-trade type codes to our DB types
 _CASH_FLOW_TYPE_MAP = {
@@ -74,12 +76,57 @@ def set_sync_state(db: Session, account_id: str, key: str, value: str):
     db.commit()
 
 
-def _safe_step(label: str, fn, *args, **kwargs):
-    """Run a sync step, logging and continuing on failure."""
-    try:
-        fn(*args, **kwargs)
-    except Exception as e:
-        logger.warning("Sync step '%s' failed (continuing): %s", label, e)
+def _safe_step(
+    label: str,
+    fn,
+    *args,
+    retries: int = 0,
+    retry_delay_seconds: float = 0.0,
+    raise_on_failure: bool = False,
+    **kwargs,
+):
+    """Run a sync step with optional retries.
+
+    Returns True on success. When `raise_on_failure` is False, returns False
+    after final failure and allows the caller to continue.
+    """
+    max_attempts = max(1, int(retries) + 1)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            fn(*args, **kwargs)
+            return True
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.warning(
+                    "Sync step '%s' failed on attempt %d/%d: %s. Retrying in %.1fs...",
+                    label,
+                    attempt,
+                    max_attempts,
+                    e,
+                    retry_delay_seconds,
+                )
+                if retry_delay_seconds > 0:
+                    time.sleep(retry_delay_seconds)
+                continue
+
+            if raise_on_failure:
+                logger.error(
+                    "Sync step '%s' failed after %d attempts: %s",
+                    label,
+                    max_attempts,
+                    e,
+                )
+                raise
+
+            logger.warning(
+                "Sync step '%s' failed after %d attempts (continuing): %s",
+                label,
+                max_attempts,
+                e,
+            )
+            return False
+
+    return False
 
 
 def _refresh_symphony_catalog_safe(db: Session):
@@ -157,47 +204,135 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
 
 
 def full_backfill_core(db: Session, client: ComposerClient, account_id: str):
-    """First-sync core backfill that skips trade activity and cash flow reports.
+    """First-sync core backfill with blocking non-trade activity sync.
 
-    This is intended to make the first sync return sooner with dashboard-critical
-    data (portfolio/symphony history + metrics), while transactions/cash flows are
-    fetched in a background continuation step.
+    Ensures non-trade activity (cash flows) is applied before portfolio history
+    and metrics are returned to the user for the first dashboard load.
+    Trade transactions can continue in a follow-up phase.
     """
     logger.info("Starting first-sync core backfill for account %s...", account_id)
 
-    # Skip transactions + cash flows here (background continuation).
-    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
-    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
-    _safe_step("benchmark", _sync_benchmark, db, account_id)
-    _safe_step("metrics", _recompute_metrics, db, account_id)
+    # Required for first-view chart/metrics stability: run synchronously.
+    # If non-trade report retrieval fails for this account type, continue with
+    # fallback net-deposit behavior instead of aborting the entire sync.
+    _safe_step(
+        "cash_flows",
+        _sync_cash_flows,
+        db,
+        client,
+        account_id,
+        since="2020-01-01",
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "portfolio_history",
+        _sync_portfolio_history,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+        raise_on_failure=True,
+    )
+    _safe_step(
+        "metrics",
+        _recompute_metrics,
+        db,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+        raise_on_failure=True,
+    )
 
-    _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
-    _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
-    _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
-    _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
+    # Remaining first-view data can degrade gracefully if individual steps fail.
+    _safe_step(
+        "holdings_history",
+        _sync_holdings_history,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "benchmark",
+        _sync_benchmark,
+        db,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+
+    _safe_step(
+        "symphony_allocations",
+        _sync_symphony_allocations,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "symphony_daily",
+        _sync_symphony_daily_backfill,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "symphony_metrics",
+        _recompute_symphony_metrics,
+        db,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "symphony_catalog",
+        _refresh_symphony_catalog_safe,
+        db,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
 
     set_sync_state(db, account_id, "initial_backfill_core_done", "true")
     logger.info("First-sync core backfill complete for account %s", account_id)
 
 
 def finish_initial_backfill_activity(db: Session, client: ComposerClient, account_id: str):
-    """Background continuation for first sync.
+    """Continuation for first sync focused on trade activity tables.
 
-    Fetches the heavier activity reports and recomputes dependent tables so that
-    transactions/cash flows and derived portfolio metrics become fully correct.
+    Cash-flow-driven portfolio history and metrics are already finalized in
+    full_backfill_core().
     """
-    logger.info("Starting first-sync activity backfill for account %s...", account_id)
+    logger.info("Starting first-sync trade-activity backfill for account %s...", account_id)
 
-    _safe_step("transactions", _sync_transactions, db, client, account_id, since="2020-01-01")
-    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since="2020-01-01")
-    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
-    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
-    _safe_step("benchmark", _sync_benchmark, db, account_id)
-    _safe_step("metrics", _recompute_metrics, db, account_id)
+    _safe_step(
+        "transactions",
+        _sync_transactions,
+        db,
+        client,
+        account_id,
+        since="2020-01-01",
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
+    _safe_step(
+        "holdings_history",
+        _sync_holdings_history,
+        db,
+        client,
+        account_id,
+        retries=_INITIAL_SYNC_STEP_RETRIES,
+        retry_delay_seconds=_INITIAL_SYNC_STEP_RETRY_DELAY_SECONDS,
+    )
 
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
-    logger.info("First-sync activity backfill complete for account %s", account_id)
+    logger.info("First-sync trade-activity backfill complete for account %s", account_id)
 
 
 # ------------------------------------------------------------------
@@ -270,6 +405,7 @@ def _sync_cash_flows(db: Session, client: ComposerClient, account_id: str, since
             type=mapped_type,
             amount=r["amount"],
             description=r.get("description", ""),
+            is_manual=0,
         ))
         existing.add(key)
         new_count += 1
@@ -278,26 +414,45 @@ def _sync_cash_flows(db: Session, client: ComposerClient, account_id: str, since
     logger.info("Cash flows synced for %s: %d new", account_id, new_count)
 
 
-def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str):
-    """Fetch portfolio history and upsert into daily_portfolio table."""
-    history = client.get_portfolio_history(account_id)
+def _roll_forward_cash_flow_totals(
+    db: Session,
+    account_id: str,
+    *,
+    preserve_baseline: bool = True,
+) -> int:
+    """Recompute cumulative cash-flow totals into existing DailyPortfolio rows.
 
-    # Load cash flows for cumulative calculations
-    all_cf = db.query(CashFlow).filter_by(account_id=account_id).order_by(CashFlow.date).all()
+    When `preserve_baseline` is True, the first portfolio row's existing totals
+    are treated as a baseline offset. This keeps fallback net-deposit values
+    stable for accounts where Composer non-trade reports are unavailable.
+    """
+    daily_rows = (
+        db.query(DailyPortfolio)
+        .filter_by(account_id=account_id)
+        .order_by(DailyPortfolio.date)
+        .all()
+    )
+    if not daily_rows:
+        return 0
 
-    # Build cumulative deposit/fee/dividend by date
+    all_cf = (
+        db.query(CashFlow)
+        .filter_by(account_id=account_id)
+        .order_by(CashFlow.date)
+        .all()
+    )
+
     cum_deposits = 0.0
     cum_fees = 0.0
     cum_dividends = 0.0
     cum_by_date = {}
 
-    cf_by_date = {}
+    cf_by_date: dict[str, list[CashFlow]] = {}
     for cf in all_cf:
         ds = str(cf.date)
         cf_by_date.setdefault(ds, []).append(cf)
 
-    all_dates_sorted = sorted(cf_by_date.keys())
-    for ds in all_dates_sorted:
+    for ds in sorted(cf_by_date.keys()):
         for cf in cf_by_date[ds]:
             if cf.type == "deposit":
                 cum_deposits += cf.amount
@@ -316,22 +471,65 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
             "total_dividends": round(cum_dividends, 2),
         }
 
-    # If no cash flows found, fall back to total-stats API for net_deposits
-    if not all_cf:
-        try:
-            total_stats = client.get_total_stats(account_id)
-            fallback_deposits = float(total_stats.get("net_deposits", 0))
-            logger.info(
-                "No cash flow data for %s — using total-stats net_deposits=%.2f as fallback",
-                account_id, fallback_deposits,
-            )
-        except Exception:
-            fallback_deposits = 0.0
-    else:
-        fallback_deposits = None
+    cash_flow_dates = sorted(cum_by_date.keys())
 
-    # Forward-fill cumulative values for dates without cash flow events
+    baseline_net_deposits = 0.0
+    baseline_total_fees = 0.0
+    baseline_total_dividends = 0.0
+    if preserve_baseline:
+        first_ds = daily_rows[0].date.isoformat()
+        baseline_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
+        baseline_idx = 0
+        while baseline_idx < len(cash_flow_dates) and cash_flow_dates[baseline_idx] <= first_ds:
+            baseline_cum = cum_by_date[cash_flow_dates[baseline_idx]]
+            baseline_idx += 1
+
+        baseline_net_deposits = round(
+            float(daily_rows[0].net_deposits or 0.0) - baseline_cum["net_deposits"],
+            2,
+        )
+        baseline_total_fees = round(
+            float(daily_rows[0].total_fees or 0.0) - baseline_cum["total_fees"],
+            2,
+        )
+        baseline_total_dividends = round(
+            float(daily_rows[0].total_dividends or 0.0) - baseline_cum["total_dividends"],
+            2,
+        )
+
+    updated_count = 0
     last_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
+    cash_flow_idx = 0
+    for row in daily_rows:
+        ds = row.date.isoformat()
+        while cash_flow_idx < len(cash_flow_dates) and cash_flow_dates[cash_flow_idx] <= ds:
+            last_cum = cum_by_date[cash_flow_dates[cash_flow_idx]]
+            cash_flow_idx += 1
+
+        next_net_deposits = round(baseline_net_deposits + last_cum["net_deposits"], 2)
+        next_total_fees = round(baseline_total_fees + last_cum["total_fees"], 2)
+        next_total_dividends = round(
+            baseline_total_dividends + last_cum["total_dividends"],
+            2,
+        )
+
+        if row.net_deposits != next_net_deposits:
+            row.net_deposits = next_net_deposits
+            updated_count += 1
+        if row.total_fees != next_total_fees:
+            row.total_fees = next_total_fees
+            updated_count += 1
+        if row.total_dividends != next_total_dividends:
+            row.total_dividends = next_total_dividends
+            updated_count += 1
+
+    db.commit()
+    return updated_count
+
+
+def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str):
+    """Fetch portfolio history and upsert into daily_portfolio table."""
+    history = client.get_portfolio_history(account_id)
 
     # Try to get current cash balance
     try:
@@ -340,46 +538,56 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
         cash_balance = 0.0
 
     new_count = 0
-    for entry in history:
-        ds = entry["date"]
+    today = datetime.now().strftime("%Y-%m-%d")
+    history_sorted = sorted(history, key=lambda item: str(item.get("date", "")))
+    for entry in history_sorted:
+        ds_raw = str(entry.get("date", ""))
         try:
-            d = date.fromisoformat(ds)
+            d = date.fromisoformat(ds_raw)
         except Exception:
             continue
-
-        # Get cumulative values
-        if ds in cum_by_date:
-            last_cum = cum_by_date[ds]
-
-        # Use fallback deposits if no cash flow data exists
-        deposits_val = fallback_deposits if fallback_deposits is not None else last_cum["net_deposits"]
-        fees_val = last_cum["total_fees"]
-        dividends_val = last_cum["total_dividends"]
+        ds = d.isoformat()
 
         existing = db.query(DailyPortfolio).filter_by(account_id=account_id, date=d).first()
         if existing:
             existing.portfolio_value = entry["portfolio_value"]
-            existing.net_deposits = deposits_val
-            existing.total_fees = fees_val
-            existing.total_dividends = dividends_val
             # Only set cash_balance for today
-            if ds == datetime.now().strftime("%Y-%m-%d"):
+            if ds == today:
                 existing.cash_balance = cash_balance
         else:
             db.add(DailyPortfolio(
                 account_id=account_id,
                 date=d,
                 portfolio_value=entry["portfolio_value"],
-                cash_balance=cash_balance if ds == datetime.now().strftime("%Y-%m-%d") else 0.0,
-                net_deposits=deposits_val,
-                total_fees=fees_val,
-                total_dividends=dividends_val,
+                cash_balance=cash_balance if ds == today else 0.0,
+                net_deposits=0.0,
+                total_fees=0.0,
+                total_dividends=0.0,
             ))
             new_count += 1
 
     db.commit()
-    logger.info("Daily portfolio synced for %s: %d new rows", account_id, new_count)
 
+    _roll_forward_cash_flow_totals(db, account_id, preserve_baseline=False)
+
+    # If no cash flows found, fall back to total-stats API for net_deposits
+    has_cash_flows = db.query(CashFlow.id).filter(CashFlow.account_id == account_id).first() is not None
+    if not has_cash_flows:
+        try:
+            total_stats = client.get_total_stats(account_id)
+            fallback_deposits = float(total_stats.get("net_deposits", 0))
+            for row in db.query(DailyPortfolio).filter_by(account_id=account_id).all():
+                row.net_deposits = round(fallback_deposits, 2)
+            db.commit()
+            logger.info(
+                "No cash flow data for %s - using total-stats net_deposits=%.2f as fallback",
+                account_id,
+                fallback_deposits,
+            )
+        except Exception:
+            pass
+
+    logger.info("Daily portfolio synced for %s: %d new rows", account_id, new_count)
 
 def _sync_holdings_history(db: Session, client: ComposerClient, account_id: str):
     """Reconstruct holdings from transactions and store snapshots."""

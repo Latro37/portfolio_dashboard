@@ -31,6 +31,7 @@ def engine():
 def _reset_job_state():
     # Keep tests isolated since the job state is a module-level singleton.
     with symphony_export_jobs._job_lock:
+        symphony_export_jobs._job_cancel_events.clear()
         symphony_export_jobs._job_state.update(
             {
                 "status": "idle",
@@ -94,8 +95,9 @@ def test_symphony_export_job_groups_drafts_once_per_credential(engine, monkeypat
         account_id: str,
         include_drafts: bool = True,
         progress_cb=None,
+        cancelled_cb=None,
     ):
-        del db, client
+        del db, client, cancelled_cb
         with calls_lock:
             calls.append((account_id, bool(include_drafts)))
             call_count = len(calls)
@@ -178,8 +180,16 @@ def test_start_returns_existing_job_id_while_running(engine, monkeypatch: pytest
     def _get_client(_db, _account_id: str):
         return object()
 
-    def _export(*, db, client, account_id: str, include_drafts: bool = True, progress_cb=None):
-        del db, client, account_id, include_drafts
+    def _export(
+        *,
+        db,
+        client,
+        account_id: str,
+        include_drafts: bool = True,
+        progress_cb=None,
+        cancelled_cb=None,
+    ):
+        del db, client, account_id, include_drafts, cancelled_cb
         if progress_cb:
             progress_cb({"event": "targets", "total": 1})
             progress_cb({"event": "processed", "exported": True})
@@ -204,3 +214,139 @@ def test_start_returns_existing_job_id_while_running(engine, monkeypatch: pytest
 
     status = symphony_export_jobs.get_symphony_export_job_status()
     assert status["status"] == "complete"
+
+
+def test_cancel_stops_running_job(engine, monkeypatch: pytest.MonkeyPatch):
+    session = Session(engine)
+    try:
+        session.add(
+            Account(
+                id="acct-001",
+                credential_name="Primary",
+                account_type="INDIVIDUAL",
+                display_name="One",
+                status="ACTIVE",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    def _session_local():
+        return Session(engine)
+
+    def _get_client(_db, _account_id: str):
+        return object()
+
+    def _export(
+        *,
+        db,
+        client,
+        account_id: str,
+        include_drafts: bool = True,
+        progress_cb=None,
+        cancelled_cb=None,
+    ):
+        del db, client, account_id, include_drafts
+        total = 100
+        if progress_cb:
+            progress_cb({"event": "targets", "total": total})
+
+        for _ in range(total):
+            if cancelled_cb and cancelled_cb():
+                return
+            if progress_cb:
+                progress_cb({"event": "processed", "exported": True})
+            time.sleep(0.01)
+
+    monkeypatch.setattr(symphony_export_jobs, "SessionLocal", _session_local)
+    monkeypatch.setattr(symphony_export_jobs, "get_client_for_account", _get_client)
+    monkeypatch.setattr(symphony_export_jobs, "export_all_symphonies_with_options", _export)
+
+    job_id = symphony_export_jobs.start_symphony_export_job(["acct-001"])
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        status = symphony_export_jobs.get_symphony_export_job_status()
+        if status["status"] in {"running", "cancelling"} and status["processed"] > 0:
+            break
+        time.sleep(0.01)
+
+    assert symphony_export_jobs.cancel_symphony_export_job(job_id) is True
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        status = symphony_export_jobs.get_symphony_export_job_status()
+        if status["status"] in {"cancelled", "error"}:
+            break
+        time.sleep(0.01)
+
+    status = symphony_export_jobs.get_symphony_export_job_status()
+    assert status["status"] == "cancelled"
+    assert status["job_id"] == job_id
+    assert 0 < status["processed"] < 100
+
+
+def test_job_status_counts_processed_even_when_exports_are_skipped(
+    engine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = Session(engine)
+    try:
+        session.add(
+            Account(
+                id="acct-001",
+                credential_name="Primary",
+                account_type="INDIVIDUAL",
+                display_name="One",
+                status="ACTIVE",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    def _session_local():
+        return Session(engine)
+
+    def _get_client(_db, _account_id: str):
+        return object()
+
+    def _export(
+        *,
+        db,
+        client,
+        account_id: str,
+        include_drafts: bool = True,
+        progress_cb=None,
+        cancelled_cb=None,
+    ):
+        del db, client, account_id, include_drafts, cancelled_cb
+        if progress_cb:
+            progress_cb({"event": "targets", "total": 5})
+            # Already-exported/unchanged symphonies.
+            for _ in range(3):
+                progress_cb({"event": "processed", "exported": False})
+            # Newly exported symphonies.
+            for _ in range(2):
+                progress_cb({"event": "processed", "exported": True})
+
+    monkeypatch.setattr(symphony_export_jobs, "SessionLocal", _session_local)
+    monkeypatch.setattr(symphony_export_jobs, "get_client_for_account", _get_client)
+    monkeypatch.setattr(symphony_export_jobs, "export_all_symphonies_with_options", _export)
+
+    job_id = symphony_export_jobs.start_symphony_export_job(["acct-001"])
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        status = symphony_export_jobs.get_symphony_export_job_status()
+        if status["status"] in {"complete", "error"}:
+            break
+        time.sleep(0.01)
+
+    status = symphony_export_jobs.get_symphony_export_job_status()
+    assert status["status"] == "complete"
+    assert status["job_id"] == job_id
+    assert status["total"] == 5
+    assert status["processed"] == 5
+    assert status["exported"] == 2

@@ -21,6 +21,8 @@ type Result = {
   selectedSubAccount: string;
   finnhubConfigured: boolean;
   isTestMode: boolean;
+  isFirstStartTestMode: boolean;
+  firstStartRunId: string | null;
   screenshotConfig: ScreenshotConfig | null;
   setScreenshotConfig: Dispatch<SetStateAction<ScreenshotConfig | null>>;
   setSelectedCredential: Dispatch<SetStateAction<string>>;
@@ -115,6 +117,8 @@ export function useDashboardBootstrap(): Result {
   const finnhubConfigured =
     configData?.finnhub_configured ?? Boolean(configData?.finnhub_api_key);
   const isTestMode = configData?.test_mode === true;
+  const isFirstStartTestMode = configData?.first_start_test_mode === true;
+  const firstStartRunId = configData?.first_start_run_id ?? null;
   const composerConfigOk = configData?.composer_config_ok ?? true;
   const composerConfigError = configData?.composer_config_error ?? null;
   const screenshotConfig = screenshotConfigOverride ?? configData?.screenshot ?? null;
@@ -129,6 +133,8 @@ export function useDashboardBootstrap(): Result {
     selectedSubAccount,
     finnhubConfigured,
     isTestMode,
+    isFirstStartTestMode,
+    firstStartRunId,
     screenshotConfig,
     setScreenshotConfig,
     setSelectedCredential,

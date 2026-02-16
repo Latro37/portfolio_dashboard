@@ -31,6 +31,7 @@ export function useFinnhubQuotes(
   const prevCloseRef = useRef<Record<string, number>>({});
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(1000);
+  const connectingRef = useRef(false);
   const mountedRef = useRef(true);
   const subscribedSymbols = useRef<Set<string>>(new Set());
 
@@ -75,16 +76,21 @@ export function useFinnhubQuotes(
   // Open WebSocket connection via backend proxy
   const connectWS = useCallback(async function openWebSocket() {
     if (!finnhubEnabled || !mountedRef.current) return;
-
-    // Clean up any existing connection
-    if (wsRef.current) {
-      try { wsRef.current.close(); } catch { /* ignore */ }
+    if (connectingRef.current) return;
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
     }
 
+    connectingRef.current = true;
     let wsUrl = "";
     try {
       wsUrl = await api.getFinnhubWsUrl();
     } catch {
+      connectingRef.current = false;
       return;
     }
 
@@ -93,6 +99,7 @@ export function useFinnhubQuotes(
 
     ws.onopen = () => {
       if (!mountedRef.current) { ws.close(); return; }
+      connectingRef.current = false;
       setConnected(true);
       reconnectDelay.current = 1000; // reset backoff
 
@@ -135,6 +142,7 @@ export function useFinnhubQuotes(
     };
 
     ws.onclose = () => {
+      connectingRef.current = false;
       setConnected(false);
       if (!mountedRef.current) return;
       // Reconnect with exponential backoff
@@ -148,6 +156,7 @@ export function useFinnhubQuotes(
     };
 
     ws.onerror = () => {
+      connectingRef.current = false;
       // onclose will fire after onerror, triggering reconnect
     };
   }, [finnhubEnabled, stableSymbols, shouldConnect]);
@@ -178,7 +187,12 @@ export function useFinnhubQuotes(
 
     // Periodic check: reconnect if we should be connected but aren't
     const checkInterval = setInterval(() => {
-      if (shouldConnect() && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
+      if (
+        shouldConnect() &&
+        (!wsRef.current ||
+          (wsRef.current.readyState !== WebSocket.OPEN &&
+            wsRef.current.readyState !== WebSocket.CONNECTING))
+      ) {
         void connectWS();
       }
     }, 60_000);
@@ -188,6 +202,7 @@ export function useFinnhubQuotes(
       mountedRef.current = false;
       clearInterval(checkInterval);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      connectingRef.current = false;
       // Unsubscribe and close
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         for (const sym of subscribedSymbolsSnapshot) {

@@ -28,6 +28,7 @@ processes: list[subprocess.Popen] = []
 
 _PLACEHOLDER_API_KEY_ID = "your-api-key-id"
 _PLACEHOLDER_API_SECRET = "your-api-secret"
+_FIRST_START_SANDBOX_DIR = os.path.join(ROOT, "data", "first_start_sandbox")
 
 
 def cleanup(*_):
@@ -167,15 +168,29 @@ def ensure_backend_python(*, no_venv: bool) -> str:
 
 def install_deps(*, backend_python: str, npm_cmd: str):
     """Install dependencies if needed."""
+    def _run_with_elapsed(cmd: list[str], *, cwd: str, progress_label: str):
+        proc = subprocess.Popen(cmd, cwd=cwd)
+        started = time.time()
+        last_report = 0
+        while proc.poll() is None:
+            elapsed = int(time.time() - started)
+            if elapsed >= 5 and elapsed - last_report >= 5:
+                print(f"  {progress_label}... {elapsed}s elapsed")
+                last_report = elapsed
+            time.sleep(0.2)
+        if proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+
     req = os.path.join(BACKEND_DIR, "requirements.txt")
     if os.path.exists(req):
         print("Checking Python dependencies...")
         try:
-            subprocess.run(
+            _run_with_elapsed(
                 [backend_python, "-m", "pip", "install", "-r", req, "-q"],
                 cwd=BACKEND_DIR,
-                check=True,
+                progress_label="Checking Python dependencies",
             )
+            print("  Python dependencies ........ OK")
         except subprocess.CalledProcessError:
             print("ERROR: Failed to install backend dependencies.")
             sys.exit(1)
@@ -190,12 +205,13 @@ def install_deps(*, backend_python: str, npm_cmd: str):
             sys.exit(1)
 
 
-def validate_config_credentials() -> tuple[bool, str | None]:
+def validate_config_credentials(*, config_path: str | None = None) -> tuple[bool, str | None]:
     """Validate config.json has usable Composer credentials (non-test mode).
 
     Returns (ok, message). Never raises.
     """
-    config_path = os.path.join(ROOT, "config.json")
+    if config_path is None:
+        config_path = os.path.join(ROOT, "config.json")
     if not os.path.exists(config_path):
         return False, (
             "config.json not found.\n"
@@ -269,6 +285,65 @@ def validate_config_credentials() -> tuple[bool, str | None]:
     return True, None
 
 
+def _sqlite_url_from_path(db_path: str) -> str:
+    return f"sqlite:///{db_path.replace(os.sep, '/')}"
+
+
+def prepare_first_start_sandbox() -> dict[str, str]:
+    """Create a clean, isolated sandbox for repeatable first-start simulation."""
+    if os.path.exists(_FIRST_START_SANDBOX_DIR):
+        shutil.rmtree(_FIRST_START_SANDBOX_DIR, ignore_errors=True)
+    os.makedirs(_FIRST_START_SANDBOX_DIR, exist_ok=True)
+
+    source_path = os.path.join(ROOT, "config.json")
+    if not os.path.exists(source_path):
+        source_path = os.path.join(ROOT, "config.json.example")
+
+    target_config_path = os.path.join(_FIRST_START_SANDBOX_DIR, "config.first_start.json")
+    config_data: dict = {}
+    if os.path.exists(source_path):
+        with open(source_path, "r", encoding="utf-8-sig") as src_file:
+            loaded = json.load(src_file)
+            if isinstance(loaded, dict):
+                config_data = loaded
+
+    export_cfg = config_data.get("symphony_export")
+    if not isinstance(export_cfg, dict):
+        export_cfg = {}
+    export_cfg["enabled"] = True
+    # Keep first-start mode isolated from personal paths while matching
+    # "new user" behavior (export on by default).
+    export_cfg["local_path"] = os.path.join(_FIRST_START_SANDBOX_DIR, "symphony_exports")
+    config_data["symphony_export"] = export_cfg
+
+    snapshot_cfg = config_data.get("daily_snapshot")
+    if not isinstance(snapshot_cfg, dict):
+        legacy_snapshot_cfg = config_data.get("screenshot")
+        snapshot_cfg = dict(legacy_snapshot_cfg) if isinstance(legacy_snapshot_cfg, dict) else {}
+    snapshot_cfg["enabled"] = False
+    # Keep first-start mode isolated from personal snapshot destinations.
+    snapshot_cfg["local_path"] = os.path.join(_FIRST_START_SANDBOX_DIR, "daily_snapshots")
+    config_data["daily_snapshot"] = snapshot_cfg
+    config_data.pop("screenshot", None)
+
+    with open(target_config_path, "w", encoding="utf-8") as target_file:
+        json.dump(config_data, target_file, indent=2, ensure_ascii=False)
+        target_file.write("\n")
+
+    db_path = os.path.join(_FIRST_START_SANDBOX_DIR, "portfolio_first_start.db")
+    local_write_base_dir = os.path.join(_FIRST_START_SANDBOX_DIR, "local_storage")
+    os.makedirs(local_write_base_dir, exist_ok=True)
+    run_id = str(int(time.time() * 1000))
+
+    return {
+        "PD_CONFIG_PATH": target_config_path,
+        "PD_DATABASE_URL": _sqlite_url_from_path(db_path),
+        "PD_LOCAL_WRITE_BASE_DIR": local_write_base_dir,
+        "PD_FIRST_START_TEST_MODE": "1",
+        "PD_FIRST_START_RUN_ID": run_id,
+    }
+
+
 # ------------------------------------------------------------------
 # Browser auto-open
 # ------------------------------------------------------------------
@@ -294,10 +369,19 @@ def open_browser_when_ready(url: str, timeout: int = 30):
 def main():
     parser = argparse.ArgumentParser(description="Portfolio Dashboard launcher")
     parser.add_argument("--test", action="store_true", help="Enable __TEST__ demo account with synthetic data")
+    parser.add_argument(
+        "--first-start-test",
+        action="store_true",
+        help="Run a clean first-start simulation in an isolated sandbox (safe to repeat).",
+    )
     parser.add_argument("--backend-port", type=int, default=8000, help="Backend port (default: 8000)")
     parser.add_argument("--frontend-port", type=int, default=3000, help="Frontend port (default: 3000)")
     parser.add_argument("--no-venv", action="store_true", help="Use current Python environment instead of backend/.venv")
     args = parser.parse_args()
+
+    if args.test and args.first_start_test:
+        print("ERROR: --test and --first-start-test cannot be used together.")
+        sys.exit(1)
 
     if not (1 <= int(args.backend_port) <= 65535):
         print("ERROR: --backend-port must be between 1 and 65535.")
@@ -320,19 +404,39 @@ def main():
 
     # Build env for backend and propagate test mode flags.
     backend_env = os.environ.copy()
+    first_start_env: dict[str, str] = {}
+    if args.first_start_test:
+        first_start_env = prepare_first_start_sandbox()
+        print("  First-start sandbox ...... enabled")
+        print(f"  Sandbox path ............. {_FIRST_START_SANDBOX_DIR}")
+
     if args.test:
         backend_env["PD_TEST_MODE"] = "1"
         backend_env["PD_DATABASE_URL"] = "sqlite:///data/portfolio_test.db"
+        backend_env.pop("PD_CONFIG_PATH", None)
+        backend_env.pop("PD_LOCAL_WRITE_BASE_DIR", None)
+        backend_env.pop("PD_FIRST_START_TEST_MODE", None)
+        backend_env.pop("PD_FIRST_START_RUN_ID", None)
     else:
         backend_env.pop("PD_TEST_MODE", None)
-        backend_env.pop("PD_DATABASE_URL", None)
-        ok, msg = validate_config_credentials()
+        if not args.first_start_test:
+            backend_env.pop("PD_DATABASE_URL", None)
+            backend_env.pop("PD_CONFIG_PATH", None)
+            backend_env.pop("PD_LOCAL_WRITE_BASE_DIR", None)
+            backend_env.pop("PD_FIRST_START_TEST_MODE", None)
+            backend_env.pop("PD_FIRST_START_RUN_ID", None)
+
+        credential_config_path = first_start_env.get("PD_CONFIG_PATH") if args.first_start_test else None
+        ok, msg = validate_config_credentials(config_path=credential_config_path)
         if not ok and msg:
             print("\n" + "=" * 50)
             print("  Setup Required")
             print("=" * 50)
             print(msg)
             print()
+
+    if first_start_env:
+        backend_env.update(first_start_env)
 
     # Strict origin allowlist for this run (dashboard origin only).
     backend_env["PD_ALLOWED_ORIGINS"] = (

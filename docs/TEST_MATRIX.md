@@ -20,7 +20,7 @@ Map change scope to the minimum required validation commands.
 | Router + schema changes | `backend/app/routers/*`, `backend/app/schemas.py` | `python -m pytest backend/tests/contracts -q` and `python -m pytest backend/tests -q` | Preserve path/status/payload/error compatibility. |
 | Frontend only (non-charting) | `frontend/src/features/dashboard/*`, `frontend/src/features/settings/*`, `frontend/src/features/trade-preview/*`, `frontend/src/features/symphony-detail/*`, `frontend/src/components/*` | `cd frontend && npm run lint` and `powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Profile basic` | Run `-Profile power` for broad rendering impact. |
 | Shared charting logic | `frontend/src/features/charting/*` | `cd frontend && npm run lint`, `cd frontend && npm run test:unit`, `powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Profile basic -Visual` | Add `-Profile power` when performance/backtest chart paths changed. |
-| Scripts / local ops | `start.py`, `stop.py`, `scripts/run-local-tests.ps1` | `python start.py --help`, `python stop.py --help`, `powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Help` | Ensure safe help paths and non-destructive behavior. |
+| Scripts / local ops | `start.py`, `stop.py`, `scripts/run-local-tests.ps1` | `python start.py --help`, `python stop.py --help`, `powershell -ExecutionPolicy Bypass -File scripts/run-local-tests.ps1 -Help` | Ensure safe help paths and non-destructive behavior (including sandboxed flags such as `--first-start-test`). |
 | Cross-layer refactor | Backend + frontend touched | Backend full tests + frontend lint + basic profile; add power/visual based on UI risk | Use conservative gate selection. |
 
 ## Canonical Commands

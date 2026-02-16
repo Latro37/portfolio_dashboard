@@ -51,9 +51,10 @@ export function useDashboardAccountScope({
   const handleSubAccountChange = useCallback(
     (accountId: string) => {
       setSelectedSubAccount(accountId);
+      resetForAccountChange();
       setLoading(true);
     },
-    [setSelectedSubAccount, setLoading],
+    [setSelectedSubAccount, resetForAccountChange, setLoading],
   );
 
   return {

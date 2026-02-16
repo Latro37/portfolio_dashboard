@@ -29,6 +29,39 @@ def _sanitize_name(name: str) -> str:
     return cleaned or "unnamed"
 
 
+def _extract_latest_ts_hint(payload: dict) -> str:
+    """Best-effort edit timestamp hint from symphony metadata payloads.
+
+    This lets us skip per-symphony version API calls when metadata already
+    carries a reliable timestamp.
+    """
+    if not isinstance(payload, dict):
+        return ""
+
+    for key in (
+        "updated_at",
+        "created_at",
+        "updatedAt",
+        "createdAt",
+        "last_updated_at",
+        "lastUpdatedAt",
+        "modified_at",
+        "modifiedAt",
+    ):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    latest_version = payload.get("latest_version") or payload.get("latestVersion")
+    if isinstance(latest_version, dict):
+        for key in ("updated_at", "created_at", "updatedAt", "createdAt"):
+            value = latest_version.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    return ""
+
+
 def _get_sync_state(db: Session, account_id: str, key: str) -> Optional[str]:
     row = db.query(SyncState).filter_by(account_id=account_id, key=key).first()
     return row.value if row else None
@@ -102,6 +135,7 @@ def export_all_symphonies_with_options(
     *,
     include_drafts: bool = True,
     progress_cb: Optional[Callable[[dict], None]] = None,
+    cancelled_cb: Optional[Callable[[], bool]] = None,
 ):
     """Export latest version of all symphonies if they have changed since last export.
 
@@ -113,6 +147,9 @@ def export_all_symphonies_with_options(
     config = load_symphony_export_config()
     if not config:
         return
+    if not bool(config.get("enabled", True)):
+        logger.info("Symphony export disabled by config; skipping account %s", account_id)
+        return {"exported": 0, "processed": 0, "total": 0, "cancelled": False}
 
     try:
         local_path = resolve_local_write_path(config.get("local_path", ""))
@@ -122,8 +159,8 @@ def export_all_symphonies_with_options(
 
     export_drafts = bool(include_drafts)
     # Export includes invested symphonies.
-    invested_targets: Dict[str, str] = {}
-    draft_targets: Dict[str, str] = {}
+    invested_targets: Dict[str, Dict[str, str]] = {}
+    draft_targets: Dict[str, Dict[str, str]] = {}
 
     try:
         symphonies = client.get_symphony_stats(account_id) or []
@@ -131,7 +168,10 @@ def export_all_symphonies_with_options(
             sym_id = s.get("id", "")
             sym_name = s.get("name", "Unknown")
             if sym_id and sym_id not in invested_targets:
-                invested_targets[sym_id] = sym_name
+                invested_targets[sym_id] = {
+                    "name": sym_name,
+                    "latest_ts_hint": _extract_latest_ts_hint(s),
+                }
     except Exception as e:
         logger.warning("Failed to fetch symphony stats for export (%s): %s", account_id, e)
 
@@ -144,7 +184,10 @@ def export_all_symphonies_with_options(
                 sym_id = s.get("symphony_id", s.get("id", s.get("symphony_sid", "")))
                 sym_name = s.get("name", "Unknown")
                 if sym_id and sym_id not in invested_targets and sym_id not in draft_targets:
-                    draft_targets[sym_id] = sym_name
+                    draft_targets[sym_id] = {
+                        "name": sym_name,
+                        "latest_ts_hint": _extract_latest_ts_hint(s),
+                    }
         except Exception as e:
             logger.warning("Failed to fetch drafts for export (%s): %s", account_id, e)
 
@@ -159,6 +202,14 @@ def export_all_symphonies_with_options(
     processed = 0
 
     total_targets = len(invested_targets) + (len(draft_targets) if export_drafts else 0)
+    def _is_cancelled() -> bool:
+        if not cancelled_cb:
+            return False
+        try:
+            return bool(cancelled_cb())
+        except Exception:
+            return False
+
     if progress_cb:
         try:
             progress_cb(
@@ -173,81 +224,77 @@ def export_all_symphonies_with_options(
         except Exception:
             pass
 
-    def _export_one(sym_id: str, sym_name: str, *, state_account_id: str) -> bool:
+    def _mark_processed(sym_id: str, *, did_export: bool) -> None:
         nonlocal exported, processed
-        sym_name = sym_name or "Unknown"
+        if did_export:
+            exported += 1
+        processed += 1
+        if progress_cb:
+            try:
+                progress_cb(
+                    {
+                        "event": "processed",
+                        "account_id": account_id,
+                        "symphony_id": sym_id,
+                        "exported": did_export,
+                        "processed": processed,
+                        "exported_count": exported,
+                        "total": total_targets,
+                    }
+                )
+            except Exception:
+                pass
 
-        # Use versions endpoint for lightweight change detection
-        try:
-            versions = client.get_symphony_versions(sym_id)
-        except Exception as e:
-            logger.warning("Failed to fetch versions for symphony %s: %s", sym_id, e)
-            processed += 1
-            if progress_cb:
-                try:
-                    progress_cb(
-                        {
-                            "event": "processed",
-                            "account_id": account_id,
-                            "symphony_id": sym_id,
-                            "exported": False,
-                            "processed": processed,
-                            "exported_count": exported,
-                            "total": total_targets,
-                        }
-                    )
-                except Exception:
-                    pass
+    def _export_one(
+        sym_id: str,
+        sym_name: str,
+        *,
+        state_account_id: str,
+        latest_ts_hint: str = "",
+    ) -> bool:
+        nonlocal exported, processed
+        if _is_cancelled():
+            return False
+        sym_name = sym_name or "Unknown"
+        state_key_ts = f"symphony_export:{sym_id}"
+        last_exported = _get_sync_state(db, state_account_id, state_key_ts)
+
+        # Fast path: when metadata already exposes a timestamp, avoid a separate
+        # versions API request for unchanged symphonies.
+        latest_ts = (latest_ts_hint or "").strip()
+        if latest_ts and last_exported and last_exported >= latest_ts:
+            _mark_processed(sym_id, did_export=False)
             return False
 
-        latest_ts = ""
-        if versions:
-            latest = versions[0] if isinstance(versions, list) else versions
-            if isinstance(latest, dict):
-                latest_ts = latest.get("created_at") or latest.get("updated_at") or ""
+        # If metadata lacks a usable timestamp hint, use versions API for
+        # change detection and timestamp persistence.
+        if not latest_ts:
+            try:
+                versions = client.get_symphony_versions(sym_id)
+            except Exception as e:
+                logger.warning("Failed to fetch versions for symphony %s: %s", sym_id, e)
+                _mark_processed(sym_id, did_export=False)
+                return False
 
-        # Check if we already exported this version (timestamp-based)
-        state_key_ts = f"symphony_export:{sym_id}"
-        if latest_ts:
-            last_exported = _get_sync_state(db, state_account_id, state_key_ts)
-            if last_exported and last_exported >= latest_ts:
-                processed += 1
-                if progress_cb:
-                    try:
-                        progress_cb(
-                            {
-                                "event": "processed",
-                                "account_id": account_id,
-                                "symphony_id": sym_id,
-                                "exported": False,
-                                "processed": processed,
-                                "exported_count": exported,
-                                "total": total_targets,
-                            }
-                        )
-                    except Exception:
-                        pass
+            if versions:
+                latest = versions[0] if isinstance(versions, list) else versions
+                if isinstance(latest, dict):
+                    latest_ts = (
+                        latest.get("created_at")
+                        or latest.get("updated_at")
+                        or ""
+                    )
+
+            if latest_ts and last_exported and last_exported >= latest_ts:
+                _mark_processed(sym_id, did_export=False)
                 return False
 
         # Fetch full structure via /score
+        if _is_cancelled():
+            return False
         score = client.get_symphony_score(sym_id)
         if not score:
-            processed += 1
-            if progress_cb:
-                try:
-                    progress_cb(
-                        {
-                            "event": "processed",
-                            "account_id": account_id,
-                            "symphony_id": sym_id,
-                            "exported": False,
-                            "processed": processed,
-                            "exported_count": exported,
-                            "total": total_targets,
-                        }
-                    )
-                except Exception:
-                    pass
+            _mark_processed(sym_id, did_export=False)
             return False
 
         # Drafts (and occasionally invested symphonies) can return an empty versions list;
@@ -259,58 +306,39 @@ def export_all_symphonies_with_options(
             score_hash = hashlib.sha256(canonical).hexdigest()
             last_hash = _get_sync_state(db, state_account_id, state_key_hash)
             if last_hash and last_hash == score_hash:
-                processed += 1
-                if progress_cb:
-                    try:
-                        progress_cb(
-                            {
-                                "event": "processed",
-                                "account_id": account_id,
-                                "symphony_id": sym_id,
-                                "exported": False,
-                                "processed": processed,
-                                "exported_count": exported,
-                                "total": total_targets,
-                            }
-                        )
-                    except Exception:
-                        pass
+                _mark_processed(sym_id, did_export=False)
                 return False
 
             _save_local(local_path, sym_name, score, symphony_id=sym_id)
             _set_sync_state(db, state_account_id, state_key_hash, score_hash)
         else:
             _save_local(local_path, sym_name, score, symphony_id=sym_id)
+            _set_sync_state(db, state_account_id, state_key_ts, latest_ts)
 
-            if latest_ts:
-                _set_sync_state(db, state_account_id, state_key_ts, latest_ts)
-
-        exported += 1
-        processed += 1
-        if progress_cb:
-            try:
-                progress_cb(
-                    {
-                        "event": "processed",
-                        "account_id": account_id,
-                        "symphony_id": sym_id,
-                        "exported": True,
-                        "processed": processed,
-                        "exported_count": exported,
-                        "total": total_targets,
-                    }
-                )
-            except Exception:
-                pass
+        _mark_processed(sym_id, did_export=True)
         time.sleep(0.3)  # gentle rate limit between version fetches
         return True
 
-    for sym_id, sym_name in invested_targets.items():
-        _export_one(sym_id, sym_name, state_account_id=account_id)
+    for sym_id, target in invested_targets.items():
+        if _is_cancelled():
+            break
+        _export_one(
+            sym_id,
+            target.get("name", "Unknown"),
+            state_account_id=account_id,
+            latest_ts_hint=target.get("latest_ts_hint", ""),
+        )
 
     if export_drafts:
-        for sym_id, sym_name in draft_targets.items():
-            _export_one(sym_id, sym_name, state_account_id=drafts_state_account_id)
+        for sym_id, target in draft_targets.items():
+            if _is_cancelled():
+                break
+            _export_one(
+                sym_id,
+                target.get("name", "Unknown"),
+                state_account_id=drafts_state_account_id,
+                latest_ts_hint=target.get("latest_ts_hint", ""),
+            )
 
     logger.info(
         "Symphony export for %s: %d exported, %d total",
@@ -322,5 +350,6 @@ def export_all_symphonies_with_options(
         "exported": exported,
         "processed": processed,
         "total": total_targets,
+        "cancelled": _is_cancelled(),
     }
 

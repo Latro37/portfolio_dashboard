@@ -56,6 +56,7 @@ def _migrate_add_columns():
         ("symphony_backtest_cache", "last_semantic_update_at", "TEXT"),
         ("daily_metrics", "annualized_return_cum", "REAL DEFAULT 0.0"),
         ("symphony_daily_metrics", "annualized_return_cum", "REAL DEFAULT 0.0"),
+        ("cash_flows", "is_manual", "INTEGER NOT NULL DEFAULT 0"),
     ]
 
     with engine.connect() as conn:
@@ -69,3 +70,21 @@ def _migrate_add_columns():
             conn.execute(sa_text(stmt))
             conn.commit()
             logging.getLogger(__name__).info("Migration: added column %s.%s", table, col)
+
+        # Backfill legacy manual cash-flow rows created before `is_manual` existed.
+        insp_after = sa_inspect(engine)
+        if "cash_flows" in insp_after.get_table_names():
+            cash_flow_cols = {c["name"] for c in insp_after.get_columns("cash_flows")}
+            if "is_manual" in cash_flow_cols:
+                conn.execute(
+                    sa_text(
+                        """
+                        UPDATE cash_flows
+                        SET is_manual = 1
+                        WHERE is_manual = 0
+                          AND lower(COALESCE(description, '')) LIKE 'manual%'
+                          AND lower(COALESCE(type, '')) IN ('deposit', 'withdrawal')
+                        """
+                    )
+                )
+                conn.commit()

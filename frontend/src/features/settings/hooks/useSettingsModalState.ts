@@ -18,6 +18,8 @@ type AccountOption = { value: string; label: string };
 type Result = {
   localPath: string;
   setLocalPath: (value: string) => void;
+  exportEnabled: boolean;
+  setExportEnabled: (value: boolean) => void;
   saving: boolean;
   saved: boolean;
   setSaved: Dispatch<SetStateAction<boolean>>;
@@ -85,6 +87,9 @@ export function useSettingsModalState(): Result {
   const [localPathOverride, setLocalPathOverride] = useState<string | undefined>(
     undefined,
   );
+  const [exportEnabledOverride, setExportEnabledOverride] = useState<boolean | undefined>(
+    undefined,
+  );
   const [savingError, setSavingError] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -107,7 +112,13 @@ export function useSettingsModalState(): Result {
   });
 
   const saveExportMutation = useMutation({
-    mutationFn: (nextLocalPath: string) => api.saveSymphonyExportPath(nextLocalPath),
+    mutationFn: ({
+      localPath,
+      enabled,
+    }: {
+      localPath: string;
+      enabled: boolean;
+    }) => api.saveSymphonyExportConfig(localPath, enabled),
     onSuccess: async () => {
       await invalidateAfterConfigWrite(queryClient);
     },
@@ -121,7 +132,9 @@ export function useSettingsModalState(): Result {
   });
 
   const baseLocalPath = configQuery.data?.symphony_export?.local_path || "";
+  const baseExportEnabled = configQuery.data?.symphony_export?.enabled ?? true;
   const localPath = localPathOverride ?? baseLocalPath;
+  const exportEnabled = exportEnabledOverride ?? baseExportEnabled;
   const baseScreenshot = useMemo(
     () => ({ ...defaultScreenshot, ...(configQuery.data?.screenshot ?? {}) }),
     [configQuery.data?.screenshot],
@@ -130,6 +143,9 @@ export function useSettingsModalState(): Result {
 
   const setLocalPath = useCallback((value: string) => {
     setLocalPathOverride(value);
+  }, []);
+  const setExportEnabled = useCallback((value: boolean) => {
+    setExportEnabledOverride(value);
   }, []);
 
   const setSs: Dispatch<SetStateAction<ScreenshotConfig>> = useCallback(
@@ -142,20 +158,23 @@ export function useSettingsModalState(): Result {
   );
 
   const handleSave = useCallback(async () => {
-    if (!localPath.trim()) {
+    if (exportEnabled && !localPath.trim()) {
       setSavingError("Path cannot be empty");
       return;
     }
     setSavingError("");
     setSaved(false);
     try {
-      await saveExportMutation.mutateAsync(localPath.trim());
+      await saveExportMutation.mutateAsync({
+        localPath: localPath.trim(),
+        enabled: exportEnabled,
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
       setSavingError("Failed to save export path");
     }
-  }, [localPath, saveExportMutation]);
+  }, [exportEnabled, localPath, saveExportMutation]);
 
   const handleSaveScreenshot = useCallback(async () => {
     if (ss.enabled && !ss.local_path.trim()) {
@@ -203,6 +222,8 @@ export function useSettingsModalState(): Result {
   return {
     localPath,
     setLocalPath,
+    exportEnabled,
+    setExportEnabled,
     saving: saveExportMutation.isPending,
     saved,
     setSaved,

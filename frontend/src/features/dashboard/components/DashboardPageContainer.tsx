@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { HelpModal } from "@/components/HelpModal";
@@ -17,6 +17,7 @@ import { DashboardLiveToggleButton } from "@/features/dashboard/components/Dashb
 import { DashboardLoadingScreen } from "@/features/dashboard/components/DashboardLoadingScreen";
 import { DashboardSnapshotRenderer } from "@/features/dashboard/components/DashboardSnapshotRenderer";
 import { DashboardSetupScreen } from "@/features/dashboard/components/DashboardSetupScreen";
+import { IraDepositWarningBox } from "@/features/dashboard/components/IraDepositWarningBox";
 import { useDashboardAccountScope } from "@/features/dashboard/hooks/useDashboardAccountScope";
 import { useBenchmarkManager } from "@/features/dashboard/hooks/useBenchmarkManager";
 import { useDashboardBootstrap } from "@/features/dashboard/hooks/useDashboardBootstrap";
@@ -42,6 +43,7 @@ export default function DashboardPageContainer() {
   const [customEnd, setCustomEnd] = useState("");
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [dismissedIraWarningKey, setDismissedIraWarningKey] = useState<string | null>(null);
   const {
     accounts,
     bootstrapLoading,
@@ -52,6 +54,8 @@ export default function DashboardPageContainer() {
     selectedSubAccount,
     finnhubConfigured,
     isTestMode,
+    isFirstStartTestMode,
+    firstStartRunId,
     screenshotConfig,
     setScreenshotConfig,
     setSelectedCredential,
@@ -65,6 +69,43 @@ export default function DashboardPageContainer() {
     }
     return selectedSubAccount || undefined;
   }, [selectedCredential, selectedSubAccount]);
+
+  const iraWarningStorageKey = useMemo(() => {
+    if (isFirstStartTestMode && firstStartRunId) {
+      return `pd:first-start:warning:ira:${firstStartRunId}`;
+    }
+    return "pd:warning:ira:v1";
+  }, [isFirstStartTestMode, firstStartRunId]);
+
+  useEffect(() => {
+    if (bootstrapLoading || isTestMode) return;
+
+    if (isFirstStartTestMode && firstStartRunId) {
+      const runMarkerKey = "pd:first-start:run-id";
+      const prevRunId = localStorage.getItem(runMarkerKey);
+      if (prevRunId !== firstStartRunId) {
+        localStorage.removeItem("live_enabled");
+        localStorage.removeItem("last_post_close_update");
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith("pd:first-start:warning:")) {
+            localStorage.removeItem(key);
+          }
+        }
+        localStorage.setItem(runMarkerKey, firstStartRunId);
+      }
+    }
+  }, [
+    bootstrapLoading,
+    firstStartRunId,
+    isFirstStartTestMode,
+    isTestMode,
+  ]);
+
+  const showIraWarning =
+    !bootstrapLoading &&
+    !isTestMode &&
+    dismissedIraWarningKey !== iraWarningStorageKey &&
+    localStorage.getItem(iraWarningStorageKey) !== "1";
 
   useSymphonyExportProgressToast();
   useSyncCompletionRefresh({ resolvedAccountId });
@@ -328,6 +369,15 @@ export default function DashboardPageContainer() {
         todayDollarChange={todayDollarChange}
         todayPctChange={todayPctChange}
       />
+
+      {showIraWarning && (
+        <IraDepositWarningBox
+          onClose={() => {
+            localStorage.setItem(iraWarningStorageKey, "1");
+            setDismissedIraWarningKey(iraWarningStorageKey);
+          }}
+        />
+      )}
 
       <ToastContainer />
     </div>
