@@ -707,7 +707,7 @@ profit_factor = Σ(positive returns) / |Σ(negative returns)|
 
 The application has four chart modes, available in both the account-level dashboard and the symphony detail modal.
 
-Chart date series include only US equity trading days: weekends and full NYSE closure holidays are filtered out, while partial-session early-close days are retained.
+Chart date series include only US equity trading days: weekends and full NYSE closure holidays are filtered out, while partial-session early-close days are retained. For ranges with SPY history (since 1993-01-29), observed SPY sessions are used as an additional guardrail for one-off full-market closure dates.
 
 ### Account-Level Dashboard
 

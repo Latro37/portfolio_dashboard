@@ -140,7 +140,7 @@ The main chart supports four view modes via toggle buttons:
 - **Drawdown** — How far below the peak your portfolio has been at each point
 
 **Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
-**Trading-day filter:** Chart date axes remove weekends and full NYSE market-closure holidays (for example, Presidents Day). Partial-session early-close days remain visible.
+**Trading-day filter:** Chart date axes remove weekends and full NYSE market-closure holidays (for example, Presidents Day). For dates with SPY history (since 1993-01-29), observed SPY sessions are also used to catch one-off closure days. Partial-session early-close days remain visible.
 
 ### Benchmark Overlays
 
@@ -500,7 +500,7 @@ The main chart supports four view modes via toggle buttons:
 - **Drawdown** — How far below the peak your portfolio has been at each point
 
 **Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
-**Trading-day filter:** Chart date axes remove weekends and full NYSE market-closure holidays (for example, Presidents Day). Partial-session early-close days remain visible.
+**Trading-day filter:** Chart date axes remove weekends and full NYSE market-closure holidays (for example, Presidents Day). For dates with SPY history (since 1993-01-29), observed SPY sessions are also used to catch one-off closure days. Partial-session early-close days remain visible.
 
 ### Benchmark Overlays
 

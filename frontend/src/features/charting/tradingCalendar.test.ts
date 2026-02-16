@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import { isUsEquityTradingDay } from "./tradingCalendar";
 
+function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function weekdayIsoDatesInYear(year: number): string[] {
+  const dates: string[] = [];
+  const cursor = new Date(Date.UTC(year, 0, 1));
+  while (cursor.getUTCFullYear() === year) {
+    const weekday = cursor.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) {
+      dates.push(toIsoDate(cursor));
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
 describe("tradingCalendar", () => {
   it("excludes weekends", () => {
     expect(isUsEquityTradingDay("2026-02-14")).toBe(false);
@@ -51,5 +68,36 @@ describe("tradingCalendar", () => {
     // Early-close dates should still be treated as trading days.
     expect(isUsEquityTradingDay("2026-11-27")).toBe(true);
     expect(isUsEquityTradingDay("2026-12-24")).toBe(true);
+  });
+
+  it("matches authoritative 1994 holiday closures when SPY sessions are provided", () => {
+    // NYSE 1994 full-day closures (authoritative holiday list + one-off closure):
+    // Presidents Day, Good Friday, Nixon funeral, Memorial Day, Independence Day,
+    // Labor Day, Thanksgiving, Christmas observed.
+    const nyseClosed1994 = new Set([
+      "1994-02-21",
+      "1994-04-01",
+      "1994-04-27",
+      "1994-05-30",
+      "1994-07-04",
+      "1994-09-05",
+      "1994-11-24",
+      "1994-12-26",
+    ]);
+    const weekdays1994 = weekdayIsoDatesInYear(1994);
+    const spyObservedSessions = new Set(
+      weekdays1994.filter((date) => !nyseClosed1994.has(date)),
+    );
+
+    for (const date of weekdays1994) {
+      const expectedTrading = !nyseClosed1994.has(date);
+      expect(
+        isUsEquityTradingDay(date, {
+          observedTradingDates: spyObservedSessions,
+          observedStartDate: "1994-01-03",
+          observedEndDate: "1994-12-30",
+        }),
+      ).toBe(expectedTrading);
+    }
   });
 });

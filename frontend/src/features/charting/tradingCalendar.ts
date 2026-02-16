@@ -4,6 +4,12 @@ type YearMonthDay = {
   day: number;
 };
 
+export type TradingDayEvidence = {
+  observedTradingDates?: ReadonlySet<string>;
+  observedStartDate?: string;
+  observedEndDate?: string;
+};
+
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const HOLIDAY_CACHE = new Map<number, Set<string>>();
 const MLK_HOLIDAY_START_YEAR = 1998;
@@ -47,6 +53,14 @@ function parseIsoDate(dateStr: string): YearMonthDay | null {
   const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   if (day < 1 || day > maxDay) return null;
   return { year, month, day };
+}
+
+function inObservedRange(
+  dateStr: string,
+  observedStartDate: string,
+  observedEndDate: string,
+): boolean {
+  return dateStr >= observedStartDate && dateStr <= observedEndDate;
 }
 
 function nthWeekdayOfMonth(year: number, month: number, weekday: number, nth: number): YearMonthDay {
@@ -127,12 +141,27 @@ function holidaySetForYear(year: number): Set<string> {
   return holidays;
 }
 
-export function isUsEquityTradingDay(dateStr: string): boolean {
+export function isUsEquityTradingDay(
+  dateStr: string,
+  evidence: TradingDayEvidence = {},
+): boolean {
   const parsed = parseIsoDate(dateStr);
   if (!parsed) return true;
+
+  const isoDate = toIsoDate(parsed);
+  const { observedTradingDates, observedStartDate, observedEndDate } = evidence;
+  if (
+    observedTradingDates &&
+    observedTradingDates.size > 0 &&
+    observedStartDate &&
+    observedEndDate &&
+    inObservedRange(isoDate, observedStartDate, observedEndDate)
+  ) {
+    return observedTradingDates.has(isoDate);
+  }
 
   const weekday = weekdayUtc(parsed.year, parsed.month, parsed.day);
   if (weekday === 0 || weekday === 6) return false;
 
-  return !holidaySetForYear(parsed.year).has(toIsoDate(parsed));
+  return !holidaySetForYear(parsed.year).has(isoDate);
 }

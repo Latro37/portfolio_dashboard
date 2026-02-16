@@ -18,6 +18,20 @@ describe("chart transforms", () => {
     expect(filtered.map((p) => p.date)).toEqual(["2026-02-13", "2026-02-17", "2026-11-27"]);
   });
 
+  it("uses observed SPY sessions to remove one-off closures", () => {
+    const points = [
+      { date: "1994-04-26", value: 1 },
+      { date: "1994-04-27", value: 2 }, // Nixon funeral closure
+      { date: "1994-04-28", value: 3 },
+    ];
+    const filtered = filterTradingDays(points, {
+      observedTradingDates: new Set(["1994-04-26", "1994-04-28"]),
+      observedStartDate: "1994-04-26",
+      observedEndDate: "1994-04-28",
+    });
+    expect(filtered.map((p) => p.date)).toEqual(["1994-04-26", "1994-04-28"]);
+  });
+
   it("merges benchmark returns/drawdowns with indexed keys", () => {
     const base: ChartSeriesPoint[] = [
       { date: "2025-01-02" },
