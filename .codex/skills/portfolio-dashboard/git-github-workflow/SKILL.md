@@ -46,6 +46,8 @@ When running in full access mode, execute the full branch->edit->commit->push->P
 - Prefer format: `type(scope): short summary`.
 - Keep subject lines under 72 characters.
 - Explain why in the body when the change is non-obvious.
+- For complex issues, evaluate whether a reputable existing Python/JavaScript package solves the problem before implementing from scratch.
+- Never add, remove, or upgrade dependencies without explicit human approval after discussing trust/security; this includes `requirements*.txt`, `package.json`, and lockfile changes.
 - Before commit:
 1. Review staged diff: `git diff --staged`
 2. Run relevant lint/tests
