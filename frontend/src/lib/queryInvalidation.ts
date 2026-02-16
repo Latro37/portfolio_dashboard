@@ -64,6 +64,17 @@ function accountMatches(family: QueryFamily, key: QueryKey, accountId: string): 
   return typeof value === "string" && value === accountId;
 }
 
+function isAggregateScope(value: string): boolean {
+  return value === "" || value === "all" || value.startsWith("all:");
+}
+
+function aggregateAccountMatches(family: QueryFamily, key: QueryKey): boolean {
+  const accountIndex = accountIndexForFamily(family);
+  if (accountIndex == null || key.length <= accountIndex) return true;
+  const value = key[accountIndex];
+  return typeof value === "string" && isAggregateScope(value);
+}
+
 async function invalidateFamilies(
   queryClient: QueryClient,
   families: QueryFamily[],
@@ -115,17 +126,33 @@ export async function invalidateAfterManualCashFlow(
   queryClient: QueryClient,
   accountId: string,
 ) {
+  const affectedFamilies: QueryFamily[] = [
+    "summary",
+    "performance",
+    "cash-flows",
+    "transactions",
+    "sync-status",
+    "benchmark-history",
+  ];
+
+  // Always invalidate the edited sub-account scope.
   await invalidateFamilies(
     queryClient,
-    [
-      "summary",
-      "performance",
-      "cash-flows",
-      "transactions",
-      "sync-status",
-      "benchmark-history",
-    ],
+    affectedFamilies,
     accountId,
+  );
+
+  // Also invalidate aggregate scopes (all / all:<credential>) so cross-account
+  // views recalculate immediately after manual cash-flow edits.
+  await Promise.all(
+    affectedFamilies.map((family) =>
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          if (familyFromKey(query.queryKey) !== family) return false;
+          return aggregateAccountMatches(family, query.queryKey);
+        },
+      }),
+    ),
   );
 }
 
