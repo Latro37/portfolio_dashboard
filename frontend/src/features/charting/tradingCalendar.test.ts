@@ -14,6 +14,11 @@ describe("tradingCalendar", () => {
     expect(isUsEquityTradingDay("2026-12-25")).toBe(false); // Christmas Day
   });
 
+  it("applies MLK holiday only from 1998 onward", () => {
+    expect(isUsEquityTradingDay("1997-01-20")).toBe(true); // Third Monday Jan before NYSE observance
+    expect(isUsEquityTradingDay("1998-01-19")).toBe(false); // First NYSE MLK closure year
+  });
+
   it("handles observed fixed-date holidays", () => {
     expect(isUsEquityTradingDay("2021-12-31")).toBe(false); // 2022 New Year's Day observed
     expect(isUsEquityTradingDay("2027-06-18")).toBe(false); // Juneteenth observed

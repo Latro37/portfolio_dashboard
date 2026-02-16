@@ -6,6 +6,7 @@ type YearMonthDay = {
 
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const HOLIDAY_CACHE = new Map<number, Set<string>>();
+const MLK_HOLIDAY_START_YEAR = 1998;
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -107,7 +108,9 @@ function holidaySetForYear(year: number): Set<string> {
 
   addHoliday(observedFixedHoliday(year, 1, 1));
   addHoliday(observedFixedHoliday(year + 1, 1, 1));
-  addHoliday(nthWeekdayOfMonth(year, 1, 1, 3));
+  if (year >= MLK_HOLIDAY_START_YEAR) {
+    addHoliday(nthWeekdayOfMonth(year, 1, 1, 3));
+  }
   addHoliday(nthWeekdayOfMonth(year, 2, 1, 3));
 
   const easter = easterSunday(year);
