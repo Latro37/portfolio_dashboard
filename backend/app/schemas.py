@@ -261,6 +261,13 @@ class BenchmarkHistoryResponse(BaseModel):
     data: List[BenchmarkHistoryPoint]
 
 
+class TradingSessionsResponse(BaseModel):
+    exchange: str
+    start_date: str
+    end_date: str
+    sessions: List[str]
+
+
 class SymphonyBenchmarkResponse(BaseModel):
     name: str
     ticker: str

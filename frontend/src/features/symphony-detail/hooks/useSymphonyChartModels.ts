@@ -8,7 +8,7 @@ import type {
 } from "@/lib/api";
 import type { SymphonyDetailPeriod } from "@/features/symphony-detail/types";
 import { makeDateFormatter } from "@/features/symphony-detail/utils";
-import { useObservedSpyTradingDays } from "@/features/charting/hooks/useObservedSpyTradingDays";
+import { useObservedTradingSessions } from "@/features/charting/hooks/useObservedTradingSessions";
 import {
   buildBacktestChartData,
   buildBacktestMetrics,
@@ -63,7 +63,7 @@ export function useSymphonyChartModels({
     () => [...liveData.map((point) => point.date), ...backtestChartData.map((point) => point.date)],
     [liveData, backtestChartData],
   );
-  const tradingDayEvidence = useObservedSpyTradingDays(sourceDates);
+  const tradingDayEvidence = useObservedTradingSessions(sourceDates);
 
   const filteredLiveData = useMemo(
     () => filterLiveData(liveData, period, customStart, customEnd, oosDate, tradingDayEvidence),

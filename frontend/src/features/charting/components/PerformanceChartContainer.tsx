@@ -7,7 +7,7 @@ import { PerformanceChartCanvas } from "@/features/charting/PerformanceChartCanv
 import { PerformanceChartControlsRow } from "@/features/charting/PerformanceChartControlsRow";
 import { PerformanceChartLegendRows } from "@/features/charting/PerformanceChartLegendRows";
 import { useBenchmarkCatalog } from "@/features/charting/hooks/useBenchmarkCatalog";
-import { useObservedSpyTradingDays } from "@/features/charting/hooks/useObservedSpyTradingDays";
+import { useObservedTradingSessions } from "@/features/charting/hooks/useObservedTradingSessions";
 import {
   MAX_BENCHMARKS,
 } from "@/features/charting/benchmarkConfig";
@@ -97,7 +97,7 @@ export function PerformanceChart({
   });
 
   const sourceDates = useMemo(() => data.map((point) => point.date), [data]);
-  const tradingDayEvidence = useObservedSpyTradingDays(sourceDates);
+  const tradingDayEvidence = useObservedTradingSessions(sourceDates);
 
   const tradingData = useMemo<ChartSeriesPoint[]>(() => {
     const dataset = adaptPortfolioChart(data, benchmarks, tradingDayEvidence);

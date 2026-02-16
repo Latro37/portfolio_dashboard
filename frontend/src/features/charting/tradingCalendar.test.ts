@@ -70,7 +70,7 @@ describe("tradingCalendar", () => {
     expect(isUsEquityTradingDay("2026-12-24")).toBe(true);
   });
 
-  it("matches authoritative 1994 holiday closures when SPY sessions are provided", () => {
+  it("matches authoritative 1994 holiday closures when observed sessions are provided", () => {
     // NYSE 1994 full-day closures (authoritative holiday list + one-off closure):
     // Presidents Day, Good Friday, Nixon funeral, Memorial Day, Independence Day,
     // Labor Day, Thanksgiving, Christmas observed.

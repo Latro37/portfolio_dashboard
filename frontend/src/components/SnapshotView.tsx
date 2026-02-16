@@ -3,7 +3,7 @@
 import { forwardRef, useMemo } from "react";
 
 import { adaptSnapshotChart } from "@/features/charting/snapshotChartAdapter";
-import { useObservedSpyTradingDays } from "@/features/charting/hooks/useObservedSpyTradingDays";
+import { useObservedTradingSessions } from "@/features/charting/hooks/useObservedTradingSessions";
 import { SnapshotBenchmarkLegend } from "@/features/dashboard/snapshot/SnapshotBenchmarkLegend";
 import { SnapshotChart } from "@/features/dashboard/snapshot/SnapshotChart";
 import { SnapshotHeader } from "@/features/dashboard/snapshot/SnapshotHeader";
@@ -52,7 +52,7 @@ export const SnapshotView = forwardRef<HTMLDivElement, Props>(
     ref,
   ) {
     const sourceDates = useMemo(() => data.map((point) => point.date), [data]);
-    const tradingDayEvidence = useObservedSpyTradingDays(sourceDates);
+    const tradingDayEvidence = useObservedTradingSessions(sourceDates);
     const dataset = adaptSnapshotChart(data, benchmarks, tradingDayEvidence);
     const tradingData = dataset.points as (PerformancePoint & Record<string, number>)[];
     const hasData = dataset.hasData;

@@ -12,6 +12,7 @@ from app.models import (
 from app.schemas import (
     AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
     TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
+    TradingSessionsResponse,
     SyncStatus, SyncTriggerResponse, ManualCashFlowRequest, ManualCashFlowResponse,
     ManualCashFlowDeleteResponse,
     AppConfigResponse, SaveSymphonyExportResponse, SaveSymphonyExportRequest,
@@ -29,6 +30,7 @@ from app.services.portfolio_activity_read import (
     get_portfolio_transactions_data,
 )
 from app.services.benchmark_read import get_benchmark_history_data
+from app.services.trading_sessions_read import get_trading_sessions_data
 from app.services.portfolio_holdings_read import (
     get_portfolio_holdings_data,
     get_portfolio_holdings_history_data,
@@ -370,6 +372,20 @@ def get_benchmark_history(
         get_daily_closes_stooq_fn=get_daily_closes_stooq,
         get_daily_closes_fn=get_daily_closes,
         get_latest_price_fn=get_latest_price,
+    )
+
+
+@router.get("/trading-sessions", response_model=TradingSessionsResponse)
+def get_trading_sessions(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    exchange: str = Query("XNYS", description="Exchange calendar code, e.g. XNYS"),
+):
+    """Return exchange session dates for the requested range."""
+    return get_trading_sessions_data(
+        exchange=exchange,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 

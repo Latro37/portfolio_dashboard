@@ -19,7 +19,7 @@ type QueryFamily =
   | "symphony-trade-preview"
   | "trade-preview"
   | "benchmark-history"
-  | "spy-trading-sessions"
+  | "trading-sessions"
   | "symphony-benchmark"
   | "symphony-catalog"
   | "config"
@@ -118,7 +118,6 @@ export async function invalidateAfterSync(queryClient: QueryClient, accountId?: 
       "trade-preview",
       "symphony-benchmark",
       "symphony-catalog",
-      "spy-trading-sessions",
     ],
     accountId,
   );

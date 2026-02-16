@@ -18,7 +18,7 @@ describe("chart transforms", () => {
     expect(filtered.map((p) => p.date)).toEqual(["2026-02-13", "2026-02-17", "2026-11-27"]);
   });
 
-  it("uses observed SPY sessions to remove one-off closures", () => {
+  it("uses observed sessions to remove one-off closures", () => {
     const points = [
       { date: "1994-04-26", value: 1 },
       { date: "1994-04-27", value: 2 }, // Nixon funeral closure

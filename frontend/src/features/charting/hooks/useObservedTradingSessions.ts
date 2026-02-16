@@ -2,17 +2,10 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import type { TradingDayEvidence } from "@/features/charting/tradingCalendar";
-import { getSpyTradingSessionsQueryFn } from "@/lib/queryFns";
+import { getTradingSessionsQueryFn } from "@/lib/queryFns";
 import { queryKeys } from "@/lib/queryKeys";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const SPY_INCEPTION_DATE = "1993-01-29";
-
-function previousUtcDate(isoDate: string): string {
-  const date = new Date(`${isoDate}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - 1);
-  return date.toISOString().slice(0, 10);
-}
 
 function toMinMaxIsoDates(dates: string[]): { minDate: string; maxDate: string } | null {
   const valid = dates.filter((date) => ISO_DATE_PATTERN.test(date));
@@ -27,28 +20,22 @@ function toMinMaxIsoDates(dates: string[]): { minDate: string; maxDate: string }
   return { minDate, maxDate };
 }
 
-function buildSpySessionQueryRange(dates: string[]): { startDate: string; endDate: string } | null {
+function buildSessionQueryRange(dates: string[]): { startDate: string; endDate: string } | null {
   const bounds = toMinMaxIsoDates(dates);
   if (!bounds) return null;
-
-  const startDate = bounds.minDate < SPY_INCEPTION_DATE ? SPY_INCEPTION_DATE : bounds.minDate;
-  let endDate = bounds.maxDate;
-  const today = new Date().toISOString().slice(0, 10);
-  if (endDate >= today) {
-    endDate = previousUtcDate(today);
-  }
-  if (startDate > endDate) return null;
-  return { startDate, endDate };
+  return { startDate: bounds.minDate, endDate: bounds.maxDate };
 }
 
-export function useObservedSpyTradingDays(dates: string[]): TradingDayEvidence {
-  const range = useMemo(() => buildSpySessionQueryRange(dates), [dates]);
+export function useObservedTradingSessions(dates: string[]): TradingDayEvidence {
+  const range = useMemo(() => buildSessionQueryRange(dates), [dates]);
   const sessionsQuery = useQuery({
     queryKey: range
-      ? queryKeys.spyTradingSessions(range)
-      : queryKeys.spyTradingSessions({ startDate: "", endDate: "" }),
+      ? queryKeys.tradingSessions({ ...range, exchange: "XNYS" })
+      : queryKeys.tradingSessions({ startDate: "", endDate: "", exchange: "XNYS" }),
     queryFn: () =>
-      range ? getSpyTradingSessionsQueryFn(range) : Promise.resolve<string[]>([]),
+      range
+        ? getTradingSessionsQueryFn({ ...range, exchange: "XNYS" })
+        : Promise.resolve<string[]>([]),
     enabled: Boolean(range),
     staleTime: 60 * 60 * 1000,
   });

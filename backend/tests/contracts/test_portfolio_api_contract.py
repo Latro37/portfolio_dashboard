@@ -83,6 +83,19 @@ def test_performance_contract(client):
     }
 
 
+def test_trading_sessions_contract(client):
+    res = client.get(
+        "/api/trading-sessions?exchange=XNYS&start_date=1994-04-25&end_date=1994-04-29"
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert set(payload.keys()) == {"exchange", "start_date", "end_date", "sessions"}
+    assert payload["exchange"] == "XNYS"
+    assert payload["start_date"] == "1994-04-25"
+    assert payload["end_date"] == "1994-04-29"
+    assert payload["sessions"] == ["1994-04-25", "1994-04-26", "1994-04-28", "1994-04-29"]
+
+
 def test_sync_status_contract(client):
     res = client.get("/api/sync/status?account_id=test-account-001")
     assert res.status_code == 200
