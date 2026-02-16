@@ -14,7 +14,7 @@ from app.schemas import (
     TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
     SyncStatus, SyncTriggerResponse, ManualCashFlowRequest, ManualCashFlowResponse,
     AppConfigResponse, SaveSymphonyExportResponse, SaveSymphonyExportRequest,
-    OkResponse, ScreenshotUploadResponse, SaveScreenshotConfigRequest,
+    OkResponse, ScreenshotUploadResponse, SaveScreenshotConfigRequest, SymphonyExportJobStatus,
 )
 from app.services.finnhub_market_data import (
     get_daily_closes,
@@ -38,6 +38,7 @@ from app.services.portfolio_admin import (
     add_manual_cash_flow_data,
     get_app_config_data,
     get_sync_status_data,
+    get_symphony_export_job_status_data,
     save_screenshot_config_data,
     save_symphony_export_config_data,
     trigger_sync_data,
@@ -258,6 +259,10 @@ def get_sync_status(
     ids = _resolve_account_ids(db, account_id)
     return get_sync_status_data(db, ids[0])
 
+@router.get("/symphony-export/status", response_model=SymphonyExportJobStatus)
+def get_symphony_export_status():
+    """Current symphony export background job status."""
+    return get_symphony_export_job_status_data()
 
 @router.post(
     "/sync",

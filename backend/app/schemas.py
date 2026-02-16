@@ -44,6 +44,16 @@ class SyncTriggerResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class SymphonyExportJobStatus(BaseModel):
+    status: str  # idle / running / complete / error
+    job_id: Optional[str] = None
+    exported: int = 0
+    processed: int = 0
+    total: Optional[int] = None
+    message: str = ""
+    error: Optional[str] = None
+
+
 class SymphonyExportConfig(BaseModel):
     local_path: str = ""
 

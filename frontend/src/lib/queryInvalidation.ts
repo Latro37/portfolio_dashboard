@@ -9,6 +9,7 @@ type QueryFamily =
   | "transactions"
   | "cash-flows"
   | "sync-status"
+  | "symphony-export-job-status"
   | "symphonies"
   | "symphony-summary"
   | "symphony-summary-live"
@@ -94,6 +95,7 @@ export async function invalidateAfterSync(queryClient: QueryClient, accountId?: 
       "transactions",
       "cash-flows",
       "sync-status",
+      "symphony-export-job-status",
       "symphonies",
       "symphony-summary",
       "symphony-summary-live",

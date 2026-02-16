@@ -98,6 +98,28 @@ def test_sync_status_contract(client):
     assert payload["initial_backfill_done"] is False
 
 
+def test_symphony_export_status_contract(client):
+    res = client.get("/api/symphony-export/status")
+    assert res.status_code == 200
+    payload = res.json()
+    assert set(payload.keys()) == {
+        "status",
+        "job_id",
+        "exported",
+        "processed",
+        "total",
+        "message",
+        "error",
+    }
+    assert payload["status"] in {"idle", "running", "complete", "error"}
+    assert isinstance(payload["exported"], int)
+    assert isinstance(payload["processed"], int)
+    assert payload["total"] is None or isinstance(payload["total"], int)
+    assert isinstance(payload["message"], str)
+    assert payload["job_id"] is None or isinstance(payload["job_id"], str)
+    assert payload["error"] is None or isinstance(payload["error"], str)
+
+
 def test_sync_trigger_skips_test_accounts_contract(client, auth_headers):
     res = client.post("/api/sync?account_id=all", headers=auth_headers)
     assert res.status_code == 200

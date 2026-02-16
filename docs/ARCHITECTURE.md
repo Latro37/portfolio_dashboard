@@ -57,6 +57,7 @@ Notable service modules:
 - `account_scope.py`, `date_filters.py`
 - `portfolio_read.py`, `portfolio_live_overlay.py`, `portfolio_holdings_read.py`, `portfolio_activity_read.py`
 - `symphony_read.py`, `symphony_list_read.py`, `symphony_benchmark_read.py`, `symphony_trade_preview.py`
+- `symphony_export.py`, `symphony_export_jobs.py`
 - `benchmark_read.py`, `backtest_cache.py`
 - `portfolio_admin.py`
 - `sync.py`
@@ -226,6 +227,7 @@ graph TD
 - `POST /api/cash-flows/manual`
 - `GET /api/sync/status`
 - `POST /api/sync`
+- `GET /api/symphony-export/status`
 - `GET /api/config`
 - `POST /api/config/symphony-export`
 - `POST /api/config/screenshot`
@@ -234,6 +236,8 @@ graph TD
 
 Notes:
 - `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning.
+- On first sync, `POST /api/sync` may return once core dashboard data is ready while transactions/cash flows continue syncing in the background. `GET /api/sync/status` remains the canonical "is background work still running?" signal.
+- Symphony structure export runs in a background job and is observable via `GET /api/symphony-export/status`.
 
 ### Symphony routes
 

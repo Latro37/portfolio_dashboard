@@ -7,7 +7,7 @@ import os
 import re
 import time
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 # Characters not allowed in file/folder names (Windows + Unix)
 _UNSAFE_CHARS = re.compile(r'[\\/:*?"<>|]+')
 _DRAFTS_STATE_ACCOUNT_PREFIX = "__DRAFTS__:"
-# Draft exports can be very slow and are currently disabled pending a better UX flow.
-_EXPORT_DRAFTS_ENABLED = False
 
 
 def _sanitize_name(name: str) -> str:
@@ -94,6 +92,24 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
 
     Called as a sync step in full_backfill() and incremental_update().
     """
+    return export_all_symphonies_with_options(db=db, client=client, account_id=account_id)
+
+
+def export_all_symphonies_with_options(
+    db: Session,
+    client: ComposerClient,
+    account_id: str,
+    *,
+    include_drafts: bool = True,
+    progress_cb: Optional[Callable[[dict], None]] = None,
+):
+    """Export latest version of all symphonies if they have changed since last export.
+
+    - Invested symphonies are always included.
+    - Drafts are credential-scoped; callers syncing multiple sub-accounts should
+      invoke this with include_drafts=True for exactly one sub-account per credential.
+    - Optional progress_cb receives small dict events and must never raise.
+    """
     config = load_symphony_export_config()
     if not config:
         return
@@ -104,12 +120,8 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         logger.warning("Symphony export skipped: %s", exc)
         return
 
-    export_drafts = _EXPORT_DRAFTS_ENABLED
-    if not export_drafts:
-        logger.info("Draft symphony export is temporarily disabled (skipping drafts for %s)", account_id)
-
+    export_drafts = bool(include_drafts)
     # Export includes invested symphonies.
-    # Draft export logic is retained but currently disabled (_EXPORT_DRAFTS_ENABLED=False).
     invested_targets: Dict[str, str] = {}
     draft_targets: Dict[str, str] = {}
 
@@ -144,9 +156,25 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
             logger.warning("Failed to resolve credential scope for drafts export (%s): %s", account_id, exc)
 
     exported = 0
+    processed = 0
+
+    total_targets = len(invested_targets) + (len(draft_targets) if export_drafts else 0)
+    if progress_cb:
+        try:
+            progress_cb(
+                {
+                    "event": "targets",
+                    "account_id": account_id,
+                    "total": total_targets,
+                    "invested_total": len(invested_targets),
+                    "draft_total": len(draft_targets) if export_drafts else 0,
+                }
+            )
+        except Exception:
+            pass
 
     def _export_one(sym_id: str, sym_name: str, *, state_account_id: str) -> bool:
-        nonlocal exported
+        nonlocal exported, processed
         sym_name = sym_name or "Unknown"
 
         # Use versions endpoint for lightweight change detection
@@ -154,6 +182,22 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
             versions = client.get_symphony_versions(sym_id)
         except Exception as e:
             logger.warning("Failed to fetch versions for symphony %s: %s", sym_id, e)
+            processed += 1
+            if progress_cb:
+                try:
+                    progress_cb(
+                        {
+                            "event": "processed",
+                            "account_id": account_id,
+                            "symphony_id": sym_id,
+                            "exported": False,
+                            "processed": processed,
+                            "exported_count": exported,
+                            "total": total_targets,
+                        }
+                    )
+                except Exception:
+                    pass
             return False
 
         latest_ts = ""
@@ -167,11 +211,43 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         if latest_ts:
             last_exported = _get_sync_state(db, state_account_id, state_key_ts)
             if last_exported and last_exported >= latest_ts:
+                processed += 1
+                if progress_cb:
+                    try:
+                        progress_cb(
+                            {
+                                "event": "processed",
+                                "account_id": account_id,
+                                "symphony_id": sym_id,
+                                "exported": False,
+                                "processed": processed,
+                                "exported_count": exported,
+                                "total": total_targets,
+                            }
+                        )
+                    except Exception:
+                        pass
                 return False
 
         # Fetch full structure via /score
         score = client.get_symphony_score(sym_id)
         if not score:
+            processed += 1
+            if progress_cb:
+                try:
+                    progress_cb(
+                        {
+                            "event": "processed",
+                            "account_id": account_id,
+                            "symphony_id": sym_id,
+                            "exported": False,
+                            "processed": processed,
+                            "exported_count": exported,
+                            "total": total_targets,
+                        }
+                    )
+                except Exception:
+                    pass
             return False
 
         # Drafts (and occasionally invested symphonies) can return an empty versions list;
@@ -183,6 +259,22 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
             score_hash = hashlib.sha256(canonical).hexdigest()
             last_hash = _get_sync_state(db, state_account_id, state_key_hash)
             if last_hash and last_hash == score_hash:
+                processed += 1
+                if progress_cb:
+                    try:
+                        progress_cb(
+                            {
+                                "event": "processed",
+                                "account_id": account_id,
+                                "symphony_id": sym_id,
+                                "exported": False,
+                                "processed": processed,
+                                "exported_count": exported,
+                                "total": total_targets,
+                            }
+                        )
+                    except Exception:
+                        pass
                 return False
 
             _save_local(local_path, sym_name, score, symphony_id=sym_id)
@@ -194,6 +286,22 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
                 _set_sync_state(db, state_account_id, state_key_ts, latest_ts)
 
         exported += 1
+        processed += 1
+        if progress_cb:
+            try:
+                progress_cb(
+                    {
+                        "event": "processed",
+                        "account_id": account_id,
+                        "symphony_id": sym_id,
+                        "exported": True,
+                        "processed": processed,
+                        "exported_count": exported,
+                        "total": total_targets,
+                    }
+                )
+            except Exception:
+                pass
         time.sleep(0.3)  # gentle rate limit between version fetches
         return True
 
@@ -208,6 +316,11 @@ def export_all_symphonies(db: Session, client: ComposerClient, account_id: str):
         "Symphony export for %s: %d exported, %d total",
         account_id,
         exported,
-        len(invested_targets) + len(draft_targets),
+        total_targets,
     )
+    return {
+        "exported": exported,
+        "processed": processed,
+        "total": total_targets,
+    }
 

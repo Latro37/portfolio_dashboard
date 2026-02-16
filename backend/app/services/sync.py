@@ -22,7 +22,6 @@ from app.services.finnhub_market_data import (
     get_daily_closes_stooq,
 )
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
-from app.services.symphony_export import export_all_symphonies
 from app.config import get_settings
 from app.market_hours import is_after_close, get_allocation_target_date
 
@@ -118,10 +117,7 @@ def full_backfill(db: Session, client: ComposerClient, account_id: str):
     _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
     _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
 
-    # 9. Export symphony structures (local + optional Google Drive)
-    _safe_step("symphony_export", export_all_symphonies, db, client, account_id)
-
-    # 10. Refresh symphony catalog (for name search)
+    # 9. Refresh symphony catalog (for name search)
     _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
 
     set_sync_state(db, account_id, "initial_backfill_done", "true")
@@ -153,14 +149,55 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
     _safe_step("symphony_daily", _sync_symphony_daily_incremental, db, client, account_id)
     _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
 
-    # Export symphony structures (local + optional Google Drive)
-    _safe_step("symphony_export", export_all_symphonies, db, client, account_id)
-
     # Refresh symphony catalog (for name search)
     _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
 
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
     logger.info("Incremental update complete for %s", account_id)
+
+
+def full_backfill_core(db: Session, client: ComposerClient, account_id: str):
+    """First-sync core backfill that skips trade activity and cash flow reports.
+
+    This is intended to make the first sync return sooner with dashboard-critical
+    data (portfolio/symphony history + metrics), while transactions/cash flows are
+    fetched in a background continuation step.
+    """
+    logger.info("Starting first-sync core backfill for account %s...", account_id)
+
+    # Skip transactions + cash flows here (background continuation).
+    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
+    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
+    _safe_step("benchmark", _sync_benchmark, db, account_id)
+    _safe_step("metrics", _recompute_metrics, db, account_id)
+
+    _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
+    _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
+    _safe_step("symphony_metrics", _recompute_symphony_metrics, db, account_id)
+    _safe_step("symphony_catalog", _refresh_symphony_catalog_safe, db)
+
+    set_sync_state(db, account_id, "initial_backfill_core_done", "true")
+    logger.info("First-sync core backfill complete for account %s", account_id)
+
+
+def finish_initial_backfill_activity(db: Session, client: ComposerClient, account_id: str):
+    """Background continuation for first sync.
+
+    Fetches the heavier activity reports and recomputes dependent tables so that
+    transactions/cash flows and derived portfolio metrics become fully correct.
+    """
+    logger.info("Starting first-sync activity backfill for account %s...", account_id)
+
+    _safe_step("transactions", _sync_transactions, db, client, account_id, since="2020-01-01")
+    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since="2020-01-01")
+    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
+    _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
+    _safe_step("benchmark", _sync_benchmark, db, account_id)
+    _safe_step("metrics", _recompute_metrics, db, account_id)
+
+    set_sync_state(db, account_id, "initial_backfill_done", "true")
+    set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
+    logger.info("First-sync activity backfill complete for account %s", account_id)
 
 
 # ------------------------------------------------------------------
