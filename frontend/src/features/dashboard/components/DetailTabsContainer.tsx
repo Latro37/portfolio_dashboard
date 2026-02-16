@@ -275,7 +275,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                           {cashFlow.is_manual ? (
                             <button
                               type="button"
-                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/50 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-500/40 text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300"
                               onClick={() => handleDeleteManual(cashFlow.id)}
                               aria-label="Delete manual entry"
                               title="Delete manual entry"

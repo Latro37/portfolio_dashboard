@@ -211,3 +211,65 @@ def test_export_all_symphonies_skips_when_disabled(
     assert result["total"] == 0
     assert result["processed"] == 0
     assert result["exported"] == 0
+
+
+def test_export_uses_metadata_timestamp_hint_to_skip_versions_call(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    export_dir = tmp_path / "exports"
+    monkeypatch.setattr(
+        symphony_export,
+        "load_symphony_export_config",
+        lambda: {"enabled": True, "local_path": str(export_dir)},
+    )
+    monkeypatch.setattr(symphony_export.time, "sleep", lambda *_args, **_kwargs: None)
+
+    account_id = "acct-001"
+    db_session.add(
+        Account(
+            id=account_id,
+            credential_name="Primary",
+            account_type="INDIVIDUAL",
+            display_name="Test",
+            status="ACTIVE",
+        )
+    )
+    db_session.add(
+        SyncState(
+            account_id=account_id,
+            key="symphony_export:inv-1",
+            value="2025-01-01T00:00:00Z",
+        )
+    )
+    db_session.commit()
+
+    class _HintClient(_StubClient):
+        def get_symphony_stats(self, _account_id: str):
+            return [
+                {
+                    "id": "inv-1",
+                    "name": "Invested",
+                    "updated_at": "2025-01-01T00:00:00Z",
+                }
+            ]
+
+        def get_symphony_versions(self, _symphony_id: str):
+            raise AssertionError("versions endpoint should not be called when timestamp hint is sufficient")
+
+        def get_symphony_score(self, _symphony_id: str):
+            raise AssertionError("score endpoint should not be called for unchanged symphony")
+
+    client = _HintClient()
+    result = symphony_export.export_all_symphonies_with_options(
+        db_session,
+        client,
+        account_id=account_id,
+        include_drafts=False,
+    )
+
+    assert result is not None
+    assert result["total"] == 1
+    assert result["processed"] == 1
+    assert result["exported"] == 0
