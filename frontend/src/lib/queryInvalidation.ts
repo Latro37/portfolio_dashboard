@@ -19,6 +19,7 @@ type QueryFamily =
   | "symphony-trade-preview"
   | "trade-preview"
   | "benchmark-history"
+  | "trading-sessions"
   | "symphony-benchmark"
   | "symphony-catalog"
   | "config"

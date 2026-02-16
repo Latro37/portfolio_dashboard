@@ -29,6 +29,8 @@ Build and maintain a local-first Portfolio Dashboard for Composer portfolios wit
 8. Do not re-introduce ad hoc component-level API caches when equivalent TanStack Query cache behavior can be used.
 9. Run a docs impact check for every change. If behavior, setup, contracts, commands, security, or legal posture changed, update docs in the same branch.
 10. Every PR and final handoff must include a `Docs impact` line: list updated docs, or state `none` with a concrete reason.
+11. For complex problems, check whether a well-maintained Python or JavaScript package already solves the problem before building a bespoke implementation.
+12. Never add, remove, or upgrade external packages (including updates to `requirements*.txt`, `package.json`, or lockfiles) without explicit human approval in this thread after discussing trust and security.
 
 ## Documentation Sync Policy
 
@@ -73,6 +75,8 @@ When the agent has full repository access and push capability, run the end-to-en
 - push after each validated logical checkpoint (not every small edit)
 - for longer tasks, avoid long-lived local-only work; push incremental, coherent commits regularly
 4. Open or update a PR as soon as the change is reviewable; use draft PR for in-progress work.
+   - Every working branch with commits must have a corresponding GitHub PR (draft is acceptable while in progress).
+   - Do not leave a pushed branch without an open PR.
 5. Keep PR description current with:
 - what changed
 - test plan and results
@@ -119,9 +123,10 @@ Do not add alternate server-state frameworks ad hoc; extend the existing query k
 1. Read this file and `docs/TEST_MATRIX.md`.
 2. Classify blast radius (backend, frontend, charting, router/schema, docs).
 3. Create a dedicated branch for the change.
-4. Implement smallest safe change.
-5. Run required gates for that scope.
-6. Commit and push coherent checkpoints at sensible intervals.
-7. Open or update PR with tests and rationale.
-8. Run docs impact check and update docs listed in `docs/DOCS_UPDATE_CHECKLIST.md` as needed.
-9. Report exactly what changed, which tests ran, docs impact, and any residual risk.
+4. For complex issues, evaluate existing Python/JavaScript package options first; if dependency changes are needed, pause and get explicit human approval before editing manifests or lockfiles.
+5. Implement smallest safe change.
+6. Run required gates for that scope.
+7. Commit and push coherent checkpoints at sensible intervals.
+8. Open or update PR with tests and rationale.
+9. Run docs impact check and update docs listed in `docs/DOCS_UPDATE_CHECKLIST.md` as needed.
+10. Report exactly what changed, which tests ran, docs impact, and any residual risk.

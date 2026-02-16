@@ -23,6 +23,7 @@ import type {
   BenchmarkHistoryQuery,
   DateScopedAccountQuery,
   LiveOverlayQuery,
+  TradingSessionsQuery,
   SymphonyScopedQuery,
   SymphonySummaryQuery,
   SymphonyLiveSummaryQuery,
@@ -136,6 +137,17 @@ export function getTradePreviewQueryFn(accountId?: string): Promise<TradePreview
 
 export function getBenchmarkHistoryQueryFn(scope: BenchmarkHistoryQuery): Promise<BenchmarkHistory> {
   return api.getBenchmarkHistory(scope.ticker, scope.startDate, scope.endDate, scope.accountId);
+}
+
+export async function getTradingSessionsQueryFn(
+  scope: TradingSessionsQuery,
+): Promise<string[]> {
+  const sessions = await api.getTradingSessions(
+    scope.startDate,
+    scope.endDate,
+    scope.exchange ?? "XNYS",
+  );
+  return sessions.sessions;
 }
 
 export function getSymphonyCatalogQueryFn(refresh = false): Promise<SymphonyCatalogItem[]> {

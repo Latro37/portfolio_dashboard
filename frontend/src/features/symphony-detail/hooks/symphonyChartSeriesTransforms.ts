@@ -14,6 +14,7 @@ import type {
   BacktestChartPoint,
   LiveChartPoint,
 } from "@/features/symphony-detail/hooks/symphonyChartModelTypes";
+import type { TradingDayEvidence } from "@/features/charting/tradingCalendar";
 
 function getDateRange(
   period: SymphonyDetailPeriod,
@@ -43,14 +44,15 @@ export function filterLiveData(
   customStart: string,
   customEnd: string,
   oosDate: string,
+  tradingDayEvidence: TradingDayEvidence = {},
 ) {
   if (!liveData.length) return [];
 
   const { start, end } = getDateRange(period, customStart, customEnd, oosDate);
-  if (!start && !end) return liveData.filter((point) => isWeekday(point.date));
+  if (!start && !end) return liveData.filter((point) => isWeekday(point.date, tradingDayEvidence));
 
   return liveData.filter((point) => {
-    if (!isWeekday(point.date)) return false;
+    if (!isWeekday(point.date, tradingDayEvidence)) return false;
     if (start && point.date < start) return false;
     if (end && point.date > end) return false;
     return true;
@@ -95,14 +97,17 @@ export function filterBacktestData(
   customStart: string,
   customEnd: string,
   oosDate: string,
+  tradingDayEvidence: TradingDayEvidence = {},
 ): BacktestChartPoint[] {
   if (!backtestChartData.length) return [];
 
   const { start, end } = getDateRange(period, customStart, customEnd, oosDate);
-  if (!start && !end) return backtestChartData.filter((point) => isWeekday(point.date));
+  if (!start && !end) {
+    return backtestChartData.filter((point) => isWeekday(point.date, tradingDayEvidence));
+  }
 
   const filtered = backtestChartData.filter((point) => {
-    if (!isWeekday(point.date)) return false;
+    if (!isWeekday(point.date, tradingDayEvidence)) return false;
     if (start && point.date < start) return false;
     if (end && point.date > end) return false;
     return true;

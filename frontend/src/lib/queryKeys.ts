@@ -40,6 +40,12 @@ export type BenchmarkHistoryQuery = {
   accountId?: string;
 };
 
+export type TradingSessionsQuery = {
+  startDate: string;
+  endDate: string;
+  exchange?: string;
+};
+
 function normalize(value?: string): string {
   return value ?? "";
 }
@@ -130,6 +136,13 @@ export const queryKeys = {
       normalize(scope.startDate),
       normalize(scope.endDate),
       normalize(scope.accountId),
+    ] as const,
+  tradingSessions: (scope: TradingSessionsQuery) =>
+    [
+      "trading-sessions",
+      normalize(scope.startDate),
+      normalize(scope.endDate),
+      normalize(scope.exchange),
     ] as const,
   symphonyCatalog: (refresh = false) =>
     ["symphony-catalog", refresh] as const,

@@ -58,7 +58,7 @@ Notable service modules:
 - `portfolio_read.py`, `portfolio_live_overlay.py`, `portfolio_holdings_read.py`, `portfolio_activity_read.py`
 - `symphony_read.py`, `symphony_list_read.py`, `symphony_benchmark_read.py`, `symphony_trade_preview.py`
 - `symphony_export.py`, `symphony_export_jobs.py`
-- `benchmark_read.py`, `backtest_cache.py`
+- `benchmark_read.py`, `backtest_cache.py`, `trading_sessions_read.py`
 - `portfolio_admin.py`
 - `sync.py`
 
@@ -96,6 +96,9 @@ Request and response models are centralized in `backend/app/schemas.py`.
 - `queryKeys.ts`: stable key factories for all server-state families
 - `queryFns.ts`: shared API-backed query functions and endpoint retry overrides
 - `queryInvalidation.ts`: centralized invalidation families for sync, cash-flow, and config writes
+
+Charting non-trading-day filtering uses the `trading-sessions` query family, backed by
+`GET /api/trading-sessions` and the NYSE exchange calendar (`exchange_calendars`, `XNYS`).
 
 Provider wiring:
 - `frontend/src/app/providers.tsx`
@@ -235,6 +238,7 @@ graph TD
 - `POST /api/config/screenshot`
 - `POST /api/screenshot`
 - `GET /api/benchmark-history`
+- `GET /api/trading-sessions`
 
 Notes:
 - `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning. It also includes `symphony_export.enabled` and first-start simulation flags (`first_start_test_mode`, `first_start_run_id`).

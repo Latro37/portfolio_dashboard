@@ -140,6 +140,7 @@ The main chart supports four view modes via toggle buttons:
 - **Drawdown** — How far below the peak your portfolio has been at each point
 
 **Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
+**Trading-day filter:** Chart date axes remove weekends and full NYSE market-closure holidays (for example, Presidents Day) using the NYSE exchange calendar (`exchange_calendars` / `XNYS`). Partial-session early-close days remain visible.
 
 ### Benchmark Overlays
 
@@ -499,6 +500,7 @@ The main chart supports four view modes via toggle buttons:
 - **Drawdown** — How far below the peak your portfolio has been at each point
 
 **Time periods:** 1W, 1M, 3M, YTD, 1Y, ALL, or pick a custom date range with the date pickers.
+**Trading-day filter:** Chart date axes remove weekends and full NYSE market-closure holidays (for example, Presidents Day) using the NYSE exchange calendar (`exchange_calendars` / `XNYS`). Partial-session early-close days remain visible.
 
 ### Benchmark Overlays
 

@@ -11,4 +11,5 @@ scipy==1.14.1
 numpy==1.26.4
 websockets==12.0
 httpx==0.27.2
-tzdata==2024.2
+tzdata==2025.2
+exchange-calendars==4.13.1

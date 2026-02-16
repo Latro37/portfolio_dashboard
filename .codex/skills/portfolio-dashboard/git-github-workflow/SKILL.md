@@ -14,6 +14,7 @@ When running in full access mode, execute the full branch->edit->commit->push->P
 ## Operating Mode
 
 - In full access mode, do not stop at local edits; carry work through push and PR creation.
+- Any pushed working branch must have a GitHub PR (use draft PR for in-progress work).
 - Use sensible intervals for commit/push cadence:
 1. push at each validated logical checkpoint
 2. for longer work, avoid large local-only deltas; push coherent increments regularly
@@ -45,6 +46,8 @@ When running in full access mode, execute the full branch->edit->commit->push->P
 - Prefer format: `type(scope): short summary`.
 - Keep subject lines under 72 characters.
 - Explain why in the body when the change is non-obvious.
+- For complex issues, evaluate whether a reputable existing Python/JavaScript package solves the problem before implementing from scratch.
+- Never add, remove, or upgrade dependencies without explicit human approval after discussing trust/security; this includes `requirements*.txt`, `package.json`, and lockfile changes.
 - Before commit:
 1. Review staged diff: `git diff --staged`
 2. Run relevant lint/tests
@@ -71,6 +74,7 @@ Use `references/commit-message-patterns.md` for message patterns.
 - Push branch: `git push -u origin <branch>`
 - Open PR in GitHub UI or CLI:
 `gh pr create --fill --base master --head <branch>`
+- If no PR exists for the branch yet, create one immediately (draft allowed) before continuing other work.
 - For non-trivial work, open a draft PR early and update it as checkpoints land.
 - Draft PR body from `references/pr-description-template.md`.
 - **PowerShell note (PR body formatting):** Prefer `gh pr create/edit --body-file <path>` over `--body "<string>"`.

@@ -7,6 +7,7 @@ import { PerformanceChartCanvas } from "@/features/charting/PerformanceChartCanv
 import { PerformanceChartControlsRow } from "@/features/charting/PerformanceChartControlsRow";
 import { PerformanceChartLegendRows } from "@/features/charting/PerformanceChartLegendRows";
 import { useBenchmarkCatalog } from "@/features/charting/hooks/useBenchmarkCatalog";
+import { useObservedTradingSessions } from "@/features/charting/hooks/useObservedTradingSessions";
 import {
   MAX_BENCHMARKS,
 } from "@/features/charting/benchmarkConfig";
@@ -95,10 +96,13 @@ export function PerformanceChart({
     maxBenchmarks: MAX_BENCHMARKS,
   });
 
+  const sourceDates = useMemo(() => data.map((point) => point.date), [data]);
+  const tradingDayEvidence = useObservedTradingSessions(sourceDates);
+
   const tradingData = useMemo<ChartSeriesPoint[]>(() => {
-    const dataset = adaptPortfolioChart(data, benchmarks);
+    const dataset = adaptPortfolioChart(data, benchmarks, tradingDayEvidence);
     return dataset.points;
-  }, [data, benchmarks]);
+  }, [data, benchmarks, tradingDayEvidence]);
 
   const hasBenchmark = benchmarks.length > 0;
   const singleBenchmark = benchmarks.length === 1;

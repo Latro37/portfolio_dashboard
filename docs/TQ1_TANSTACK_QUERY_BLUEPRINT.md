@@ -42,7 +42,7 @@ The canonical key registry lives in `frontend/src/lib/queryKeys.ts` and includes
 - Accounts/config: `accounts`, `config`
 - Portfolio: `summary`, `summary-live`, `performance`, `holdings`, `holdings-history`, `transactions`, `cash-flows`, `sync-status`, `symphony-export-job-status`
 - Symphony: `symphonies`, `symphony-summary`, `symphony-summary-live`, `symphony-performance`, `symphony-backtest`, `symphony-allocations`, `symphony-trade-preview`, `symphony-benchmark`
-- Trade preview and benchmarks: `trade-preview`, `benchmark-history`, `symphony-catalog`
+- Trade preview and benchmarks: `trade-preview`, `benchmark-history`, `trading-sessions`, `symphony-catalog`
 
 ## Invalidation Contracts
 

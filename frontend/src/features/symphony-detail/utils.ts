@@ -1,4 +1,5 @@
 import type { SymphonyDetailPeriod } from "@/features/symphony-detail/types";
+import { isUsEquityTradingDay, type TradingDayEvidence } from "@/features/charting/tradingCalendar";
 
 export function fmtDollar(value: number): string {
   return `$${Math.abs(value).toLocaleString(undefined, {
@@ -53,9 +54,8 @@ export function epochDayToDate(dayNumber: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function isWeekday(dateStr: string): boolean {
-  const day = new Date(`${dateStr}T00:00`).getDay();
-  return day !== 0 && day !== 6;
+export function isWeekday(dateStr: string, evidence: TradingDayEvidence = {}): boolean {
+  return isUsEquityTradingDay(dateStr, evidence);
 }
 
 export function periodStartDate(period: SymphonyDetailPeriod): string {

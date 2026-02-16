@@ -332,6 +332,13 @@ export interface BenchmarkEntry {
   color: string;
 }
 
+export interface TradingSessionsResponse {
+  exchange: string;
+  start_date: string;
+  end_date: string;
+  sessions: string[];
+}
+
 export interface SymphonyCatalogItem {
   symphony_id: string;
   name: string;
@@ -499,6 +506,14 @@ export const api = {
     if (endDate) params.set("end_date", endDate);
     if (accountId) params.set("account_id", accountId);
     return fetchJSON<BenchmarkHistory>(`/benchmark-history?${params.toString()}`);
+  },
+  getTradingSessions: (startDate: string, endDate: string, exchange = "XNYS") => {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      exchange,
+    });
+    return fetchJSON<TradingSessionsResponse>(`/trading-sessions?${params.toString()}`);
   },
   getSymphonyCatalog: (refresh = false) =>
     fetchJSON<SymphonyCatalogItem[]>(`/symphony-catalog${refresh ? "?refresh=true" : ""}`),

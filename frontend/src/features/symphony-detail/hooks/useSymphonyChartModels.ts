@@ -8,6 +8,7 @@ import type {
 } from "@/lib/api";
 import type { SymphonyDetailPeriod } from "@/features/symphony-detail/types";
 import { makeDateFormatter } from "@/features/symphony-detail/utils";
+import { useObservedTradingSessions } from "@/features/charting/hooks/useObservedTradingSessions";
 import {
   buildBacktestChartData,
   buildBacktestMetrics,
@@ -53,19 +54,33 @@ export function useSymphonyChartModels({
   customEnd,
   oosDate,
 }: Args) {
-  const filteredLiveData = useMemo(
-    () => filterLiveData(liveData, period, customStart, customEnd, oosDate),
-    [liveData, period, customStart, customEnd, oosDate],
-  );
-
   const backtestChartData = useMemo(
     () => buildBacktestChartData(backtest),
     [backtest],
   );
 
+  const sourceDates = useMemo(
+    () => [...liveData.map((point) => point.date), ...backtestChartData.map((point) => point.date)],
+    [liveData, backtestChartData],
+  );
+  const tradingDayEvidence = useObservedTradingSessions(sourceDates);
+
+  const filteredLiveData = useMemo(
+    () => filterLiveData(liveData, period, customStart, customEnd, oosDate, tradingDayEvidence),
+    [liveData, period, customStart, customEnd, oosDate, tradingDayEvidence],
+  );
+
   const filteredBacktestData = useMemo(
-    () => filterBacktestData(backtestChartData, period, customStart, customEnd, oosDate),
-    [backtestChartData, period, customStart, customEnd, oosDate],
+    () =>
+      filterBacktestData(
+        backtestChartData,
+        period,
+        customStart,
+        customEnd,
+        oosDate,
+        tradingDayEvidence,
+      ),
+    [backtestChartData, period, customStart, customEnd, oosDate, tradingDayEvidence],
   );
 
   const backtestTwrOffset = calcTwrOffset(filteredBacktestData);
