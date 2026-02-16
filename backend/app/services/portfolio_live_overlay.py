@@ -19,6 +19,28 @@ _live_cache: Dict[Tuple[tuple[str, ...], Optional[str], Optional[str], Optional[
 _LIVE_CACHE_TTL = 120  # seconds
 
 
+def invalidate_portfolio_live_cache(*, account_ids: Optional[List[str]] = None) -> int:
+    """Invalidate in-memory live-summary cache entries.
+
+    If ``account_ids`` is omitted, clears the full cache.  Otherwise clears any
+    cached scope that intersects with one of the provided account IDs.
+    Returns the number of removed cache entries.
+    """
+    if not _live_cache:
+        return 0
+
+    if not account_ids:
+        removed = len(_live_cache)
+        _live_cache.clear()
+        return removed
+
+    targets = set(account_ids)
+    to_remove = [key for key in _live_cache if set(key[0]) & targets]
+    for key in to_remove:
+        _live_cache.pop(key, None)
+    return len(to_remove)
+
+
 def get_portfolio_live_summary_data(
     db: Session,
     account_ids: List[str],

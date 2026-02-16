@@ -28,6 +28,8 @@ from app.schemas import ManualCashFlowRequest
 from app.security import get_local_auth_token
 from app.services.local_paths import LocalPathError, resolve_local_write_path
 from app.services.manual_cash_flow import encode_manual_description, is_manual_cash_flow
+from app.services.portfolio_live_overlay import invalidate_portfolio_live_cache
+from app.services.symphony_read import invalidate_symphony_live_cache
 from app.services.sync import (
     full_backfill_core,
     finish_initial_backfill_activity,
@@ -85,6 +87,10 @@ def add_manual_cash_flow_data(
         _recompute_metrics(db, body.account_id)
     except Exception as exc:
         logger.warning("Post-manual-entry recompute failed: %s", exc)
+    finally:
+        # Avoid serving stale live overlay summaries after manual cash-flow edits.
+        invalidate_portfolio_live_cache(account_ids=[body.account_id])
+        invalidate_symphony_live_cache(account_id=body.account_id)
 
     return {"status": "ok", "date": str(body.date), "type": cf_type, "amount": amount}
 
@@ -120,6 +126,10 @@ def delete_manual_cash_flow_data(
         _recompute_metrics(db, account_id)
     except Exception as exc:
         logger.warning("Post-manual-delete recompute failed: %s", exc)
+    finally:
+        # Avoid serving stale live overlay summaries after manual cash-flow edits.
+        invalidate_portfolio_live_cache(account_ids=[account_id])
+        invalidate_symphony_live_cache(account_id=account_id)
 
     return {"status": "ok", "deleted_id": cash_flow_id}
 
