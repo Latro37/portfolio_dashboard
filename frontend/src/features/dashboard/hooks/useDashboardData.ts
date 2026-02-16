@@ -55,6 +55,11 @@ type Result = {
   restoreBaseData: () => void;
 };
 
+type ScopedOverride<T> = {
+  scopeKey: string;
+  value: T;
+};
+
 function applySetStateAction<T>(previous: T, value: SetStateAction<T>): T {
   return typeof value === "function"
     ? (value as (prevState: T) => T)(previous)
@@ -67,11 +72,11 @@ export function useDashboardData({
   customStart,
   customEnd,
 }: Args): Result {
-  const [summaryOverride, setSummaryOverride] = useState<Summary | null | undefined>(
-    undefined,
-  );
+  const [summaryOverride, setSummaryOverride] = useState<
+    ScopedOverride<Summary | null> | undefined
+  >(undefined);
   const [performanceOverride, setPerformanceOverride] = useState<
-    PerformancePoint[] | undefined
+    ScopedOverride<PerformancePoint[]> | undefined
   >(undefined);
   const [holdingsOverride, setHoldingsOverride] = useState<
     HoldingsResponse | null | undefined
@@ -91,6 +96,11 @@ export function useDashboardData({
   const range = useMemo(
     () => resolveDashboardRange(period, customStart, customEnd),
     [period, customStart, customEnd],
+  );
+  const scopeKey = useMemo(
+    () =>
+      [resolvedAccountId ?? "__none__", range.period, range.startDate, range.endDate].join("|"),
+    [resolvedAccountId, range.period, range.startDate, range.endDate],
   );
 
   const summaryQuery = useQuery({
@@ -172,16 +182,16 @@ export function useDashboardData({
   }, [performanceQuery.data]);
 
   const summary =
-    summaryOverride !== undefined
-      ? summaryOverride
+    summaryOverride !== undefined && summaryOverride.scopeKey === scopeKey
+      ? summaryOverride.value
       : summaryQuery.data ?? null;
   const holdings =
     holdingsOverride !== undefined
       ? holdingsOverride
       : holdingsQuery.data ?? null;
   const performance =
-    performanceOverride !== undefined
-      ? performanceOverride
+    performanceOverride !== undefined && performanceOverride.scopeKey === scopeKey
+      ? performanceOverride.value
       : performanceQuery.data ?? [];
   const symphonies =
     symphoniesOverride !== undefined
@@ -211,22 +221,31 @@ export function useDashboardData({
   const setSummary: Dispatch<SetStateAction<Summary | null>> = useCallback(
     (value) => {
       setSummaryOverride((previous) =>
-        applySetStateAction(previous !== undefined ? previous : summaryQuery.data ?? null, value),
+        ({
+          scopeKey,
+          value: applySetStateAction(
+            previous?.scopeKey === scopeKey ? previous.value : summaryQuery.data ?? null,
+            value,
+          ),
+        }),
       );
     },
-    [summaryQuery.data],
+    [scopeKey, summaryQuery.data],
   );
 
   const setPerformance: Dispatch<SetStateAction<PerformancePoint[]>> = useCallback(
     (value) => {
       setPerformanceOverride((previous) =>
-        applySetStateAction(
-          previous !== undefined ? previous : performanceQuery.data ?? [],
-          value,
-        ),
+        ({
+          scopeKey,
+          value: applySetStateAction(
+            previous?.scopeKey === scopeKey ? previous.value : performanceQuery.data ?? [],
+            value,
+          ),
+        }),
       );
     },
-    [performanceQuery.data],
+    [scopeKey, performanceQuery.data],
   );
 
   const setHoldings: Dispatch<SetStateAction<HoldingsResponse | null>> = useCallback(
@@ -307,10 +326,10 @@ export function useDashboardData({
   }, []);
 
   const restoreBaseData = useCallback(() => {
-    setSummaryOverride(baseSummaryRef.current);
+    setSummaryOverride({ scopeKey, value: baseSummaryRef.current });
     setHoldingsOverride(baseHoldingsRef.current);
-    setPerformanceOverride(basePerformanceRef.current);
-  }, []);
+    setPerformanceOverride({ scopeKey, value: basePerformanceRef.current });
+  }, [scopeKey]);
 
   return {
     summary,
