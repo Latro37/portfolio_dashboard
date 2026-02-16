@@ -285,3 +285,68 @@ def test_cancel_stops_running_job(engine, monkeypatch: pytest.MonkeyPatch):
     assert status["status"] == "cancelled"
     assert status["job_id"] == job_id
     assert 0 < status["processed"] < 100
+
+
+def test_job_status_counts_processed_even_when_exports_are_skipped(
+    engine,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = Session(engine)
+    try:
+        session.add(
+            Account(
+                id="acct-001",
+                credential_name="Primary",
+                account_type="INDIVIDUAL",
+                display_name="One",
+                status="ACTIVE",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    def _session_local():
+        return Session(engine)
+
+    def _get_client(_db, _account_id: str):
+        return object()
+
+    def _export(
+        *,
+        db,
+        client,
+        account_id: str,
+        include_drafts: bool = True,
+        progress_cb=None,
+        cancelled_cb=None,
+    ):
+        del db, client, account_id, include_drafts, cancelled_cb
+        if progress_cb:
+            progress_cb({"event": "targets", "total": 5})
+            # Already-exported/unchanged symphonies.
+            for _ in range(3):
+                progress_cb({"event": "processed", "exported": False})
+            # Newly exported symphonies.
+            for _ in range(2):
+                progress_cb({"event": "processed", "exported": True})
+
+    monkeypatch.setattr(symphony_export_jobs, "SessionLocal", _session_local)
+    monkeypatch.setattr(symphony_export_jobs, "get_client_for_account", _get_client)
+    monkeypatch.setattr(symphony_export_jobs, "export_all_symphonies_with_options", _export)
+
+    job_id = symphony_export_jobs.start_symphony_export_job(["acct-001"])
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        status = symphony_export_jobs.get_symphony_export_job_status()
+        if status["status"] in {"complete", "error"}:
+            break
+        time.sleep(0.01)
+
+    status = symphony_export_jobs.get_symphony_export_job_status()
+    assert status["status"] == "complete"
+    assert status["job_id"] == job_id
+    assert status["total"] == 5
+    assert status["processed"] == 5
+    assert status["exported"] == 2

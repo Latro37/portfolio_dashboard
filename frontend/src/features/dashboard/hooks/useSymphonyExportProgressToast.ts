@@ -8,8 +8,8 @@ import { queryKeys } from "@/lib/queryKeys";
 
 const TOAST_ID = "symphony-export-progress";
 
-function formatProgress(exported: number, total: number | null) {
-  return typeof total === "number" && total > 0 ? `${exported}/${total}` : String(exported);
+function formatProgress(processed: number, total: number | null) {
+  return typeof total === "number" && total > 0 ? `${processed}/${total}` : String(processed);
 }
 
 export function useSymphonyExportProgressToast() {
@@ -31,6 +31,7 @@ export function useSymphonyExportProgressToast() {
     if (!status) return;
 
     const jobId = statusQuery.data?.job_id ?? null;
+    const processed = statusQuery.data?.processed ?? 0;
     const exported = statusQuery.data?.exported ?? 0;
     const total = statusQuery.data?.total ?? null;
     const prev = prevStatusRef.current;
@@ -45,7 +46,7 @@ export function useSymphonyExportProgressToast() {
         id: TOAST_ID,
         type: "info",
         persistent: true,
-        text: `Saving Symphonies locally: ${formatProgress(exported, total)}`,
+        text: `Saving Symphonies locally: ${formatProgress(processed, total)}`,
         onManualDismiss: async () => {
           if (jobId) {
             suppressedJobIdRef.current = jobId;
@@ -63,7 +64,7 @@ export function useSymphonyExportProgressToast() {
         type: "success",
         persistent: false,
         autoDismissMs: 1500,
-        text: `Symphony extraction complete. Symphonies extracted: ${exported}`,
+        text: `Symphony extraction complete. Symphonies saved: ${exported}`,
       });
     } else if ((prev === "running" || prev === "cancelling") && status === "error" && !isSuppressedJob) {
       const error = statusQuery.data?.error ? `: ${statusQuery.data.error}` : "";
@@ -87,6 +88,7 @@ export function useSymphonyExportProgressToast() {
     prevStatusRef.current = status;
   }, [
     statusQuery.data?.status,
+    statusQuery.data?.processed,
     statusQuery.data?.exported,
     statusQuery.data?.total,
     statusQuery.data?.error,

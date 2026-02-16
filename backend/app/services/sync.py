@@ -465,8 +465,12 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
     else:
         fallback_deposits = None
 
-    # Forward-fill cumulative values for dates without cash flow events
+    # Forward-fill cumulative values for dates without cash flow events.
+    # Apply each cash-flow date once its date is <= the current portfolio-history date
+    # so weekend/holiday manual entries roll into the next market day.
     last_cum = {"net_deposits": 0.0, "total_fees": 0.0, "total_dividends": 0.0}
+    cash_flow_dates = sorted(cum_by_date.keys())
+    cash_flow_idx = 0
 
     # Try to get current cash balance
     try:
@@ -475,16 +479,19 @@ def _sync_portfolio_history(db: Session, client: ComposerClient, account_id: str
         cash_balance = 0.0
 
     new_count = 0
-    for entry in history:
-        ds = entry["date"]
+    history_sorted = sorted(history, key=lambda item: str(item.get("date", "")))
+    for entry in history_sorted:
+        ds_raw = str(entry.get("date", ""))
         try:
-            d = date.fromisoformat(ds)
+            d = date.fromisoformat(ds_raw)
         except Exception:
             continue
+        ds = d.isoformat()
 
         # Get cumulative values
-        if ds in cum_by_date:
-            last_cum = cum_by_date[ds]
+        while cash_flow_idx < len(cash_flow_dates) and cash_flow_dates[cash_flow_idx] <= ds:
+            last_cum = cum_by_date[cash_flow_dates[cash_flow_idx]]
+            cash_flow_idx += 1
 
         # Use fallback deposits if no cash flow data exists
         deposits_val = fallback_deposits if fallback_deposits is not None else last_cum["net_deposits"]
