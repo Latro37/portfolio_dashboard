@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   Area,
   AreaChart,
+  getNiceTickValues,
   Line,
   ReferenceLine,
   ResponsiveContainer,
@@ -11,6 +12,10 @@ import {
 } from "recharts";
 
 import type { BenchmarkEntry } from "@/lib/api";
+import {
+  stackLabelPositions,
+  valueToPixelY,
+} from "@/features/charting/endLabelLayout";
 import type { ChartMode, ChartSeriesPoint } from "@/features/charting/types";
 
 type TooltipPayloadEntry = {
@@ -48,6 +53,30 @@ type Props = {
   renderDrawdownTooltip: TooltipRenderer;
 };
 
+type EndLabelSeries = {
+  dataKey: string;
+  label: string;
+  color: string;
+  formatter: (value: number) => string;
+};
+
+const CHART_HEIGHT = 320;
+const CHART_MARGIN = { top: 5, right: 120, bottom: 5, left: 5 };
+const CHART_MARGIN_NO_LABELS = { ...CHART_MARGIN, right: 20 };
+
+const END_LABEL_GAP = 16;
+const END_LABEL_FONT_SIZE = 11;
+const END_LABEL_FONT_WEIGHT = 700;
+const END_LABEL_EDGE_PADDING = 1;
+const Y_AXIS_TICK_COUNT = 5;
+const AUTO_DOMAIN: [string, string] = ["auto", "auto"];
+
+function shortLabel(label: string): string {
+  const maxChars = 10;
+  if (label.length <= maxChars) return label;
+  return `${label.slice(0, maxChars - 3)}...`;
+}
+
 export function PerformanceChartCanvas({
   uid,
   mode,
@@ -70,6 +99,213 @@ export function PerformanceChartCanvas({
   renderMwrTooltip,
   renderDrawdownTooltip,
 }: Props) {
+  const lastIndexesByKey = useMemo(() => {
+    const byKey: Record<string, number> = {};
+    if (!tradingData.length) return byKey;
+
+    for (let i = tradingData.length - 1; i >= 0; i -= 1) {
+      const point = tradingData[i] as Record<string, unknown>;
+      Object.entries(point).forEach(([key, value]) => {
+        if (byKey[key] !== undefined) return;
+        if (typeof value === "number" && Number.isFinite(value)) {
+          byKey[key] = i;
+        }
+      });
+    }
+    return byKey;
+  }, [tradingData]);
+
+  const activeEndLabels = useMemo<EndLabelSeries[]>(() => {
+    if (mode === "portfolio") return [];
+
+    if (mode === "twr") {
+      const labels: EndLabelSeries[] = [
+        {
+          dataKey: "time_weighted_return",
+          label: "TWR",
+          color: "#10b981",
+          formatter: formatPct,
+        },
+      ];
+      if (overlayKey && showOverlay) {
+        labels.push({
+          dataKey: overlayKey,
+          label: "Backtest",
+          color: overlayColor,
+          formatter: formatPct,
+        });
+      }
+      benchmarks.forEach((benchmark, index) => {
+        labels.push({
+          dataKey: `bench_${index}_return`,
+          label: benchmark.label || benchmark.ticker,
+          color: benchmark.color,
+          formatter: formatPct,
+        });
+      });
+      return labels;
+    }
+
+    if (mode === "mwr") {
+      const labels: EndLabelSeries[] = [
+        {
+          dataKey: "money_weighted_return",
+          label: "MWR",
+          color: "#d946ef",
+          formatter: formatPct,
+        },
+      ];
+      benchmarks.forEach((benchmark, index) => {
+        labels.push({
+          dataKey: `bench_${index}_mwr`,
+          label: benchmark.label || benchmark.ticker,
+          color: benchmark.color,
+          formatter: formatPct,
+        });
+      });
+      return labels;
+    }
+
+    const labels: EndLabelSeries[] = [
+      {
+        dataKey: "current_drawdown",
+        label: "Drawdown",
+        color: "#ef4444",
+        formatter: formatPct,
+      },
+    ];
+    if (drawdownOverlayKey && showOverlay) {
+      labels.push({
+        dataKey: drawdownOverlayKey,
+        label: "Backtest",
+        color: overlayColor,
+        formatter: formatPct,
+      });
+    }
+    benchmarks.forEach((benchmark, index) => {
+      labels.push({
+        dataKey: `bench_${index}_drawdown`,
+        label: benchmark.label || benchmark.ticker,
+        color: benchmark.color,
+        formatter: formatPct,
+      });
+    });
+    return labels;
+  }, [
+    mode,
+    overlayKey,
+    showOverlay,
+    overlayColor,
+    benchmarks,
+    formatPct,
+    drawdownOverlayKey,
+  ]);
+
+  const yAxisDomain = useMemo<readonly [number, number] | undefined>(() => {
+    if (mode === "portfolio") return undefined;
+
+    const numericValues: number[] = [];
+    activeEndLabels.forEach((series) => {
+      for (let i = 0; i < tradingData.length; i += 1) {
+        const value = (tradingData[i] as Record<string, unknown>)[series.dataKey];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          numericValues.push(value);
+        }
+      }
+    });
+
+    if (!numericValues.length) return undefined;
+
+    const dataMin = Math.min(Math.min(...numericValues), 0);
+    const dataMax = Math.max(Math.max(...numericValues), 0);
+    const ticks = getNiceTickValues([dataMin, dataMax], Y_AXIS_TICK_COUNT);
+    if (ticks.length >= 2) {
+      return [ticks[0], ticks[ticks.length - 1]];
+    }
+    return [dataMin, dataMax];
+  }, [activeEndLabels, mode, tradingData]);
+
+  const endLabelOffsetByKey = useMemo(() => {
+    if (!yAxisDomain) return {} as Record<string, number>;
+    const [domainMin, domainMax] = yAxisDomain;
+
+    const labelHalfHeight = END_LABEL_FONT_SIZE / 2;
+    const minY = CHART_MARGIN.top + END_LABEL_EDGE_PADDING + labelHalfHeight;
+    const maxY =
+      CHART_HEIGHT - CHART_MARGIN.bottom - END_LABEL_EDGE_PADDING - labelHalfHeight;
+
+    const candidates = activeEndLabels
+      .map((series) => {
+        const lastIndex = lastIndexesByKey[series.dataKey];
+        if (lastIndex === undefined) return null;
+        const lastValue = (tradingData[lastIndex] as Record<string, unknown>)[series.dataKey];
+        if (typeof lastValue !== "number" || !Number.isFinite(lastValue)) return null;
+        return {
+          id: series.dataKey,
+          rawY: valueToPixelY(lastValue, domainMin, domainMax, minY, maxY),
+        };
+      })
+      .filter((candidate): candidate is { id: string; rawY: number } => candidate !== null);
+
+    const stackedYByKey = stackLabelPositions(candidates, minY, maxY, END_LABEL_GAP);
+
+    const offsets: Record<string, number> = {};
+    candidates.forEach((candidate) => {
+      const stackedY = stackedYByKey[candidate.id];
+      if (typeof stackedY === "number") {
+        offsets[candidate.id] = stackedY - candidate.rawY;
+      }
+    });
+
+    return offsets;
+  }, [activeEndLabels, lastIndexesByKey, tradingData, yAxisDomain]);
+
+  const createEndLabel = (
+    dataKey: string,
+    label: string,
+    color: string,
+    formatter: (value: number) => string,
+  ) => {
+    const lastIndex = lastIndexesByKey[dataKey];
+    const yOffset = endLabelOffsetByKey[dataKey];
+    if (lastIndex === undefined || yOffset === undefined) return undefined;
+
+    function renderEndLabel(props: {
+      index?: number;
+      x?: number;
+      y?: number;
+      value?: number;
+    }) {
+      if (
+        props.index !== lastIndex ||
+        typeof props.x !== "number" ||
+        typeof props.y !== "number" ||
+        typeof props.value !== "number"
+      ) {
+        return null;
+      }
+
+      // Keep stacked offsets as-is; per-label clamping can collapse multiple labels onto
+      // the same boundary and reintroduce overlap.
+      const y = props.y + yOffset;
+      return (
+        <text
+          x={props.x + 8}
+          y={y}
+          fill={color}
+          fontSize={END_LABEL_FONT_SIZE}
+          fontWeight={END_LABEL_FONT_WEIGHT}
+          textAnchor="start"
+          dominantBaseline="middle"
+        >
+          {`${shortLabel(label)} ${formatter(props.value)}`}
+        </text>
+      );
+    }
+
+    return renderEndLabel;
+  };
+
   if (!hasData) {
     return (
       <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">
@@ -81,7 +317,7 @@ export function PerformanceChartCanvas({
   if (mode === "portfolio") {
     return (
       <ResponsiveContainer width="100%" height={320}>
-        <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+        <AreaChart data={tradingData} margin={CHART_MARGIN_NO_LABELS}>
           <defs>
             <linearGradient id={`pvGrad${uid}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -92,41 +328,14 @@ export function PerformanceChartCanvas({
               <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            minTickGap={40}
-          />
-          <YAxis
-            tickFormatter={formatValue}
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            width={70}
-          />
+          <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+          <YAxis tickFormatter={formatValue} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
           <Tooltip content={renderPortfolioTooltip} />
           {showDeposits && (
-            <Area
-              type="monotone"
-              dataKey="net_deposits"
-              stroke="#6366f1"
-              strokeWidth={1.5}
-              fill={`url(#depGrad${uid})`}
-              dot={false}
-            />
+            <Area type="monotone" dataKey="net_deposits" stroke="#6366f1" strokeWidth={1.5} fill={`url(#depGrad${uid})`} dot={false} />
           )}
           {showPortfolio && (
-            <Area
-              type="monotone"
-              dataKey="portfolio_value"
-              stroke="#10b981"
-              strokeWidth={2}
-              fill={`url(#pvGrad${uid})`}
-              dot={false}
-            />
+            <Area type="monotone" dataKey="portfolio_value" stroke="#10b981" strokeWidth={2} fill={`url(#pvGrad${uid})`} dot={false} />
           )}
         </AreaChart>
       </ResponsiveContainer>
@@ -136,7 +345,7 @@ export function PerformanceChartCanvas({
   if (mode === "twr") {
     return (
       <ResponsiveContainer width="100%" height={320}>
-        <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+        <AreaChart data={tradingData} margin={CHART_MARGIN}>
           <defs>
             <linearGradient id={`twrGradSplit${uid}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
@@ -149,53 +358,16 @@ export function PerformanceChartCanvas({
               <stop offset={twrOffset} stopColor="#ef4444" />
             </linearGradient>
           </defs>
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            minTickGap={40}
-          />
-          <YAxis
-            tickFormatter={formatPct}
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            width={70}
-          />
+          <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+          <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} domain={yAxisDomain ?? AUTO_DOMAIN} tickCount={Y_AXIS_TICK_COUNT} />
           <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
           <Tooltip content={renderTwrTooltip} />
-          <Area
-            type="monotone"
-            dataKey="time_weighted_return"
-            stroke={`url(#twrStrokeSplit${uid})`}
-            strokeWidth={2}
-            fill={`url(#twrGradSplit${uid})`}
-            dot={false}
-          />
+          <Area type="monotone" dataKey="time_weighted_return" stroke={`url(#twrStrokeSplit${uid})`} strokeWidth={2} fill={`url(#twrGradSplit${uid})`} dot={false} label={createEndLabel("time_weighted_return", "TWR", "#10b981", formatPct)} />
           {overlayKey && showOverlay && (
-            <Line
-              type="monotone"
-              dataKey={overlayKey}
-              stroke={overlayColor}
-              strokeWidth={1.5}
-              strokeDasharray="6 3"
-              dot={false}
-              connectNulls
-            />
+            <Line type="monotone" dataKey={overlayKey} stroke={overlayColor} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls label={createEndLabel(overlayKey, "Backtest", overlayColor, formatPct)} />
           )}
           {benchmarks.map((benchmark, index) => (
-            <Line
-              key={`bench-twr-${index}`}
-              type="monotone"
-              dataKey={`bench_${index}_return`}
-              stroke={benchmark.color}
-              strokeWidth={1.5}
-              strokeDasharray="6 3"
-              dot={false}
-              connectNulls
-            />
+            <Line key={`bench-twr-${index}`} type="monotone" dataKey={`bench_${index}_return`} stroke={benchmark.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls label={createEndLabel(`bench_${index}_return`, benchmark.label || benchmark.ticker, benchmark.color, formatPct)} />
           ))}
         </AreaChart>
       </ResponsiveContainer>
@@ -205,7 +377,7 @@ export function PerformanceChartCanvas({
   if (mode === "mwr") {
     return (
       <ResponsiveContainer width="100%" height={320}>
-        <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+        <AreaChart data={tradingData} margin={CHART_MARGIN}>
           <defs>
             <linearGradient id={`mwrGradSplit${uid}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset={0} stopColor="#d946ef" stopOpacity={0.3} />
@@ -218,42 +390,13 @@ export function PerformanceChartCanvas({
               <stop offset={mwrOffset} stopColor="#ef4444" />
             </linearGradient>
           </defs>
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            minTickGap={40}
-          />
-          <YAxis
-            tickFormatter={formatPct}
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            width={70}
-          />
+          <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+          <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} domain={yAxisDomain ?? AUTO_DOMAIN} tickCount={Y_AXIS_TICK_COUNT} />
           <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
           <Tooltip content={renderMwrTooltip} />
-          <Area
-            type="monotone"
-            dataKey="money_weighted_return"
-            stroke={`url(#mwrStrokeSplit${uid})`}
-            strokeWidth={2}
-            fill={`url(#mwrGradSplit${uid})`}
-            dot={false}
-          />
+          <Area type="monotone" dataKey="money_weighted_return" stroke={`url(#mwrStrokeSplit${uid})`} strokeWidth={2} fill={`url(#mwrGradSplit${uid})`} dot={false} label={createEndLabel("money_weighted_return", "MWR", "#d946ef", formatPct)} />
           {benchmarks.map((benchmark, index) => (
-            <Line
-              key={`bench-mwr-${index}`}
-              type="monotone"
-              dataKey={`bench_${index}_mwr`}
-              stroke={benchmark.color}
-              strokeWidth={1.5}
-              strokeDasharray="6 3"
-              dot={false}
-              connectNulls
-            />
+            <Line key={`bench-mwr-${index}`} type="monotone" dataKey={`bench_${index}_mwr`} stroke={benchmark.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls label={createEndLabel(`bench_${index}_mwr`, benchmark.label || benchmark.ticker, benchmark.color, formatPct)} />
           ))}
         </AreaChart>
       </ResponsiveContainer>
@@ -262,61 +405,23 @@ export function PerformanceChartCanvas({
 
   return (
     <ResponsiveContainer width="100%" height={320}>
-      <AreaChart data={tradingData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+      <AreaChart data={tradingData} margin={CHART_MARGIN}>
         <defs>
           <linearGradient id={`ddGrad${uid}`} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#ef4444" stopOpacity={0.05} />
             <stop offset="100%" stopColor="#ef4444" stopOpacity={0.3} />
           </linearGradient>
         </defs>
-        <XAxis
-          dataKey="date"
-          tickFormatter={formatDate}
-          tick={{ fill: "#71717a", fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          minTickGap={40}
-        />
-        <YAxis
-          tickFormatter={formatPct}
-          tick={{ fill: "#71717a", fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          width={70}
-        />
+        <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+        <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} domain={yAxisDomain ?? AUTO_DOMAIN} tickCount={Y_AXIS_TICK_COUNT} />
         <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
         <Tooltip content={renderDrawdownTooltip} />
-        <Area
-          type="monotone"
-          dataKey="current_drawdown"
-          stroke="#ef4444"
-          strokeWidth={2}
-          fill={`url(#ddGrad${uid})`}
-          baseValue={0}
-          dot={false}
-        />
+        <Area type="monotone" dataKey="current_drawdown" stroke="#ef4444" strokeWidth={2} fill={`url(#ddGrad${uid})`} baseValue={0} dot={false} label={createEndLabel("current_drawdown", "Drawdown", "#ef4444", formatPct)} />
         {drawdownOverlayKey && showOverlay && (
-          <Line
-            type="monotone"
-            dataKey={drawdownOverlayKey}
-            stroke={overlayColor}
-            strokeWidth={1.5}
-            strokeDasharray="6 3"
-            dot={false}
-            connectNulls
-          />
+          <Line type="monotone" dataKey={drawdownOverlayKey} stroke={overlayColor} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls label={createEndLabel(drawdownOverlayKey, "Backtest", overlayColor, formatPct)} />
         )}
         {benchmarks.map((benchmark, index) => (
-          <Line
-            key={`bench-dd-${index}`}
-            type="monotone"
-            dataKey={`bench_${index}_drawdown`}
-            stroke={benchmark.color}
-            strokeWidth={1.5}
-            strokeDasharray="6 3"
-            dot={false}
-            connectNulls
-          />
+          <Line key={`bench-dd-${index}`} type="monotone" dataKey={`bench_${index}_drawdown`} stroke={benchmark.color} strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls label={createEndLabel(`bench_${index}_drawdown`, benchmark.label || benchmark.ticker, benchmark.color, formatPct)} />
         ))}
       </AreaChart>
     </ResponsiveContainer>

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { showToast } from "@/components/Toast";
 import { SymphonyCatalogItem } from "@/lib/api";
 import { getSymphonyCatalogQueryFn } from "@/lib/queryFns";
 import { queryKeys } from "@/lib/queryKeys";
@@ -77,8 +78,12 @@ export function useBenchmarkCatalog({
   }, [customTickerInput, symphonyCatalog]);
 
   const openCustomInput = useCallback(() => {
+    if (benchmarksCount >= maxBenchmarks) {
+      showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+      return;
+    }
     setShowCustomInput(true);
-  }, []);
+  }, [benchmarksCount, maxBenchmarks]);
 
   const handleInputChange = useCallback((value: string) => {
     setCustomTickerInput(value);
@@ -100,7 +105,11 @@ export function useBenchmarkCatalog({
 
   const submitCustomBenchmark = useCallback(() => {
     const raw = customTickerInput.trim();
-    if (!raw || benchmarksCount >= maxBenchmarks) return;
+    if (!raw) return;
+    if (benchmarksCount >= maxBenchmarks) {
+      showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+      return;
+    }
 
     const symphonyMatch = raw.match(/composer\.trade\/symphony\/([^/\s?]+)/);
     if (symphonyMatch) {
@@ -116,12 +125,16 @@ export function useBenchmarkCatalog({
 
   const selectCatalogItem = useCallback(
     (symphonyId: string) => {
+      if (benchmarksCount >= maxBenchmarks) {
+        showToast(`You can add up to ${maxBenchmarks} benchmarks.`, "error");
+        return;
+      }
       onBenchmarkAdd?.(`symphony:${symphonyId}`);
       setCustomTickerInput("");
       setShowCustomInput(false);
       setCatalogDropdownOpen(false);
     },
-    [onBenchmarkAdd],
+    [benchmarksCount, maxBenchmarks, onBenchmarkAdd],
   );
 
   const refreshCatalog = useCallback(() => {

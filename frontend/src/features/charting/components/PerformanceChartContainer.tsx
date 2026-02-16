@@ -7,6 +7,9 @@ import { PerformanceChartCanvas } from "@/features/charting/PerformanceChartCanv
 import { PerformanceChartControlsRow } from "@/features/charting/PerformanceChartControlsRow";
 import { PerformanceChartLegendRows } from "@/features/charting/PerformanceChartLegendRows";
 import { useBenchmarkCatalog } from "@/features/charting/hooks/useBenchmarkCatalog";
+import {
+  MAX_BENCHMARKS,
+} from "@/features/charting/benchmarkConfig";
 import { adaptPortfolioChart } from "@/features/charting/portfolioChartAdapter";
 import {
   createMwrTooltipRenderer,
@@ -73,7 +76,6 @@ export function PerformanceChart({
   const [showPortfolio, setShowPortfolio] = useState(true);
   const [showDeposits, setShowDeposits] = useState(true);
 
-  const MAX_BENCHMARKS = 3;
   const {
     customTickerInput,
     showCustomInput,
