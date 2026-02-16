@@ -310,7 +310,7 @@ def prepare_first_start_sandbox() -> dict[str, str]:
     export_cfg = config_data.get("symphony_export")
     if not isinstance(export_cfg, dict):
         export_cfg = {}
-    export_cfg["enabled"] = False
+    export_cfg["enabled"] = True
     export_cfg.setdefault(
         "local_path",
         os.path.join(_FIRST_START_SANDBOX_DIR, "symphony_exports"),
