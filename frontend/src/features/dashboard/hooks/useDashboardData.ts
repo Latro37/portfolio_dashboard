@@ -297,10 +297,10 @@ export function useDashboardData({
   ]);
 
   const resetForAccountChange = useCallback(() => {
-    setSummaryOverride(null);
-    setPerformanceOverride([]);
-    setHoldingsOverride(null);
-    setSymphoniesOverride([]);
+    setSummaryOverride(undefined);
+    setPerformanceOverride(undefined);
+    setHoldingsOverride(undefined);
+    setSymphoniesOverride(undefined);
     setHoldingsLastUpdatedOverride(null);
     setManualError(null);
     setManualLoading(true);
