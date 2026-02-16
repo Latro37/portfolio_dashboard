@@ -10,6 +10,7 @@ interface ToastMessage {
   text: string;
   type: ToastType;
   persistent: boolean;
+  onManualDismiss?: () => void | Promise<void>;
 }
 
 let _nextId = 0;
@@ -22,6 +23,7 @@ export type ToastUpsert = {
   type?: ToastType;
   persistent?: boolean;
   autoDismissMs?: number;
+  onManualDismiss?: () => void | Promise<void>;
 };
 
 export function showToast(text: string, type: ToastType = "success") {
@@ -43,13 +45,28 @@ export function ToastContainer() {
   useEffect(() => {
     const timeouts = timeoutsRef.current;
 
-    const dismiss = (id: string) => {
+    const dismiss = (
+      id: string,
+      reason: "programmatic" | "timeout" | "user" = "programmatic",
+    ) => {
       const existing = timeouts.get(id);
       if (existing) {
         clearTimeout(existing);
         timeouts.delete(id);
       }
-      setToasts((prev) => prev.filter((t) => t.id !== id));
+      let onManualDismiss: (() => void | Promise<void>) | undefined;
+      setToasts((prev) => {
+        if (reason === "user") {
+          const existingToast = prev.find((t) => t.id === id);
+          onManualDismiss = existingToast?.onManualDismiss;
+        }
+        return prev.filter((t) => t.id !== id);
+      });
+      if (onManualDismiss) {
+        void Promise.resolve(onManualDismiss()).catch(() => {
+          // noop
+        });
+      }
     };
 
     const upsert = (msg: ToastUpsert) => {
@@ -66,6 +83,7 @@ export function ToastContainer() {
           text: msg.text,
           type,
           persistent,
+          onManualDismiss: msg.onManualDismiss,
         };
 
         if (existingIndex === -1) {
@@ -84,7 +102,7 @@ export function ToastContainer() {
       }
 
       if (typeof autoDismissMs === "number" && autoDismissMs > 0) {
-        const timeoutId = setTimeout(() => dismiss(id), autoDismissMs);
+        const timeoutId = setTimeout(() => dismiss(id, "timeout"), autoDismissMs);
         timeouts.set(id, timeoutId);
       }
 
@@ -126,7 +144,7 @@ export function ToastContainer() {
           )}
           {t.text}
           <button
-            onClick={() => dismissToast(t.id)}
+            onClick={() => dismiss(t.id, "user")}
             className="ml-2 cursor-pointer rounded p-0.5 hover:bg-white/10"
           >
             <X className="h-3 w-3" />

@@ -45,7 +45,7 @@ class SyncTriggerResponse(BaseModel):
 
 
 class SymphonyExportJobStatus(BaseModel):
-    status: str  # idle / running / complete / error
+    status: str  # idle / running / cancelling / complete / cancelled / error
     job_id: Optional[str] = None
     exported: int = 0
     processed: int = 0
@@ -55,6 +55,7 @@ class SymphonyExportJobStatus(BaseModel):
 
 
 class SymphonyExportConfig(BaseModel):
+    enabled: bool = True
     local_path: str = ""
 
 
@@ -66,6 +67,8 @@ class AppConfigResponse(BaseModel):
     symphony_export: Optional[SymphonyExportConfig] = None
     screenshot: Optional[Dict[str, Any]] = None
     test_mode: bool
+    first_start_test_mode: bool = False
+    first_start_run_id: Optional[str] = None
     composer_config_ok: bool
     composer_config_error: Optional[str] = None
 
@@ -73,10 +76,12 @@ class AppConfigResponse(BaseModel):
 class SaveSymphonyExportResponse(BaseModel):
     ok: bool
     local_path: str
+    enabled: bool
 
 
 class SaveSymphonyExportRequest(BaseModel):
     local_path: str
+    enabled: bool = True
 
 
 class OkResponse(BaseModel):

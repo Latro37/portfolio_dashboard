@@ -35,7 +35,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Symphony name search** — Type a symphony name to find and add it as a benchmark overlay. Includes invested symphonies plus your Composer watchlist and drafts.
 - **Symphony analytics** — Per-symphony live performance charts, backtest results, allocation history, and current holdings.
 - **Backtest caching** — Symphony backtests are cached locally and automatically re-fetched when you edit the symphony in Composer.
-- **Symphony structure export** — Exports invested symphonies plus drafts to local JSON in a background job (does not block sync) and shows a toast with extraction progress.
+- **Symphony structure export** — Exports invested symphonies plus drafts to local JSON in a background job (does not block sync), supports enable/disable in Settings, and can be cancelled from the progress toast.
 - **Daily snapshot** — Captures a clean portfolio summary image after market close (or manually via the camera button). Configurable chart type, metrics, date range, and benchmark overlays.
 - **Trade preview** — See what trades are pending before the next rebalance.
 - **Live intraday data** — During market hours, your portfolio value updates in real time.
@@ -80,7 +80,7 @@ Get up and running in under 5 minutes.
    ```
    The browser opens automatically.
 
-4. **Sync your data.** Click the **Update** button in the top-right corner. The first sync loads the dashboard as soon as core data is ready, then continues backfilling transactions/cash flows in the background. If Symphony Export is enabled, a lower-right toast shows JSON extraction progress.
+4. **Sync your data.** Click the **Update** button in the top-right corner. The first sync loads the dashboard as soon as core data is ready, then continues backfilling transactions/cash flows in the background. If Symphony Export is enabled, a lower-right toast shows `Saving Symphonies locally: x/y`.
 
 That's it! You're ready to go with the basic features. If you want to take advantage of all the features, see the [Detailed Setup](#detailed-setup) section.
 
@@ -100,7 +100,7 @@ When you click **Update** for the first time, the app syncs your complete Compos
 
 The dashboard renders as soon as the core portfolio + symphony history is ready. Transactions and cash flows may continue syncing in the background and will populate the Transactions / Non-Trade Activity tabs when ready.
 
-If you have Symphony Export enabled, symphony JSON extraction runs in the background and shows a lower-right toast with an extracted counter. The toast auto-dismisses when complete.
+If you have Symphony Export enabled, symphony JSON extraction runs in the background and shows a lower-right toast with `Saving Symphonies locally: x/y`. Closing the toast requests cancellation of the current export job; already-exported symphonies remain tracked and unchanged symphonies are skipped on the next sync.
 
 ### After the First Sync
 
@@ -584,7 +584,7 @@ Click the **gear icon** (⚙) in the dashboard header to open Settings.
 
 ### Symphony Export
 
-Enter a local folder path to automatically save your symphony definitions as JSON files (invested symphonies plus all your drafts). Exports are saved as `<SymphonyName>/<SymphonyName>_<SymphonyId>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
+Use **Enable local symphony export** to turn local JSON export on or off. When enabled, set a local folder path to automatically save your symphony definitions (invested symphonies plus all drafts). Exports are saved as `<SymphonyName>/<SymphonyName>_<SymphonyId>_<date>.json` and update whenever you edit a symphony in Composer or run a sync.
 
 **Default export folder:** `./symphony_exports` (project root).
 
@@ -592,7 +592,7 @@ The configured folder can be any local path. Relative paths resolve under `setti
 
 This is useful as a backup of your symphony logic in case Composer should ever go dark, and for tracking changes over time.
 
-Export runs in the background and does not block the dashboard from loading. While an export is running, the dashboard shows a lower-right toast with a live extracted counter and auto-dismisses when complete.
+Export runs in the background and does not block the dashboard from loading. While an export is running, the dashboard shows `Saving Symphonies locally: x/y` in a lower-right toast. Clicking the toast `x` cancels the active export job; export resumes safely on a later sync and skips unchanged symphonies.
 
 ### Daily Snapshot
 
@@ -647,6 +647,17 @@ Portfolio-level data (values, transactions, cash flows, holdings) is fully backf
 
 ### Can I add deposits that the API doesn't capture?
 Yes! Roth IRA contributions are not captured by the API, so you can add them manually. Go to the **Non-Trade Activity** tab and use the manual entry form to add deposits or withdrawals with a date and amount. The next sync will recalculate all metrics with the corrected deposit totals.
+
+On first dashboard load, the app also shows a one-time warning box about this limitation. Dismiss it once and it stays hidden in normal mode.
+
+### How do I simulate a clean first run repeatedly without touching my real data?
+Launch with:
+
+```bash
+python start.py --first-start-test
+```
+
+This mode wipes and recreates an isolated sandbox before startup, uses a separate database, and keeps local write output isolated from normal runs.
 
 ### How do I add another Composer account?
 Add another entry to the `composer_accounts` array in `config.json` and restart the app. See [Multiple accounts](#configuring-configjson).

@@ -111,13 +111,20 @@ def test_symphony_export_status_contract(client):
         "message",
         "error",
     }
-    assert payload["status"] in {"idle", "running", "complete", "error"}
+    assert payload["status"] in {"idle", "running", "cancelling", "complete", "cancelled", "error"}
     assert isinstance(payload["exported"], int)
     assert isinstance(payload["processed"], int)
     assert payload["total"] is None or isinstance(payload["total"], int)
     assert isinstance(payload["message"], str)
     assert payload["job_id"] is None or isinstance(payload["job_id"], str)
     assert payload["error"] is None or isinstance(payload["error"], str)
+
+
+def test_symphony_export_cancel_contract(client, auth_headers):
+    res = client.post("/api/symphony-export/cancel", headers=auth_headers)
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload == {"ok": False}
 
 
 def test_sync_trigger_skips_test_accounts_contract(client, auth_headers):
@@ -141,13 +148,21 @@ def test_config_contract(client):
         "symphony_export",
         "screenshot",
         "test_mode",
+        "first_start_test_mode",
+        "first_start_run_id",
         "composer_config_ok",
         "composer_config_error",
     }
     assert payload["test_mode"] is True
+    assert payload["first_start_test_mode"] is False
+    assert payload["first_start_run_id"] is None
     assert payload["local_auth_token"] == "contract-test-token"
     assert payload["composer_config_ok"] is True
     assert payload["composer_config_error"] is None
+    if payload["symphony_export"] is not None:
+        assert set(payload["symphony_export"].keys()) == {"enabled", "local_path"}
+        assert isinstance(payload["symphony_export"]["enabled"], bool)
+        assert isinstance(payload["symphony_export"]["local_path"], str)
 
 
 def test_config_requires_origin_header(client):
@@ -157,21 +172,24 @@ def test_config_requires_origin_header(client):
 
 
 def test_config_symphony_export_contract(client, monkeypatch, auth_headers):
-    captured = {"path": ""}
+    captured = {"path": "", "enabled": None}
 
-    def _save(path: str):
-        captured["path"] = path
+    def _save(*, local_path: str, enabled: bool):
+        captured["path"] = local_path
+        captured["enabled"] = enabled
 
-    monkeypatch.setattr(portfolio_admin, "save_symphony_export_path", _save)
+    monkeypatch.setattr(portfolio_admin, "save_symphony_export_config", _save)
     res = client.post(
         "/api/config/symphony-export",
-        json={"local_path": "exports"},
+        json={"local_path": "exports", "enabled": False},
         headers=auth_headers,
     )
     assert res.status_code == 200
     payload = res.json()
     assert payload["ok"] is True
+    assert payload["enabled"] is False
     assert payload["local_path"] == captured["path"]
+    assert captured["enabled"] is False
     assert payload["local_path"].endswith(
         os.path.join("data", "local_storage", "exports")
     )

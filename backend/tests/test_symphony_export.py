@@ -184,3 +184,30 @@ def test_export_all_symphonies_with_options_can_skip_drafts(
         .first()
         is None
     )
+
+
+def test_export_all_symphonies_skips_when_disabled(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        symphony_export,
+        "load_symphony_export_config",
+        lambda: {"enabled": False, "local_path": "exports"},
+    )
+
+    def _unexpected_save(*_args, **_kwargs):
+        raise AssertionError("save should not run when export is disabled")
+
+    monkeypatch.setattr(symphony_export, "_save_local", _unexpected_save)
+
+    client = _StubClient()
+    result = symphony_export.export_all_symphonies_with_options(
+        db_session,
+        client,
+        account_id="acct-001",
+    )
+    assert result is not None
+    assert result["total"] == 0
+    assert result["processed"] == 0
+    assert result["exported"] == 0

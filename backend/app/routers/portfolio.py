@@ -36,6 +36,7 @@ from app.services.portfolio_live_overlay import get_portfolio_live_summary_data
 from app.services.portfolio_read import get_portfolio_performance_data, get_portfolio_summary_data
 from app.services.portfolio_admin import (
     add_manual_cash_flow_data,
+    cancel_symphony_export_job_data,
     get_app_config_data,
     get_sync_status_data,
     get_symphony_export_job_status_data,
@@ -265,6 +266,15 @@ def get_symphony_export_status():
     return get_symphony_export_job_status_data()
 
 @router.post(
+    "/symphony-export/cancel",
+    response_model=OkResponse,
+    dependencies=[Depends(require_local_auth)],
+)
+def cancel_symphony_export():
+    """Request cancellation of an active symphony export background job."""
+    return cancel_symphony_export_job_data()
+
+@router.post(
     "/sync",
     response_model=SyncTriggerResponse,
     dependencies=[Depends(require_local_auth)],
@@ -297,8 +307,8 @@ def get_app_config():
     dependencies=[Depends(require_local_auth)],
 )
 def set_symphony_export_config(body: SaveSymphonyExportRequest):
-    """Save symphony export local_path from the frontend settings modal."""
-    return save_symphony_export_config_data(body.local_path)
+    """Save symphony export settings from the frontend settings modal."""
+    return save_symphony_export_config_data(body.local_path, body.enabled)
 
 @router.post(
     "/config/screenshot",

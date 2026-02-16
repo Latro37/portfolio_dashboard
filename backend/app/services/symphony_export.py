@@ -102,6 +102,7 @@ def export_all_symphonies_with_options(
     *,
     include_drafts: bool = True,
     progress_cb: Optional[Callable[[dict], None]] = None,
+    cancelled_cb: Optional[Callable[[], bool]] = None,
 ):
     """Export latest version of all symphonies if they have changed since last export.
 
@@ -113,6 +114,9 @@ def export_all_symphonies_with_options(
     config = load_symphony_export_config()
     if not config:
         return
+    if not bool(config.get("enabled", True)):
+        logger.info("Symphony export disabled by config; skipping account %s", account_id)
+        return {"exported": 0, "processed": 0, "total": 0, "cancelled": False}
 
     try:
         local_path = resolve_local_write_path(config.get("local_path", ""))
@@ -159,6 +163,14 @@ def export_all_symphonies_with_options(
     processed = 0
 
     total_targets = len(invested_targets) + (len(draft_targets) if export_drafts else 0)
+    def _is_cancelled() -> bool:
+        if not cancelled_cb:
+            return False
+        try:
+            return bool(cancelled_cb())
+        except Exception:
+            return False
+
     if progress_cb:
         try:
             progress_cb(
@@ -175,6 +187,8 @@ def export_all_symphonies_with_options(
 
     def _export_one(sym_id: str, sym_name: str, *, state_account_id: str) -> bool:
         nonlocal exported, processed
+        if _is_cancelled():
+            return False
         sym_name = sym_name or "Unknown"
 
         # Use versions endpoint for lightweight change detection
@@ -230,6 +244,8 @@ def export_all_symphonies_with_options(
                 return False
 
         # Fetch full structure via /score
+        if _is_cancelled():
+            return False
         score = client.get_symphony_score(sym_id)
         if not score:
             processed += 1
@@ -306,10 +322,14 @@ def export_all_symphonies_with_options(
         return True
 
     for sym_id, sym_name in invested_targets.items():
+        if _is_cancelled():
+            break
         _export_one(sym_id, sym_name, state_account_id=account_id)
 
     if export_drafts:
         for sym_id, sym_name in draft_targets.items():
+            if _is_cancelled():
+                break
             _export_one(sym_id, sym_name, state_account_id=drafts_state_account_id)
 
     logger.info(
@@ -322,5 +342,6 @@ def export_all_symphonies_with_options(
         "exported": exported,
         "processed": processed,
         "total": total_targets,
+        "cancelled": _is_cancelled(),
     }
 

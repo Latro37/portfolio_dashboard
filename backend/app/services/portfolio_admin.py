@@ -14,14 +14,16 @@ from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.config import (
+    get_first_start_run_id,
+    is_first_start_test_mode,
     is_test_mode,
     load_finnhub_key,
     load_polygon_key,
     load_screenshot_config,
     load_symphony_export_config,
+    save_symphony_export_config,
     validate_composer_config,
     save_screenshot_config,
-    save_symphony_export_path,
 )
 from app.models import Account, CashFlow
 from app.schemas import ManualCashFlowRequest
@@ -33,7 +35,11 @@ from app.services.sync import (
     get_sync_state,
     incremental_update,
 )
-from app.services.symphony_export_jobs import get_symphony_export_job_status, start_symphony_export_job
+from app.services.symphony_export_jobs import (
+    cancel_symphony_export_job,
+    get_symphony_export_job_status,
+    start_symphony_export_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,22 @@ _sync_state_lock = Lock()
 _syncing = False
 _sync_message = ""
 _sync_error: Optional[str] = None
+
+
+def _start_symphony_export_job_if_enabled(account_ids: list[str]) -> None:
+    if not account_ids:
+        return
+
+    export_cfg = load_symphony_export_config() or {}
+    if not bool(export_cfg.get("enabled", True)):
+        logger.info("Symphony export disabled by config; skipping background export job")
+        return
+
+    try:
+        start_symphony_export_job(account_ids)
+    except Exception as exc:
+        logger.warning("Failed to start symphony export job: %s", exc)
+
 
 def is_syncing() -> bool:
     return _syncing
@@ -108,6 +130,10 @@ def get_symphony_export_job_status_data() -> dict:
     return get_symphony_export_job_status()
 
 
+def cancel_symphony_export_job_data() -> dict:
+    return {"ok": cancel_symphony_export_job()}
+
+
 def trigger_sync_data(
     db: Session,
     *,
@@ -163,17 +189,13 @@ def trigger_sync_data(
             if len(sync_ids) > 1:
                 time.sleep(1)
 
-        # Always run symphony export in the background (invested + drafts).
-        try:
-            start_symphony_export_job(sync_ids)
-        except Exception as exc:
-            logger.warning("Failed to start symphony export job: %s", exc)
-
         if deferred_activity_ids:
             handed_off = True
-            _start_background_first_sync(deferred_activity_ids)
+            # Prioritize first-run transactions + non-trade activity before draft export.
+            _start_background_first_sync(deferred_activity_ids, export_account_ids=sync_ids)
             return {"status": "complete", "synced_accounts": len(sync_ids)}
 
+        _start_symphony_export_job_if_enabled(sync_ids)
         return {"status": "complete", "synced_accounts": len(sync_ids)}
     except HTTPException:
         raise
@@ -189,19 +211,19 @@ def trigger_sync_data(
                 _sync_message = ""
 
 
-def _start_background_first_sync(account_ids: list[str]) -> None:
+def _start_background_first_sync(account_ids: list[str], *, export_account_ids: list[str]) -> None:
     """Spawn background continuation for the first sync (transactions + cash flows)."""
 
     thread = Thread(
         target=_run_background_first_sync,
         name="first-sync-activity-backfill",
         daemon=True,
-        args=(list(account_ids),),
+        args=(list(account_ids), list(export_account_ids)),
     )
     thread.start()
 
 
-def _run_background_first_sync(account_ids: list[str]) -> None:
+def _run_background_first_sync(account_ids: list[str], export_account_ids: list[str]) -> None:
     global _syncing, _sync_message, _sync_error
 
     # Import here to avoid router import cycles.
@@ -216,6 +238,9 @@ def _run_background_first_sync(account_ids: list[str]) -> None:
             client = get_client_for_account(db, aid)
             finish_initial_backfill_activity(db, client, aid)
             time.sleep(1)
+
+        # Once first-run activity is complete, symphony export can run in the background.
+        _start_symphony_export_job_if_enabled(export_account_ids)
 
         with _sync_state_lock:
             _sync_message = ""
@@ -236,9 +261,13 @@ def get_app_config_data() -> dict:
     export_cfg = load_symphony_export_config()
     export_status = None
     if export_cfg:
-        export_status = {"local_path": export_cfg.get("local_path", "")}
+        export_status = {
+            "enabled": bool(export_cfg.get("enabled", True)),
+            "local_path": export_cfg.get("local_path", ""),
+        }
 
     screenshot_cfg = load_screenshot_config()
+    first_start_mode = is_first_start_test_mode()
     return {
         "finnhub_api_key": None,
         "finnhub_configured": load_finnhub_key() is not None,
@@ -247,18 +276,22 @@ def get_app_config_data() -> dict:
         "symphony_export": export_status,
         "screenshot": screenshot_cfg,
         "test_mode": is_test_mode(),
+        "first_start_test_mode": first_start_mode,
+        "first_start_run_id": get_first_start_run_id() if first_start_mode else None,
         "composer_config_ok": composer_ok,
         "composer_config_error": composer_err,
     }
 
 
-def save_symphony_export_config_data(local_path: str) -> dict:
+def save_symphony_export_config_data(local_path: str, enabled: bool) -> dict:
+    current = load_symphony_export_config() or {}
+    candidate = (local_path or "").strip() or str(current.get("local_path") or "").strip()
     try:
-        normalized = resolve_local_write_path(local_path)
+        normalized = resolve_local_write_path(candidate)
     except LocalPathError as exc:
         raise HTTPException(400, str(exc))
-    save_symphony_export_path(normalized)
-    return {"ok": True, "local_path": normalized}
+    save_symphony_export_config(local_path=normalized, enabled=bool(enabled))
+    return {"ok": True, "local_path": normalized, "enabled": bool(enabled)}
 
 
 def save_screenshot_config_data(config: dict) -> dict:

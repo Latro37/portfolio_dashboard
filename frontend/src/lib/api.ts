@@ -144,7 +144,7 @@ export interface SyncStatus {
 }
 
 export interface SymphonyExportJobStatus {
-  status: string; // idle / running / complete / error
+  status: string; // idle / running / cancelling / complete / cancelled / error
   job_id: string | null;
   exported: number;
   processed: number;
@@ -337,6 +337,7 @@ export interface SymphonyCatalogItem {
 }
 
 export interface SymphonyExportStatus {
+  enabled: boolean;
   local_path: string;
 }
 
@@ -360,17 +361,25 @@ export interface AppConfig {
   symphony_export: SymphonyExportStatus | null;
   screenshot: ScreenshotConfig | null;
   test_mode: boolean;
+  first_start_test_mode: boolean;
+  first_start_run_id: string | null;
   composer_config_ok: boolean;
   composer_config_error: string | null;
 }
 
 export const api = {
   getConfig: () => fetchJSON<AppConfig>("/config"),
+  saveSymphonyExportConfig: (localPath: string, enabled: boolean) =>
+    authFetch("/config/symphony-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ local_path: localPath, enabled }),
+    }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   saveSymphonyExportPath: (localPath: string) =>
     authFetch("/config/symphony-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ local_path: localPath }),
+      body: JSON.stringify({ local_path: localPath, enabled: true }),
     }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   getAccounts: () => fetchJSON<AccountInfo[]>("/accounts"),
   getSummary: (accountId?: string, period?: string, startDate?: string, endDate?: string) => {
@@ -410,6 +419,9 @@ export const api = {
     fetchJSON<SyncStatus>(`/sync/status${_qs(accountId)}`),
   getSymphonyExportJobStatus: () =>
     fetchJSON<SymphonyExportJobStatus>("/symphony-export/status"),
+  cancelSymphonyExportJob: () =>
+    authFetch("/symphony-export/cancel", { method: "POST" })
+      .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   triggerSync: (accountId?: string) =>
     authFetch(`/sync${_qs(accountId)}`, { method: "POST" })
       .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),

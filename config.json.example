@@ -8,6 +8,7 @@
     "local_write_base_dir": "data/local_storage"
   },
   "symphony_export": {
+    "enabled": true,
     "local_path": ""
   },
   "daily_snapshot": {
