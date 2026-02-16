@@ -45,7 +45,7 @@ class _StubClient:
         return {"id": symphony_id, "nodes": [], "meta": {"name": symphony_id}}
 
 
-def test_export_all_symphonies_skips_drafts_even_after_initial_sync(
+def test_export_all_symphonies_exports_drafts_by_default(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -62,11 +62,7 @@ def test_export_all_symphonies_skips_drafts_even_after_initial_sync(
     monkeypatch.setattr(symphony_export.time, "sleep", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(symphony_export, "load_symphony_export_config", lambda: {"local_path": str(export_dir)})
 
-    class _NoDraftsClient(_StubClient):
-        def get_drafts(self):
-            raise AssertionError("draft fetch should be disabled")
-
-    client = _NoDraftsClient()
+    client = _StubClient()
     account_id = "acct-001"
     db_session.add(
         Account(
@@ -79,15 +75,19 @@ def test_export_all_symphonies_skips_drafts_even_after_initial_sync(
     )
     db_session.commit()
 
-    # Draft export is currently disabled; ensure we skip drafts even after initial sync.
+    # Draft export should work regardless of initial sync markers.
     db_session.add(SyncState(account_id=account_id, key="initial_backfill_done", value="true"))
     db_session.commit()
 
     symphony_export.export_all_symphonies(db_session, client, account_id=account_id)
 
-    # Drafts are disabled: no draft folder/files and no draft sync state.
+    invested_file = export_dir / "Invested" / "Invested_inv-1_2025-01-02.json"
+    assert invested_file.exists()
+
     draft_folder = export_dir / "My Draft"
-    assert not draft_folder.exists()
+    assert draft_folder.exists()
+    assert (draft_folder / "My Draft_draft-1_2025-01-02.json").exists()
+    assert (draft_folder / "My Draft_draft-2_2025-01-02.json").exists()
 
     # Timestamp-based state is used when versions provide timestamps.
     inv_state = (
@@ -99,12 +99,23 @@ def test_export_all_symphonies_skips_drafts_even_after_initial_sync(
     assert inv_state.value == "2025-01-01T00:00:00Z"
 
     draft_state_account_id = "__DRAFTS__:Primary"
-    assert (
+    draft_hash_1 = (
         db_session.query(SyncState)
-        .filter_by(account_id=draft_state_account_id)
+        .filter_by(account_id=draft_state_account_id, key="symphony_export_hash:draft-1")
         .first()
-        is None
     )
+    assert draft_hash_1 is not None
+    assert isinstance(draft_hash_1.value, str)
+    assert len(draft_hash_1.value) == 64
+
+    draft_hash_2 = (
+        db_session.query(SyncState)
+        .filter_by(account_id=draft_state_account_id, key="symphony_export_hash:draft-2")
+        .first()
+    )
+    assert draft_hash_2 is not None
+    assert isinstance(draft_hash_2.value, str)
+    assert len(draft_hash_2.value) == 64
 
     # Second run should be a no-op (no files written) based on state.
     def _unexpected_save(*_args, **_kwargs):
@@ -114,7 +125,7 @@ def test_export_all_symphonies_skips_drafts_even_after_initial_sync(
     symphony_export.export_all_symphonies(db_session, client, account_id=account_id)
 
 
-def test_export_all_symphonies_skips_drafts_on_first_sync(
+def test_export_all_symphonies_with_options_can_skip_drafts(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -130,11 +141,11 @@ def test_export_all_symphonies_skips_drafts_on_first_sync(
     monkeypatch.setattr(symphony_export.time, "sleep", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(symphony_export, "load_symphony_export_config", lambda: {"local_path": str(export_dir)})
 
-    class _FirstRunClient(_StubClient):
+    class _NoDraftsClient(_StubClient):
         def get_drafts(self):
-            raise AssertionError("draft fetch should be disabled")
+            raise AssertionError("draft fetch should be skipped when include_drafts=False")
 
-    client = _FirstRunClient()
+    client = _NoDraftsClient()
     account_id = "acct-001"
     db_session.add(
         Account(
@@ -147,8 +158,12 @@ def test_export_all_symphonies_skips_drafts_on_first_sync(
     )
     db_session.commit()
 
-    # No initial_backfill_done marker exists yet (first sync).
-    symphony_export.export_all_symphonies(db_session, client, account_id=account_id)
+    symphony_export.export_all_symphonies_with_options(
+        db_session,
+        client,
+        account_id=account_id,
+        include_drafts=False,
+    )
 
     # Invested export still runs.
     inv_state = (
@@ -158,7 +173,7 @@ def test_export_all_symphonies_skips_drafts_on_first_sync(
     )
     assert inv_state is not None
 
-    # Draft export is disabled: no draft folder/files and no draft sync state.
+    # Draft export is skipped: no draft folder/files and no draft sync state.
     draft_folder = export_dir / "My Draft"
     assert not draft_folder.exists()
 
