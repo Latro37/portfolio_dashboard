@@ -74,6 +74,14 @@ export function useSymphonyExportProgressToast() {
         autoDismissMs: 5000,
         text: `Symphony extraction failed${error}`,
       });
+    } else if ((prev === "running" || prev === "cancelling") && status === "cancelled" && !isSuppressedJob) {
+      upsertToast({
+        id: TOAST_ID,
+        type: "info",
+        persistent: false,
+        autoDismissMs: 1500,
+        text: "Symphony extraction cancelled.",
+      });
     }
 
     prevStatusRef.current = status;

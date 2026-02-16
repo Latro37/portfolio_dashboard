@@ -321,10 +321,8 @@ def prepare_first_start_sandbox() -> dict[str, str]:
         legacy_snapshot_cfg = config_data.get("screenshot")
         snapshot_cfg = dict(legacy_snapshot_cfg) if isinstance(legacy_snapshot_cfg, dict) else {}
     snapshot_cfg["enabled"] = False
-    snapshot_cfg.setdefault(
-        "local_path",
-        os.path.join(_FIRST_START_SANDBOX_DIR, "daily_snapshots"),
-    )
+    # Keep first-start mode isolated from personal snapshot destinations.
+    snapshot_cfg["local_path"] = os.path.join(_FIRST_START_SANDBOX_DIR, "daily_snapshots")
     config_data["daily_snapshot"] = snapshot_cfg
     config_data.pop("screenshot", None)
 
