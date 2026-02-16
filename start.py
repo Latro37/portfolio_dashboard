@@ -311,10 +311,9 @@ def prepare_first_start_sandbox() -> dict[str, str]:
     if not isinstance(export_cfg, dict):
         export_cfg = {}
     export_cfg["enabled"] = True
-    export_cfg.setdefault(
-        "local_path",
-        os.path.join(_FIRST_START_SANDBOX_DIR, "symphony_exports"),
-    )
+    # Keep first-start mode isolated from personal paths while matching
+    # "new user" behavior (export on by default).
+    export_cfg["local_path"] = os.path.join(_FIRST_START_SANDBOX_DIR, "symphony_exports")
     config_data["symphony_export"] = export_cfg
 
     snapshot_cfg = config_data.get("daily_snapshot")

@@ -55,3 +55,40 @@ def test_config_path_override(monkeypatch: pytest.MonkeyPatch, tmp_path):
     accounts = config.load_accounts()
     assert len(accounts) == 1
     assert accounts[0].name == "Primary"
+
+
+def test_symphony_export_defaults_enabled_when_block_missing(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(config, "_config_json_cache", None)
+    monkeypatch.setattr(
+        config,
+        "_load_config_json",
+        lambda: {
+            "composer_accounts": [
+                {"name": "Primary", "api_key_id": "k", "api_secret": "s"}
+            ]
+        },
+    )
+
+    export_cfg = config.load_symphony_export_config()
+    assert export_cfg is not None
+    assert export_cfg["enabled"] is True
+    assert isinstance(export_cfg["local_path"], str)
+    assert export_cfg["local_path"]
+
+
+def test_symphony_export_defaults_enabled_when_flag_omitted(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(config, "_config_json_cache", None)
+    monkeypatch.setattr(
+        config,
+        "_load_config_json",
+        lambda: {
+            "composer_accounts": [
+                {"name": "Primary", "api_key_id": "k", "api_secret": "s"}
+            ],
+            "symphony_export": {"local_path": "exports"},
+        },
+    )
+
+    export_cfg = config.load_symphony_export_config()
+    assert export_cfg is not None
+    assert export_cfg["enabled"] is True
