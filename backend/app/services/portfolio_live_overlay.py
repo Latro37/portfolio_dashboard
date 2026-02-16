@@ -88,25 +88,38 @@ def get_portfolio_live_summary_data(
     series = [dict(row) for row in daily_series]
     cf = list(cf_dicts)
 
-    today_str = str(today)
-    if series and series[-1]["date"] == today_str:
-        series[-1]["portfolio_value"] = live_pv
-        series[-1]["net_deposits"] = live_nd
-    else:
-        last_nd = series[-1]["net_deposits"] if series else 0.0
-        deposit_delta = live_nd - last_nd
-        if abs(deposit_delta) > 0.50:
-            cf.append({"date": today, "amount": deposit_delta})
-        series.append({"date": today_str, "portfolio_value": live_pv, "net_deposits": live_nd})
+    # Respect explicit historical end-date ranges: do not append/replace today's
+    # row if the requested window ends before today.
+    apply_live_overlay = date_end is None or date_end >= today
+    if apply_live_overlay:
+        today_str = str(today)
+        if series and series[-1]["date"] == today_str:
+            series[-1]["portfolio_value"] = live_pv
+            series[-1]["net_deposits"] = live_nd
+        else:
+            last_nd = series[-1]["net_deposits"] if series else 0.0
+            deposit_delta = live_nd - last_nd
+            if abs(deposit_delta) > 0.50:
+                cf.append({"date": today, "amount": deposit_delta})
+            series.append(
+                {"date": today_str, "portfolio_value": live_pv, "net_deposits": live_nd}
+            )
 
     settings = get_settings()
     metric = compute_latest_metrics(series, cf, risk_free_rate=settings.risk_free_rate)
     if not metric:
         raise HTTPException(404, "Could not compute live metrics.")
 
+    summary_pv = (
+        live_pv if apply_live_overlay else (series[-1]["portfolio_value"] if series else live_pv)
+    )
+    summary_nd = (
+        live_nd if apply_live_overlay else (series[-1]["net_deposits"] if series else live_nd)
+    )
+
     return {
-        "portfolio_value": round(live_pv, 2),
-        "net_deposits": round(live_nd, 2),
+        "portfolio_value": round(summary_pv, 2),
+        "net_deposits": round(summary_nd, 2),
         "total_return_dollars": round(metric.get("total_return_dollars", 0), 2),
         "daily_return_pct": round(metric.get("daily_return_pct", 0), 4),
         "cumulative_return_pct": round(metric.get("cumulative_return_pct", 0), 4),

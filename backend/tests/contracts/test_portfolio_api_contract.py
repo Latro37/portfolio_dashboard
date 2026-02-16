@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 
 import app.services.portfolio_admin as portfolio_admin
+import app.services.portfolio_live_overlay as portfolio_live_overlay
 
 
 def test_accounts_contract(client):
@@ -62,6 +64,53 @@ def test_summary_contract(client):
         "last_updated",
     }
     assert payload["portfolio_value"] == 102500.0
+    assert payload["net_deposits"] == 100000.0
+
+
+def test_summary_live_ignores_live_overlay_for_historical_end_date(client, monkeypatch):
+    class _FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2025, 1, 6)
+
+    portfolio_live_overlay.invalidate_portfolio_live_cache()
+    monkeypatch.setattr(portfolio_live_overlay, "date", _FakeDate)
+
+    base_res = client.get(
+        "/api/summary?account_id=test-account-001&start_date=2025-01-02&end_date=2025-01-04"
+    )
+    assert base_res.status_code == 200
+    base_payload = base_res.json()
+
+    live_res = client.get(
+        "/api/summary/live?account_id=test-account-001&live_pv=999999&live_nd=999999"
+        "&start_date=2025-01-02&end_date=2025-01-04"
+    )
+    assert live_res.status_code == 200
+    live_payload = live_res.json()
+    excluded = {"best_day_date", "worst_day_date", "max_drawdown_date"}
+    for key, value in base_payload.items():
+        if key in excluded:
+            continue
+        assert live_payload[key] == value
+
+
+def test_summary_live_applies_live_overlay_when_range_includes_today(client, monkeypatch):
+    class _FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2025, 1, 4)
+
+    portfolio_live_overlay.invalidate_portfolio_live_cache()
+    monkeypatch.setattr(portfolio_live_overlay, "date", _FakeDate)
+
+    res = client.get(
+        "/api/summary/live?account_id=test-account-001&live_pv=103000&live_nd=100000"
+        "&start_date=2025-01-02&end_date=2025-01-04"
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["portfolio_value"] == 103000.0
     assert payload["net_deposits"] == 100000.0
 
 

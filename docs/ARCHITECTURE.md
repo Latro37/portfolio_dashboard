@@ -244,6 +244,8 @@ Notes:
 - `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning. It also includes `symphony_export.enabled` and first-start simulation flags (`first_start_test_mode`, `first_start_run_id`).
 - `GET /api/cash-flows` returns row identifiers and manual-source metadata (`id`, `is_manual`) so the dashboard can delete user-added manual entries safely.
 - On first sync, `POST /api/sync` blocks until non-trade activity is applied and portfolio history/metrics are recomputed, so first-view charts and metrics are stable.
+- `GET /api/summary/live` applies the live row overlay only when the requested range includes today. If a custom `end_date` is before today, live overlay is skipped and metrics stay locked to the requested historical window.
+- Frontend live-refresh scheduling is gated by NYSE trading-day rules (including market holidays), not weekday clock checks alone.
 - Symphony structure export runs in a background job and is observable via `GET /api/symphony-export/status` (`idle|running|cancelling|complete|cancelled|error`). Users can request cancellation via `POST /api/symphony-export/cancel`.
 
 ### Symphony routes
