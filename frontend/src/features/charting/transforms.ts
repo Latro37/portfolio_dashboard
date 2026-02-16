@@ -1,4 +1,5 @@
 import type { BenchmarkSeries, BenchmarkSeriesPoint, ChartSeriesPoint, BenchmarkKeyNames } from "./types";
+import { isUsEquityTradingDay } from "./tradingCalendar";
 
 type BenchmarkState = {
   map: Map<string, BenchmarkSeriesPoint>;
@@ -18,8 +19,7 @@ function defaultKeyNames(): BenchmarkKeyNames {
 }
 
 export function isTradingDay(dateStr: string): boolean {
-  const day = new Date(`${dateStr}T00:00`).getDay();
-  return day !== 0 && day !== 6;
+  return isUsEquityTradingDay(dateStr);
 }
 
 export function filterTradingDays<T extends { date: string }>(points: T[]): T[] {

@@ -5,15 +5,17 @@ import { calcGradientOffset, filterTradingDays } from "./transforms";
 import type { BenchmarkSeries, ChartSeriesPoint } from "./types";
 
 describe("chart transforms", () => {
-  it("filters out weekend dates", () => {
+  it("filters out weekends and full-market holidays while keeping early closes", () => {
     const points = [
-      { date: "2025-01-03", value: 1 }, // Friday
-      { date: "2025-01-04", value: 2 }, // Saturday
-      { date: "2025-01-05", value: 3 }, // Sunday
-      { date: "2025-01-06", value: 4 }, // Monday
+      { date: "2026-02-13", value: 1 }, // Friday
+      { date: "2026-02-14", value: 2 }, // Saturday
+      { date: "2026-02-15", value: 3 }, // Sunday
+      { date: "2026-02-16", value: 4 }, // Presidents Day (market closed)
+      { date: "2026-02-17", value: 5 }, // Tuesday
+      { date: "2026-11-27", value: 6 }, // Day after Thanksgiving (early close)
     ];
     const filtered = filterTradingDays(points);
-    expect(filtered.map((p) => p.date)).toEqual(["2025-01-03", "2025-01-06"]);
+    expect(filtered.map((p) => p.date)).toEqual(["2026-02-13", "2026-02-17", "2026-11-27"]);
   });
 
   it("merges benchmark returns/drawdowns with indexed keys", () => {

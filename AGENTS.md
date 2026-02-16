@@ -73,6 +73,8 @@ When the agent has full repository access and push capability, run the end-to-en
 - push after each validated logical checkpoint (not every small edit)
 - for longer tasks, avoid long-lived local-only work; push incremental, coherent commits regularly
 4. Open or update a PR as soon as the change is reviewable; use draft PR for in-progress work.
+   - Every working branch with commits must have a corresponding GitHub PR (draft is acceptable while in progress).
+   - Do not leave a pushed branch without an open PR.
 5. Keep PR description current with:
 - what changed
 - test plan and results
