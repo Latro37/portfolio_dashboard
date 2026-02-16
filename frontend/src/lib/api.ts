@@ -143,6 +143,16 @@ export interface SyncStatus {
   message: string;
 }
 
+export interface SymphonyExportJobStatus {
+  status: string; // idle / running / complete / error
+  job_id: string | null;
+  exported: number;
+  processed: number;
+  total: number | null;
+  message: string;
+  error: string | null;
+}
+
 export interface AccountInfo {
   id: string;
   credential_name: string;
@@ -398,6 +408,8 @@ export const api = {
     fetchJSON<CashFlowRow[]>(`/cash-flows${_qs(accountId)}`),
   getSyncStatus: (accountId?: string) =>
     fetchJSON<SyncStatus>(`/sync/status${_qs(accountId)}`),
+  getSymphonyExportJobStatus: () =>
+    fetchJSON<SymphonyExportJobStatus>("/symphony-export/status"),
   triggerSync: (accountId?: string) =>
     authFetch(`/sync${_qs(accountId)}`, { method: "POST" })
       .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),

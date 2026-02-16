@@ -27,6 +27,8 @@ import { usePostCloseSyncAndSnapshot } from "@/features/dashboard/hooks/usePostC
 import { useDashboardSymphonyRefresh } from "@/features/dashboard/hooks/useDashboardSymphonyRefresh";
 import { useDashboardSymphonySelection } from "@/features/dashboard/hooks/useDashboardSymphonySelection";
 import { useDashboardSyncAction } from "@/features/dashboard/hooks/useDashboardSyncAction";
+import { useSymphonyExportProgressToast } from "@/features/dashboard/hooks/useSymphonyExportProgressToast";
+import { useSyncCompletionRefresh } from "@/features/dashboard/hooks/useSyncCompletionRefresh";
 import type { DashboardPeriod } from "@/features/dashboard/types";
 import { summarizeSymphonyDailyChange } from "@/features/dashboard/utils";
 import { PerformanceChart } from "@/features/charting/components/PerformanceChartContainer";
@@ -63,6 +65,9 @@ export default function DashboardPageContainer() {
     }
     return selectedSubAccount || undefined;
   }, [selectedCredential, selectedSubAccount]);
+
+  useSymphonyExportProgressToast();
+  useSyncCompletionRefresh({ resolvedAccountId });
 
   const {
     summary,

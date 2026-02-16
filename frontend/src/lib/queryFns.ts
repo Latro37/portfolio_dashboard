@@ -9,6 +9,7 @@ import {
   type HoldingsResponse,
   type PerformancePoint,
   type Summary,
+  type SymphonyExportJobStatus,
   type SymphonyBacktest,
   type SymphonyBenchmarkHistory,
   type SymphonyCatalogItem,
@@ -76,6 +77,10 @@ export function getCashFlowsQueryFn(accountId?: string): Promise<CashFlowRow[]> 
 
 export function getSyncStatusQueryFn(accountId?: string) {
   return api.getSyncStatus(accountId);
+}
+
+export function getSymphonyExportJobStatusQueryFn(): Promise<SymphonyExportJobStatus> {
+  return api.getSymphonyExportJobStatus();
 }
 
 export function getSymphoniesQueryFn(accountId?: string): Promise<SymphonyInfo[]> {

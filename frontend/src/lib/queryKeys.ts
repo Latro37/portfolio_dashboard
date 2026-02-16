@@ -89,6 +89,8 @@ export const queryKeys = {
     ["cash-flows", normalize(accountId)] as const,
   syncStatus: (accountId?: string) =>
     ["sync-status", normalize(accountId)] as const,
+  symphonyExportJobStatus: () =>
+    ["symphony-export-job-status"] as const,
   symphonies: (accountId?: string) =>
     ["symphonies", normalize(accountId)] as const,
   symphonySummary: (scope: SymphonySummaryQuery) =>
