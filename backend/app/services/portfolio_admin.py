@@ -83,7 +83,9 @@ def _recompute_after_manual_cash_flow(
     )
 
     try:
-        _roll_forward_cash_flow_totals(db, account_id, preserve_baseline=True)
+        # Match sync-path behavior so manual-entry recompute yields the same
+        # totals as a subsequent manual sync.
+        _roll_forward_cash_flow_totals(db, account_id, preserve_baseline=False)
         _recompute_metrics(db, account_id)
     except Exception as exc:
         logger.warning("Post-manual cash-flow local recompute failed for %s: %s", account_id, exc)
