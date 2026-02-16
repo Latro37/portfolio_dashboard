@@ -165,8 +165,10 @@ def full_backfill_core(db: Session, client: ComposerClient, account_id: str):
     """
     logger.info("Starting first-sync core backfill for account %s...", account_id)
 
-    # Required for first-view chart/metrics stability: do not continue on failure.
-    _sync_cash_flows(db, client, account_id, since="2020-01-01")
+    # Required for first-view chart/metrics stability: run synchronously.
+    # If non-trade report retrieval fails for this account type, continue with
+    # fallback net-deposit behavior instead of aborting the entire sync.
+    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since="2020-01-01")
     _sync_portfolio_history(db, client, account_id)
     _recompute_metrics(db, account_id)
 
