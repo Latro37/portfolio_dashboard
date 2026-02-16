@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import secrets
 from urllib.parse import urlparse
@@ -11,6 +12,8 @@ from typing import Optional
 from fastapi import HTTPException, Request, WebSocket, WebSocketException, status
 
 from app.config import get_settings, is_test_mode
+
+logger = logging.getLogger(__name__)
 
 LOCAL_AUTH_HEADER = "x-pd-local-token"
 _DEFAULT_ALLOWED_ORIGINS = {
@@ -48,7 +51,8 @@ def get_local_auth_token() -> str:
 
 
 def _normalize_origin(value: str) -> str:
-    return value.strip().rstrip("/")
+    normalized = value.strip().strip("'\"").strip()
+    return normalized.rstrip("/")
 
 
 def _is_loopback_origin(origin: str) -> bool:
@@ -84,6 +88,14 @@ def get_allowed_origins() -> set[str]:
             continue
         if _is_loopback_origin(normalized):
             allowed.add(normalized)
+
+    if not allowed:
+        logger.warning(
+            "%s was provided but no valid loopback origins were parsed; falling back to defaults",
+            _ALLOWED_ORIGINS_ENV,
+        )
+        return set(_DEFAULT_ALLOWED_ORIGINS)
+
     return allowed
 
 

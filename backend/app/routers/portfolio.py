@@ -13,7 +13,7 @@ from app.schemas import (
     AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
     TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
     SyncStatus, SyncTriggerResponse, ManualCashFlowRequest, ManualCashFlowResponse,
-    DeleteManualCashFlowResponse,
+    ManualCashFlowDeleteResponse,
     AppConfigResponse, SaveSymphonyExportResponse, SaveSymphonyExportRequest,
     OkResponse, ScreenshotUploadResponse, SaveScreenshotConfigRequest, SymphonyExportJobStatus,
 )
@@ -248,17 +248,16 @@ def add_manual_cash_flow(
         get_client_for_account_fn=get_client_for_account,
     )
 
-
 @router.delete(
     "/cash-flows/manual/{cash_flow_id}",
-    response_model=DeleteManualCashFlowResponse,
+    response_model=ManualCashFlowDeleteResponse,
     dependencies=[Depends(require_local_auth)],
 )
 def delete_manual_cash_flow(
     cash_flow_id: int,
     db: Session = Depends(get_db),
 ):
-    """Delete a user-added manual cash-flow entry."""
+    """Delete a manual deposit/withdrawal entry by ID."""
     return delete_manual_cash_flow_data(
         db,
         cash_flow_id,

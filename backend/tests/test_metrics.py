@@ -162,6 +162,11 @@ class TestComputeCAGR:
     def test_zero_start(self):
         assert compute_cagr(0, 10000, 365) == 0.0
 
+    def test_extreme_growth_remains_finite(self):
+        cagr = compute_cagr(1.0, 1e300, 1)
+        assert math.isfinite(cagr)
+        assert cagr > 0.0
+
 
 # =====================================================================
 # compute_annualized_return
@@ -180,6 +185,15 @@ class TestComputeAnnualizedReturn:
 
     def test_zero_days(self):
         assert compute_annualized_return(0.10, 0) == 0.0
+
+    def test_floor_when_return_is_minus_100pct_or_worse(self):
+        assert compute_annualized_return(-1.0, 365) == -100.0
+        assert compute_annualized_return(-1.25, 365) == -100.0
+
+    def test_extreme_growth_remains_finite(self):
+        result = compute_annualized_return(1e300, 1)
+        assert math.isfinite(result)
+        assert result > 0.0
 
     def test_compound_not_linear(self):
         # 26% return over 195 days (~0.534 years)
@@ -218,6 +232,15 @@ class TestComputeAnnualizedReturnCumulative:
 
     def test_zero_days(self):
         assert compute_annualized_return_cumulative(0.10, 0) == 0.0
+
+    def test_floor_when_return_is_minus_100pct_or_worse(self):
+        assert compute_annualized_return_cumulative(-1.0, 365) == -100.0
+        assert compute_annualized_return_cumulative(-1.8, 365) == -100.0
+
+    def test_extreme_growth_remains_finite(self):
+        result = compute_annualized_return_cumulative(1e300, 1)
+        assert math.isfinite(result)
+        assert result > 0.0
 
     def test_matches_formula(self):
         # 15% cumulative return over 200 days
@@ -549,6 +572,16 @@ class TestComputeAllMetrics:
         assert last["cumulative_return_pct"] == 0.0
         assert last["annualized_volatility"] == 0.0
         assert last["sharpe_ratio"] == 0.0
+
+    def test_invalid_risk_free_rate_does_not_crash(self, simple_series):
+        results = compute_all_metrics(
+            simple_series["daily_rows"],
+            simple_series["cash_flows"],
+            risk_free_rate=-1.5,
+        )
+        last = results[-1]
+        assert math.isfinite(last["sharpe_ratio"])
+        assert math.isfinite(last["sortino_ratio"])
 
 
 # =====================================================================

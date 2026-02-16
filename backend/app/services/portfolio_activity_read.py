@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models import Account, CashFlow, Transaction
+from app.services.manual_cash_flow import is_manual_cash_flow, normalize_manual_description
 
 
 def get_portfolio_transactions_data(
@@ -65,10 +66,10 @@ def get_portfolio_cash_flows_data(
             "date": str(row.date),
             "type": row.type,
             "amount": row.amount,
-            "description": row.description,
-            "is_manual": bool(row.is_manual),
+            "description": normalize_manual_description(row.description),
             "account_id": row.account_id,
             "account_name": acct_names.get(row.account_id, row.account_id),
+            "is_manual": is_manual_cash_flow(row),
         }
         for row in rows
     ]

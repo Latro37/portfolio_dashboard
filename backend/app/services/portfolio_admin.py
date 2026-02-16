@@ -29,6 +29,9 @@ from app.models import Account, CashFlow
 from app.schemas import ManualCashFlowRequest
 from app.security import get_local_auth_token
 from app.services.local_paths import LocalPathError, resolve_local_write_path
+from app.services.manual_cash_flow import encode_manual_description, is_manual_cash_flow
+from app.services.portfolio_live_overlay import invalidate_portfolio_live_cache
+from app.services.symphony_read import invalidate_symphony_live_cache
 from app.services.sync import (
     full_backfill_core,
     finish_initial_backfill_activity,
@@ -92,7 +95,7 @@ def add_manual_cash_flow_data(
             date=body.date,
             type=cf_type,
             amount=amount,
-            description=body.description or "Manual entry",
+            description=encode_manual_description(body.description),
             is_manual=1,
         )
     )
@@ -107,6 +110,10 @@ def add_manual_cash_flow_data(
         _recompute_metrics(db, body.account_id)
     except Exception as exc:
         logger.warning("Post-manual-entry recompute failed: %s", exc)
+    finally:
+        # Avoid serving stale live overlay summaries after manual cash-flow edits.
+        invalidate_portfolio_live_cache(account_ids=[body.account_id])
+        invalidate_symphony_live_cache(account_id=body.account_id)
 
     return {"status": "ok", "date": str(body.date), "type": cf_type, "amount": amount}
 
@@ -118,16 +125,16 @@ def delete_manual_cash_flow_data(
     resolve_account_ids_fn: Callable[[Session, Optional[str]], list[str]],
     get_client_for_account_fn: Callable[[Session, str], object],
 ) -> dict:
-    """Delete a manual cash flow row and recompute derived portfolio metrics."""
+    """Delete a manual cash flow entry and recompute derived portfolio metrics."""
     row = db.query(CashFlow).filter(CashFlow.id == cash_flow_id).first()
-    if not row:
-        raise HTTPException(404, "Manual cash flow not found")
+    if row is None:
+        raise HTTPException(404, "Manual cash flow entry not found")
 
-    # Validate row account is visible in current scope.
+    # Validate account visibility and existence.
     resolve_account_ids_fn(db, row.account_id)
 
-    if not bool(row.is_manual):
-        raise HTTPException(400, "Only manual cash-flow entries can be deleted")
+    if not is_manual_cash_flow(row):
+        raise HTTPException(400, "Only manual deposit/withdrawal entries can be deleted")
 
     account_id = row.account_id
     deleted_id = int(row.id)
@@ -143,8 +150,12 @@ def delete_manual_cash_flow_data(
         _recompute_metrics(db, account_id)
     except Exception as exc:
         logger.warning("Post-manual-delete recompute failed: %s", exc)
+    finally:
+        # Avoid serving stale live overlay summaries after manual cash-flow edits.
+        invalidate_portfolio_live_cache(account_ids=[account_id])
+        invalidate_symphony_live_cache(account_id=account_id)
 
-    return {"status": "ok", "id": deleted_id}
+    return {"status": "ok", "deleted_id": deleted_id}
 
 
 def get_sync_status_data(db: Session, account_id: str) -> dict:

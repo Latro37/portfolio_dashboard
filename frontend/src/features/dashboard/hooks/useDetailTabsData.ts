@@ -63,14 +63,11 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
       await transactionsQuery.refetch();
     },
   });
-  const deleteManualCashFlowMutation = useMutation({
-    mutationFn: api.deleteManualCashFlow,
-    onSuccess: async () => {
-      if (resolvedSingleAccountId) {
-        await invalidateAfterManualCashFlow(queryClient, resolvedSingleAccountId);
-      } else {
-        await invalidateAfterManualCashFlow(queryClient, accountId ?? "");
-      }
+  const manualCashFlowDeleteMutation = useMutation({
+    mutationFn: ({ cashFlowId }: { cashFlowId: number; accountId: string }) =>
+      api.deleteManualCashFlow(cashFlowId),
+    onSuccess: async (_, variables) => {
+      await invalidateAfterManualCashFlow(queryClient, variables.accountId);
       await cashFlowsQuery.refetch();
       await transactionsQuery.refetch();
     },
@@ -94,9 +91,12 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     onDataChange?.();
   };
 
-  const handleDeleteManual = async (cashFlowId: number) => {
-    if (!Number.isFinite(cashFlowId)) return;
-    await deleteManualCashFlowMutation.mutateAsync(cashFlowId);
+  const handleDeleteManual = async (cashFlow: CashFlowRow) => {
+    if (!cashFlow.is_manual || !cashFlow.account_id) return;
+    await manualCashFlowDeleteMutation.mutateAsync({
+      cashFlowId: cashFlow.id,
+      accountId: cashFlow.account_id,
+    });
     onDataChange?.();
   };
 

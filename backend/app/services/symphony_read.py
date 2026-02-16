@@ -18,6 +18,39 @@ _sym_live_cache: dict = {}  # key: (symphony_id, account_id, period, start, end)
 _SYM_LIVE_CACHE_TTL = 120  # seconds
 
 
+def invalidate_symphony_live_cache(
+    *,
+    account_id: Optional[str] = None,
+    symphony_id: Optional[str] = None,
+) -> int:
+    """Invalidate in-memory live-summary cache entries for symphonies.
+
+    Filters can be applied by ``account_id`` and/or ``symphony_id``.  If both
+    are omitted, the full cache is cleared.
+    Returns the number of removed cache entries.
+    """
+    if not _sym_live_cache:
+        return 0
+
+    if account_id is None and symphony_id is None:
+        removed = len(_sym_live_cache)
+        _sym_live_cache.clear()
+        return removed
+
+    to_remove = []
+    for key in _sym_live_cache:
+        key_symphony_id, key_account_id = key[0], key[1]
+        if account_id is not None and key_account_id != account_id:
+            continue
+        if symphony_id is not None and key_symphony_id != symphony_id:
+            continue
+        to_remove.append(key)
+
+    for key in to_remove:
+        _sym_live_cache.pop(key, None)
+    return len(to_remove)
+
+
 def _period_cutoff(period: str, end_date: date) -> Optional[date]:
     mapping = {
         "1D": timedelta(days=1),

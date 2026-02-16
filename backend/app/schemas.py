@@ -30,9 +30,9 @@ class ManualCashFlowResponse(BaseModel):
     amount: float
 
 
-class DeleteManualCashFlowResponse(BaseModel):
+class ManualCashFlowDeleteResponse(BaseModel):
     status: str
-    id: int
+    deleted_id: int
 
 
 # --- Sync ---

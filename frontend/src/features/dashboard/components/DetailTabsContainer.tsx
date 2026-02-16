@@ -232,11 +232,11 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                     <th className="pb-2 pr-4">Type</th>
                     <th className="pb-2 pr-4">Description</th>
                     <th className="pb-2 text-right">Amount</th>
-                    <th className="pb-2 pl-3 text-right">Actions</th>
+                    <th className="pb-2 pl-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...cashFlows].reverse().map((cashFlow, i) => {
+                  {[...cashFlows].reverse().map((cashFlow) => {
                     const icon =
                       cashFlow.type === "deposit" ? (
                         <DollarSign className="h-3 w-3 text-emerald-400" />
@@ -248,7 +248,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                     const color =
                       cashFlow.amount >= 0 ? "text-emerald-400" : "text-red-400";
                     return (
-                      <tr key={cashFlow.id ?? i} className="border-b border-border/30">
+                      <tr key={cashFlow.id} className="border-b border-border/30">
                         <td className="py-2 pr-4 text-muted-foreground">{cashFlow.date}</td>
                         <td className="py-2 pr-4 text-xs text-muted-foreground">
                           {cashFlow.account_name ?? ""}
@@ -271,17 +271,20 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                             maximumFractionDigits: 2,
                           })}
                         </td>
-                        <td className="py-2 pl-3 text-right">
+                        <td className="py-2 pl-4 text-right">
                           {cashFlow.is_manual ? (
-                            <button
-                              type="button"
-                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-500/40 text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300"
-                              onClick={() => handleDeleteManual(cashFlow.id)}
-                              aria-label="Delete manual entry"
-                              title="Delete manual entry"
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-red-500 hover:text-red-400"
+                              onClick={() => {
+                                if (window.confirm("Delete this manual cash flow entry?")) {
+                                  void handleDeleteManual(cashFlow);
+                                }
+                              }}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            </Button>
                           ) : null}
                         </td>
                       </tr>
