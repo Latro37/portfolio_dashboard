@@ -396,19 +396,26 @@ python -m pip install -r requirements.txt
 # - macOS/Linux:          export PD_ALLOWED_ORIGINS="http://localhost:3010,http://127.0.0.1:3010"
 
 python -m uvicorn app.main:app --port 8000
-# optionally, use a custom port e.g. --port 8080
+# optionally, use a custom port e.g. --port 8080 (if you do, set NEXT_PUBLIC_API_URL in the frontend below)
 ```
 
 Frontend (Terminal 2):
 ```bash
 cd frontend
 npm install
+
+# If the backend is not running on 8000, set NEXT_PUBLIC_API_URL to match it.
+# Example (backend on 8080):
+# - Windows (PowerShell): $env:NEXT_PUBLIC_API_URL="http://localhost:8080/api"
+# - Windows (cmd.exe):    set NEXT_PUBLIC_API_URL=http://localhost:8080/api
+# - macOS/Linux:          export NEXT_PUBLIC_API_URL="http://localhost:8080/api"
+
 npm run dev
 # optionally, use a custom port e.g. npm run dev -- -p 3010
 ```
 Then open **http://localhost:3000** (or your chosen frontend port) in your browser.
 
-If you use a non-default frontend port, make sure the backend `PD_ALLOWED_ORIGINS` matches it (see backend commands above). Tip: `python start.py --frontend-port <port>` wires this automatically.
+If you use non-default ports, make sure backend `PD_ALLOWED_ORIGINS` matches the frontend origin and frontend `NEXT_PUBLIC_API_URL` matches the backend port. Tip: `python start.py --backend-port <port> --frontend-port <port>` wires this automatically.
 
 ### Stopping the App
 
