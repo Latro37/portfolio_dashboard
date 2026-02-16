@@ -27,6 +27,7 @@ from app.models import Account, CashFlow
 from app.schemas import ManualCashFlowRequest
 from app.security import get_local_auth_token
 from app.services.local_paths import LocalPathError, resolve_local_write_path
+from app.services.manual_cash_flow import encode_manual_description, is_manual_cash_flow
 from app.services.sync import (
     full_backfill_core,
     finish_initial_backfill_activity,
@@ -70,7 +71,7 @@ def add_manual_cash_flow_data(
             date=body.date,
             type=cf_type,
             amount=amount,
-            description=body.description or "Manual entry",
+            description=encode_manual_description(body.description),
         )
     )
     db.commit()
@@ -86,6 +87,41 @@ def add_manual_cash_flow_data(
         logger.warning("Post-manual-entry recompute failed: %s", exc)
 
     return {"status": "ok", "date": str(body.date), "type": cf_type, "amount": amount}
+
+
+def delete_manual_cash_flow_data(
+    db: Session,
+    cash_flow_id: int,
+    *,
+    resolve_account_ids_fn: Callable[[Session, Optional[str]], list[str]],
+    get_client_for_account_fn: Callable[[Session, str], object],
+) -> dict:
+    """Delete a manual cash flow entry and recompute derived portfolio metrics."""
+    row = db.query(CashFlow).filter(CashFlow.id == cash_flow_id).first()
+    if row is None:
+        raise HTTPException(404, "Manual cash flow entry not found")
+
+    # Validate account visibility and existence.
+    resolve_account_ids_fn(db, row.account_id)
+
+    if not is_manual_cash_flow(row):
+        raise HTTPException(400, "Only manual deposit/withdrawal entries can be deleted")
+
+    account_id = row.account_id
+    db.delete(row)
+    db.commit()
+
+    # Recompute account-level portfolio history/metrics after mutation.
+    try:
+        client = get_client_for_account_fn(db, account_id)
+        from app.services.sync import _recompute_metrics, _sync_portfolio_history
+
+        _sync_portfolio_history(db, client, account_id)
+        _recompute_metrics(db, account_id)
+    except Exception as exc:
+        logger.warning("Post-manual-delete recompute failed: %s", exc)
+
+    return {"status": "ok", "deleted_id": cash_flow_id}
 
 
 def get_sync_status_data(db: Session, account_id: str) -> dict:

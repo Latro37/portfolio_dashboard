@@ -63,6 +63,15 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
       await transactionsQuery.refetch();
     },
   });
+  const manualCashFlowDeleteMutation = useMutation({
+    mutationFn: ({ cashFlowId }: { cashFlowId: number; accountId: string }) =>
+      api.deleteManualCashFlow(cashFlowId),
+    onSuccess: async (_, variables) => {
+      await invalidateAfterManualCashFlow(queryClient, variables.accountId);
+      await cashFlowsQuery.refetch();
+      await transactionsQuery.refetch();
+    },
+  });
 
   const handleAddManual = async () => {
     if (!resolvedSingleAccountId || !manualDate || !manualAmount) return;
@@ -79,6 +88,15 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     setManualAmount("");
     setManualDesc("");
     setShowManualForm(false);
+    onDataChange?.();
+  };
+
+  const handleDeleteManual = async (cashFlow: CashFlowRow) => {
+    if (!cashFlow.is_manual || !cashFlow.account_id) return;
+    await manualCashFlowDeleteMutation.mutateAsync({
+      cashFlowId: cashFlow.id,
+      accountId: cashFlow.account_id,
+    });
     onDataChange?.();
   };
 
@@ -110,5 +128,6 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     setManualDesc,
     resolvedSingleAccountId,
     handleAddManual,
+    handleDeleteManual,
   };
 }
