@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import {
   Area,
   AreaChart,
+  getNiceTickValues,
   Line,
   ReferenceLine,
   ResponsiveContainer,
@@ -66,6 +67,8 @@ const CHART_MARGIN_NO_LABELS = { ...CHART_MARGIN, right: 20 };
 const END_LABEL_GAP = 16;
 const END_LABEL_FONT_SIZE = 11;
 const END_LABEL_FONT_WEIGHT = 700;
+const Y_AXIS_TICK_COUNT = 5;
+const AUTO_DOMAIN: [string, string] = ["auto", "auto"];
 
 function shortLabel(label: string): string {
   const maxChars = 10;
@@ -197,7 +200,9 @@ export function PerformanceChartCanvas({
     drawdownOverlayKey,
   ]);
 
-  const endLabelOffsetByKey = useMemo(() => {
+  const yAxisDomain = useMemo<readonly [number, number] | undefined>(() => {
+    if (mode === "portfolio") return undefined;
+
     const numericValues: number[] = [];
     activeEndLabels.forEach((series) => {
       for (let i = 0; i < tradingData.length; i += 1) {
@@ -208,14 +213,20 @@ export function PerformanceChartCanvas({
       }
     });
 
-    if (!numericValues.length) return {} as Record<string, number>;
+    if (!numericValues.length) return undefined;
 
-    let domainMin = Math.min(...numericValues);
-    let domainMax = Math.max(...numericValues);
-    if (mode !== "portfolio") {
-      domainMin = Math.min(domainMin, 0);
-      domainMax = Math.max(domainMax, 0);
+    const dataMin = Math.min(Math.min(...numericValues), 0);
+    const dataMax = Math.max(Math.max(...numericValues), 0);
+    const ticks = getNiceTickValues([dataMin, dataMax], Y_AXIS_TICK_COUNT);
+    if (ticks.length >= 2) {
+      return [ticks[0], ticks[ticks.length - 1]];
     }
+    return [dataMin, dataMax];
+  }, [activeEndLabels, mode, tradingData]);
+
+  const endLabelOffsetByKey = useMemo(() => {
+    if (!yAxisDomain) return {} as Record<string, number>;
+    const [domainMin, domainMax] = yAxisDomain;
 
     const labelHalfHeight = END_LABEL_FONT_SIZE / 2;
     const minY = CHART_MARGIN.top + 4 + labelHalfHeight;
@@ -245,7 +256,7 @@ export function PerformanceChartCanvas({
     });
 
     return offsets;
-  }, [activeEndLabels, lastIndexesByKey, mode, tradingData]);
+  }, [activeEndLabels, lastIndexesByKey, tradingData, yAxisDomain]);
 
   const createEndLabel = (
     dataKey: string,
@@ -347,7 +358,7 @@ export function PerformanceChartCanvas({
             </linearGradient>
           </defs>
           <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-          <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+          <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} domain={yAxisDomain ?? AUTO_DOMAIN} tickCount={Y_AXIS_TICK_COUNT} />
           <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
           <Tooltip content={renderTwrTooltip} />
           <Area type="monotone" dataKey="time_weighted_return" stroke={`url(#twrStrokeSplit${uid})`} strokeWidth={2} fill={`url(#twrGradSplit${uid})`} dot={false} label={createEndLabel("time_weighted_return", "TWR", "#10b981", formatPct)} />
@@ -379,7 +390,7 @@ export function PerformanceChartCanvas({
             </linearGradient>
           </defs>
           <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-          <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+          <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} domain={yAxisDomain ?? AUTO_DOMAIN} tickCount={Y_AXIS_TICK_COUNT} />
           <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
           <Tooltip content={renderMwrTooltip} />
           <Area type="monotone" dataKey="money_weighted_return" stroke={`url(#mwrStrokeSplit${uid})`} strokeWidth={2} fill={`url(#mwrGradSplit${uid})`} dot={false} label={createEndLabel("money_weighted_return", "MWR", "#d946ef", formatPct)} />
@@ -401,7 +412,7 @@ export function PerformanceChartCanvas({
           </linearGradient>
         </defs>
         <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-        <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+        <YAxis tickFormatter={formatPct} tick={{ fill: "#71717a", fontSize: 11 }} axisLine={false} tickLine={false} width={70} domain={yAxisDomain ?? AUTO_DOMAIN} tickCount={Y_AXIS_TICK_COUNT} />
         <ReferenceLine y={0} stroke="#71717a" strokeDasharray="4 4" strokeOpacity={0.5} />
         <Tooltip content={renderDrawdownTooltip} />
         <Area type="monotone" dataKey="current_drawdown" stroke="#ef4444" strokeWidth={2} fill={`url(#ddGrad${uid})`} baseValue={0} dot={false} label={createEndLabel("current_drawdown", "Drawdown", "#ef4444", formatPct)} />
