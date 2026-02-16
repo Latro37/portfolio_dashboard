@@ -237,7 +237,7 @@ graph TD
 
 Notes:
 - `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning. It also includes `symphony_export.enabled` and first-start simulation flags (`first_start_test_mode`, `first_start_run_id`).
-- On first sync, `POST /api/sync` may return once core dashboard data is ready while transactions/cash flows continue syncing in the background. `GET /api/sync/status` remains the canonical "is background work still running?" signal.
+- On first sync, `POST /api/sync` blocks until non-trade activity is applied and portfolio history/metrics are recomputed, so first-view charts and metrics are stable.
 - Symphony structure export runs in a background job and is observable via `GET /api/symphony-export/status` (`idle|running|cancelling|complete|cancelled|error`). Users can request cancellation via `POST /api/symphony-export/cancel`.
 
 ### Symphony routes

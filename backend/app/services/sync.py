@@ -157,19 +157,22 @@ def incremental_update(db: Session, client: ComposerClient, account_id: str):
 
 
 def full_backfill_core(db: Session, client: ComposerClient, account_id: str):
-    """First-sync core backfill that skips trade activity and cash flow reports.
+    """First-sync core backfill with blocking non-trade activity sync.
 
-    This is intended to make the first sync return sooner with dashboard-critical
-    data (portfolio/symphony history + metrics), while transactions/cash flows are
-    fetched in a background continuation step.
+    Ensures non-trade activity (cash flows) is applied before portfolio history
+    and metrics are returned to the user for the first dashboard load.
+    Trade transactions can continue in a follow-up phase.
     """
     logger.info("Starting first-sync core backfill for account %s...", account_id)
 
-    # Skip transactions + cash flows here (background continuation).
-    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
+    # Required for first-view chart/metrics stability: do not continue on failure.
+    _sync_cash_flows(db, client, account_id, since="2020-01-01")
+    _sync_portfolio_history(db, client, account_id)
+    _recompute_metrics(db, account_id)
+
+    # Remaining first-view data can degrade gracefully if individual steps fail.
     _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
     _safe_step("benchmark", _sync_benchmark, db, account_id)
-    _safe_step("metrics", _recompute_metrics, db, account_id)
 
     _safe_step("symphony_allocations", _sync_symphony_allocations, db, client, account_id)
     _safe_step("symphony_daily", _sync_symphony_daily_backfill, db, client, account_id)
@@ -181,23 +184,19 @@ def full_backfill_core(db: Session, client: ComposerClient, account_id: str):
 
 
 def finish_initial_backfill_activity(db: Session, client: ComposerClient, account_id: str):
-    """Background continuation for first sync.
+    """Continuation for first sync focused on trade activity tables.
 
-    Fetches the heavier activity reports and recomputes dependent tables so that
-    transactions/cash flows and derived portfolio metrics become fully correct.
+    Cash-flow-driven portfolio history and metrics are already finalized in
+    full_backfill_core().
     """
-    logger.info("Starting first-sync activity backfill for account %s...", account_id)
+    logger.info("Starting first-sync trade-activity backfill for account %s...", account_id)
 
     _safe_step("transactions", _sync_transactions, db, client, account_id, since="2020-01-01")
-    _safe_step("cash_flows", _sync_cash_flows, db, client, account_id, since="2020-01-01")
-    _safe_step("portfolio_history", _sync_portfolio_history, db, client, account_id)
     _safe_step("holdings_history", _sync_holdings_history, db, client, account_id)
-    _safe_step("benchmark", _sync_benchmark, db, account_id)
-    _safe_step("metrics", _recompute_metrics, db, account_id)
 
     set_sync_state(db, account_id, "initial_backfill_done", "true")
     set_sync_state(db, account_id, "last_sync_date", datetime.now().strftime("%Y-%m-%d"))
-    logger.info("First-sync activity backfill complete for account %s", account_id)
+    logger.info("First-sync trade-activity backfill complete for account %s", account_id)
 
 
 # ------------------------------------------------------------------

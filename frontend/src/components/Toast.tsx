@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, X, AlertCircle } from "lucide-react";
 
 export type ToastType = "success" | "error" | "info";
+type ToastDismissReason = "programmatic" | "timeout" | "user";
 
 interface ToastMessage {
   id: string;
@@ -15,7 +16,7 @@ interface ToastMessage {
 
 let _nextId = 0;
 let _upsertToast: ((msg: ToastUpsert) => string) | null = null;
-let _dismissToast: ((id: string) => void) | null = null;
+let _dismissToast: ((id: string, reason?: ToastDismissReason) => void) | null = null;
 
 export type ToastUpsert = {
   id?: string;
@@ -34,8 +35,8 @@ export function upsertToast(msg: ToastUpsert): string | null {
   return _upsertToast ? _upsertToast(msg) : null;
 }
 
-export function dismissToast(id: string) {
-  _dismissToast?.(id);
+export function dismissToast(id: string, reason: ToastDismissReason = "programmatic") {
+  _dismissToast?.(id, reason);
 }
 
 export function ToastContainer() {
@@ -47,7 +48,7 @@ export function ToastContainer() {
 
     const dismiss = (
       id: string,
-      reason: "programmatic" | "timeout" | "user" = "programmatic",
+      reason: ToastDismissReason = "programmatic",
     ) => {
       const existing = timeouts.get(id);
       if (existing) {
@@ -144,7 +145,7 @@ export function ToastContainer() {
           )}
           {t.text}
           <button
-            onClick={() => dismiss(t.id, "user")}
+            onClick={() => dismissToast(t.id, "user")}
             className="ml-2 cursor-pointer rounded p-0.5 hover:bg-white/10"
           >
             <X className="h-3 w-3" />

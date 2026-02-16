@@ -26,7 +26,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 ## Features
 
 - **Multi-account support** — Track multiple Composer accounts (e.g. yours + spouse's) from a single dashboard. Switch between accounts or view them aggregated together.
-- **Full historical backfill** — On first sync, the app loads dashboard-critical history first, then backfills transactions and cash flows (deposits/withdrawals/fees/dividends) in the background.
+- **Full historical backfill** — On first sync, the app backfills transactions and cash flows (deposits/withdrawals/fees/dividends) before returning final chart/metric state.
 - **Incremental updates** — After the initial sync, only new data is fetched. If the app hasn't run for days, it automatically fills in the gaps.
 - **20+ portfolio metrics** — Sharpe ratio, Sortino ratio, Calmar ratio, TWR, MWR, max drawdown, win rate, volatility, annualized return, and more. All computed live from your data.
 - **Performance chart** — Interactive chart with TWR, MWR, Portfolio Value, and Drawdown views. Adjustable time periods (1W–All) and custom date ranges.
@@ -80,7 +80,7 @@ Get up and running in under 5 minutes.
    ```
    The browser opens automatically.
 
-4. **Sync your data.** Click the **Update** button in the top-right corner. The first sync loads the dashboard as soon as core data is ready, then continues backfilling transactions/cash flows in the background. If Symphony Export is enabled, a lower-right toast shows `Saving Symphonies locally: x/y`.
+4. **Sync your data.** Click the **Update** button in the top-right corner. The first sync completes non-trade activity backfill and metric recomputation before returning the dashboard. If Symphony Export is enabled, a lower-right toast shows `Saving Symphonies locally: x/y`.
 
 That's it! You're ready to go with the basic features. If you want to take advantage of all the features, see the [Detailed Setup](#detailed-setup) section.
 
@@ -98,7 +98,7 @@ When you click **Update** for the first time, the app syncs your complete Compos
 - **Holdings** — Current positions and historical position reconstruction
 - **Symphony data** — Per-symphony daily values and metadata
 
-The dashboard renders as soon as the core portfolio + symphony history is ready. Transactions and cash flows may continue syncing in the background and will populate the Transactions / Non-Trade Activity tabs when ready.
+The first sync waits for non-trade activity to be applied so chart data and metrics are stable when the dashboard loads. Trade transaction tables may still finish immediately afterward on first run.
 
 If you have Symphony Export enabled, symphony JSON extraction runs in the background and shows a lower-right toast with `Saving Symphonies locally: x/y`. Closing the toast requests cancellation of the current export job; already-exported symphonies remain tracked and unchanged symphonies are skipped on the next sync.
 
@@ -625,7 +625,7 @@ Click the **Update** button in the top-right corner. The app doesn't fetch data 
 ### The sync seems stuck or is taking a long time
 The first sync can take 30–60 seconds. If it takes longer than 2 minutes, check the terminal window running the backend for error messages.
 
-Note: on first sync, the dashboard may appear before transactions and cash flows have finished backfilling. Those tabs will populate automatically once the background phase completes.
+Note: first sync waits for non-trade activity and portfolio metric recomputation, so it can take longer than incremental syncs.
 
 ### Port 8000 or 3000 is already in use
 A previous session may not have shut down cleanly.

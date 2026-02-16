@@ -7,7 +7,7 @@ import os
 import re
 import time
 from datetime import date as date_cls
-from threading import Lock, Thread
+from threading import Lock
 from typing import Callable, Optional
 
 from fastapi import HTTPException, Request
@@ -151,7 +151,6 @@ def trigger_sync_data(
         _sync_message = "Starting sync..."
         _sync_error = None
 
-    handed_off = False
     try:
         selected_account = account_id if account_id else "all"
         ids = resolve_account_ids_fn(db, selected_account)
@@ -166,8 +165,6 @@ def trigger_sync_data(
                 "reason": "No sync-eligible accounts",
             }
 
-        deferred_activity_ids: list[str] = []
-
         for aid in sync_ids:
             client = get_client_for_account_fn(db, aid)
             state = get_sync_state(db, aid)
@@ -177,23 +174,21 @@ def trigger_sync_data(
                     _sync_message = f"Syncing incremental updates for {aid}..."
                 incremental_update(db, client, aid)
             else:
-                # First sync: core backfill now, heavy activity reports in background.
+                # First sync: complete core first, then finish trade activity before returning.
                 if state.get("initial_backfill_core_done") == "true":
-                    deferred_activity_ids.append(aid)
+                    with _sync_state_lock:
+                        _sync_message = f"Completing first-run trade activity for {aid}..."
+                    finish_initial_backfill_activity(db, client, aid)
                 else:
                     with _sync_state_lock:
                         _sync_message = f"Syncing first-run core data for {aid}..."
                     full_backfill_core(db, client, aid)
-                    deferred_activity_ids.append(aid)
+                    with _sync_state_lock:
+                        _sync_message = f"Completing first-run trade activity for {aid}..."
+                    finish_initial_backfill_activity(db, client, aid)
 
             if len(sync_ids) > 1:
                 time.sleep(1)
-
-        if deferred_activity_ids:
-            handed_off = True
-            # Prioritize first-run transactions + non-trade activity before draft export.
-            _start_background_first_sync(deferred_activity_ids, export_account_ids=sync_ids)
-            return {"status": "complete", "synced_accounts": len(sync_ids)}
 
         _start_symphony_export_job_if_enabled(sync_ids)
         return {"status": "complete", "synced_accounts": len(sync_ids)}
@@ -205,55 +200,9 @@ def trigger_sync_data(
             _sync_error = f"Sync failed: {exc}"
         raise HTTPException(500, f"Sync failed: {exc}")
     finally:
-        if not handed_off:
-            with _sync_state_lock:
-                _syncing = False
-                _sync_message = ""
-
-
-def _start_background_first_sync(account_ids: list[str], *, export_account_ids: list[str]) -> None:
-    """Spawn background continuation for the first sync (transactions + cash flows)."""
-
-    thread = Thread(
-        target=_run_background_first_sync,
-        name="first-sync-activity-backfill",
-        daemon=True,
-        args=(list(account_ids), list(export_account_ids)),
-    )
-    thread.start()
-
-
-def _run_background_first_sync(account_ids: list[str], export_account_ids: list[str]) -> None:
-    global _syncing, _sync_message, _sync_error
-
-    # Import here to avoid router import cycles.
-    from app.services.account_clients import get_client_for_account
-    from app.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        for aid in account_ids:
-            with _sync_state_lock:
-                _sync_message = f"Background: syncing transactions/cash flows for {aid}..."
-            client = get_client_for_account(db, aid)
-            finish_initial_backfill_activity(db, client, aid)
-            time.sleep(1)
-
-        # Once first-run activity is complete, symphony export can run in the background.
-        _start_symphony_export_job_if_enabled(export_account_ids)
-
-        with _sync_state_lock:
-            _sync_message = ""
-            _sync_error = None
-    except Exception as exc:
-        logger.error("Background first-sync continuation failed: %s", exc, exc_info=True)
-        with _sync_state_lock:
-            _sync_error = f"Background sync failed: {exc}"
-            _sync_message = ""
-    finally:
         with _sync_state_lock:
             _syncing = False
-        db.close()
+            _sync_message = ""
 
 
 def get_app_config_data() -> dict:
