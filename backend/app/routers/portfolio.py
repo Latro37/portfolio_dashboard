@@ -13,6 +13,7 @@ from app.schemas import (
     AccountInfo, PortfolioSummary, PortfolioHoldingsResponse, HoldingsHistoryRow,
     TransactionListResponse, CashFlowRow, PerformancePoint, BenchmarkHistoryResponse,
     SyncStatus, SyncTriggerResponse, ManualCashFlowRequest, ManualCashFlowResponse,
+    ManualCashFlowDeleteResponse,
     AppConfigResponse, SaveSymphonyExportResponse, SaveSymphonyExportRequest,
     OkResponse, ScreenshotUploadResponse, SaveScreenshotConfigRequest, SymphonyExportJobStatus,
 )
@@ -36,6 +37,7 @@ from app.services.portfolio_live_overlay import get_portfolio_live_summary_data
 from app.services.portfolio_read import get_portfolio_performance_data, get_portfolio_summary_data
 from app.services.portfolio_admin import (
     add_manual_cash_flow_data,
+    delete_manual_cash_flow_data,
     get_app_config_data,
     get_sync_status_data,
     get_symphony_export_job_status_data,
@@ -241,6 +243,23 @@ def add_manual_cash_flow(
     return add_manual_cash_flow_data(
         db,
         body,
+        resolve_account_ids_fn=_resolve_account_ids,
+        get_client_for_account_fn=get_client_for_account,
+    )
+
+@router.delete(
+    "/cash-flows/manual/{cash_flow_id}",
+    response_model=ManualCashFlowDeleteResponse,
+    dependencies=[Depends(require_local_auth)],
+)
+def delete_manual_cash_flow(
+    cash_flow_id: int,
+    db: Session = Depends(get_db),
+):
+    """Delete a manual deposit/withdrawal entry by ID."""
+    return delete_manual_cash_flow_data(
+        db,
+        cash_flow_id,
         resolve_account_ids_fn=_resolve_account_ids,
         get_client_for_account_fn=get_client_for_account,
     )

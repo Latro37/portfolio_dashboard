@@ -27,7 +27,7 @@ export function DashboardErrorScreen({
           {needsSync
             ? isTestMode
               ? "No test data was found. Seed the test database (basic/power profile), then reload."
-              : "Click the button below to fetch your portfolio history from Composer. This may take up to a minute on the first run."
+              : "Click the button below to fetch your portfolio history from Composer. This may take up to a minute on the first run. Note: IRA deposits cannot be automatically retrieved. Please add them manually in the Non-Trade Activity tab."
             : error}
         </p>
       </div>

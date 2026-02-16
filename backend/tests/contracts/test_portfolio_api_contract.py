@@ -227,6 +227,155 @@ def test_manual_cash_flow_contract(client, auth_headers):
     assert payload["amount"] == -123.45
 
 
+def test_manual_cash_flow_invalidates_live_caches(client, auth_headers, monkeypatch):
+    calls = {"portfolio": [], "symphony": []}
+
+    def _invalidate_portfolio_live_cache(*, account_ids=None):
+        calls["portfolio"].append(account_ids)
+        return 1
+
+    def _invalidate_symphony_live_cache(*, account_id=None, symphony_id=None):
+        calls["symphony"].append((account_id, symphony_id))
+        return 1
+
+    monkeypatch.setattr(
+        portfolio_admin,
+        "invalidate_portfolio_live_cache",
+        _invalidate_portfolio_live_cache,
+    )
+    monkeypatch.setattr(
+        portfolio_admin,
+        "invalidate_symphony_live_cache",
+        _invalidate_symphony_live_cache,
+    )
+
+    res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-05",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 200
+    assert calls["portfolio"] == [["test-account-001"]]
+    assert calls["symphony"] == [("test-account-001", None)]
+
+
+def test_cash_flows_row_contract(client):
+    res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert res.status_code == 200
+    payload = res.json()
+    assert isinstance(payload, list)
+    assert len(payload) >= 1
+    assert set(payload[0].keys()) == {
+        "id",
+        "date",
+        "type",
+        "amount",
+        "description",
+        "account_id",
+        "account_name",
+        "is_manual",
+    }
+    assert payload[0]["is_manual"] is False
+
+
+def test_delete_manual_cash_flow_contract(client, auth_headers):
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-05",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+
+    list_res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert list_res.status_code == 200
+    manual_rows = [row for row in list_res.json() if row["is_manual"]]
+    assert len(manual_rows) == 1
+    manual_id = manual_rows[0]["id"]
+
+    delete_res = client.delete(f"/api/cash-flows/manual/{manual_id}", headers=auth_headers)
+    assert delete_res.status_code == 200
+    payload = delete_res.json()
+    assert set(payload.keys()) == {"status", "deleted_id"}
+    assert payload["status"] == "ok"
+    assert payload["deleted_id"] == manual_id
+
+    after_delete = client.get("/api/cash-flows?account_id=test-account-001")
+    assert after_delete.status_code == 200
+    after_ids = {row["id"] for row in after_delete.json()}
+    assert manual_id not in after_ids
+
+
+def test_delete_manual_cash_flow_invalidates_live_caches(client, auth_headers, monkeypatch):
+    calls = {"portfolio": [], "symphony": []}
+
+    def _invalidate_portfolio_live_cache(*, account_ids=None):
+        calls["portfolio"].append(account_ids)
+        return 1
+
+    def _invalidate_symphony_live_cache(*, account_id=None, symphony_id=None):
+        calls["symphony"].append((account_id, symphony_id))
+        return 1
+
+    monkeypatch.setattr(
+        portfolio_admin,
+        "invalidate_portfolio_live_cache",
+        _invalidate_portfolio_live_cache,
+    )
+    monkeypatch.setattr(
+        portfolio_admin,
+        "invalidate_symphony_live_cache",
+        _invalidate_symphony_live_cache,
+    )
+
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-05",
+            "type": "deposit",
+            "amount": 250.00,
+            "description": "Manual contribution",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+    calls["portfolio"].clear()
+    calls["symphony"].clear()
+
+    list_res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert list_res.status_code == 200
+    manual_rows = [row for row in list_res.json() if row["is_manual"]]
+    assert len(manual_rows) == 1
+    manual_id = manual_rows[0]["id"]
+
+    delete_res = client.delete(f"/api/cash-flows/manual/{manual_id}", headers=auth_headers)
+    assert delete_res.status_code == 200
+    assert calls["portfolio"] == [["test-account-001"]]
+    assert calls["symphony"] == [("test-account-001", None)]
+
+
+def test_delete_manual_cash_flow_rejects_non_manual_row(client, auth_headers):
+    list_res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert list_res.status_code == 200
+    seeded_row_id = list_res.json()[0]["id"]
+
+    delete_res = client.delete(f"/api/cash-flows/manual/{seeded_row_id}", headers=auth_headers)
+    assert delete_res.status_code == 400
+    assert delete_res.json()["detail"] == "Only manual deposit/withdrawal entries can be deleted"
+
+
 def test_sync_requires_local_auth_token(client):
     res = client.post("/api/sync?account_id=all")
     assert res.status_code == 401

@@ -225,6 +225,7 @@ graph TD
 - `GET /api/transactions`
 - `GET /api/cash-flows`
 - `POST /api/cash-flows/manual`
+- `DELETE /api/cash-flows/manual/{cash_flow_id}`
 - `GET /api/sync/status`
 - `POST /api/sync`
 - `GET /api/symphony-export/status`

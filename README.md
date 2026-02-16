@@ -42,7 +42,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 - **Real-time ticker quotes** — Live price change badges next to each holding (requires free Finnhub API key).
 - **Holdings visualization** — Donut chart and detailed list of current positions with allocation percentages.
 - **Transaction history** — Searchable, paginated list of all trades.
-- **Cash flow tracking** — Deposits, withdrawals, fees, and dividends. Supports manual entries for transfers not captured by the API.
+- **Cash flow tracking** — Deposits, withdrawals, fees, and dividends. Supports manual entries for transfers not captured by the API, plus manual-entry deletion from the Non-Trade Activity tab.
 - **Dark-themed UI** — Easy on the eyes for extended monitoring sessions.
 
 ---
@@ -175,7 +175,7 @@ Three tabs below the main dashboard:
 
 - **All Metrics** — Complete list of 20+ computed metrics, grouped by category
 - **Transactions** — Paginated table of every trade (filterable by symbol)
-- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes a form to **manually add** deposits or withdrawals not captured by the API.
+- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes controls to **manually add** and **delete** manual deposits/withdrawals not captured by the API.
 
 ### Symphony Cards
 
@@ -534,7 +534,7 @@ Three tabs below the main dashboard:
 
 - **All Metrics** — Complete list of 20+ computed metrics, grouped by category
 - **Transactions** — Paginated table of every trade (filterable by symbol)
-- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes a form to **manually add** deposits or withdrawals not captured by the API.
+- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes controls to **manually add** and **delete** manual deposits/withdrawals not captured by the API.
 
 ### Symphony Cards
 
@@ -646,7 +646,7 @@ You need a Finnhub API key configured in `config.json`. See [Optional: Real-Time
 Portfolio-level data (values, transactions, cash flows, holdings) is fully backfilled on the next sync — the Composer API returns your complete history. Per-symphony daily values, however, are only captured for the current day during incremental syncs, so the symphony-level performance charts may show gaps for days the app wasn't running. This does not affect the main portfolio chart or metrics.
 
 ### Can I add deposits that the API doesn't capture?
-Yes! Roth IRA contributions are not captured by the API, so you can add them manually. Go to the **Non-Trade Activity** tab and use the manual entry form to add deposits or withdrawals with a date and amount. The next sync will recalculate all metrics with the corrected deposit totals.
+Yes. Roth IRA contributions are not captured by the API, so you can add them manually. Go to the **Non-Trade Activity** tab and use the manual entry form to add deposits or withdrawals with a date and amount. If you need to correct an entry, use the delete control on manual rows in the same table. The next sync will recalculate all metrics with the corrected deposit totals.
 
 ### How do I add another Composer account?
 Add another entry to the `composer_accounts` array in `config.json` and restart the app. See [Multiple accounts](#configuring-configjson).

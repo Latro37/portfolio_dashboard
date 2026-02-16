@@ -15,6 +15,72 @@ import numpy as np
 from scipy.optimize import brentq
 
 logger = logging.getLogger(__name__)
+_MAX_ANNUALIZED_PCT = 1_000_000.0
+_MAX_ANNUALIZED_DECIMAL = _MAX_ANNUALIZED_PCT / 100.0
+_DEFAULT_RISK_FREE_RATE = 0.05
+_MIN_RISK_FREE_RATE = -0.999999
+
+
+def _annualized_pct_from_return_decimal(return_decimal: float, days_elapsed: int) -> float:
+    """Return annualized percent from a period return decimal with overflow guards."""
+    if days_elapsed <= 0:
+        return 0.0
+    years = days_elapsed / 365.25
+    if years <= 0:
+        return 0.0
+
+    base = 1 + return_decimal
+    if base <= 0:
+        return -100.0
+
+    try:
+        log_annual = math.log(base) / years
+    except (ValueError, OverflowError, ZeroDivisionError):
+        return 0.0
+
+    max_log = math.log1p(_MAX_ANNUALIZED_DECIMAL)
+    if log_annual >= max_log:
+        return _MAX_ANNUALIZED_PCT
+
+    try:
+        annualized_pct = math.expm1(log_annual) * 100.0
+    except OverflowError:
+        return _MAX_ANNUALIZED_PCT
+
+    if not math.isfinite(annualized_pct):
+        return 0.0
+    return min(max(annualized_pct, -100.0), _MAX_ANNUALIZED_PCT)
+
+
+def _sanitize_risk_free_rate(risk_free_rate: float) -> float:
+    """Normalize invalid/non-finite risk-free-rate inputs to safe values."""
+    try:
+        rf = float(risk_free_rate)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid risk_free_rate=%r; using default %.4f",
+            risk_free_rate,
+            _DEFAULT_RISK_FREE_RATE,
+        )
+        return _DEFAULT_RISK_FREE_RATE
+
+    if not math.isfinite(rf):
+        logger.warning(
+            "Non-finite risk_free_rate=%r; using default %.4f",
+            risk_free_rate,
+            _DEFAULT_RISK_FREE_RATE,
+        )
+        return _DEFAULT_RISK_FREE_RATE
+
+    if rf <= -1.0:
+        logger.warning(
+            "risk_free_rate=%.6f is <= -1.0; clamping to %.6f",
+            rf,
+            _MIN_RISK_FREE_RATE,
+        )
+        return _MIN_RISK_FREE_RATE
+
+    return rf
 
 
 # =====================================================================
@@ -80,8 +146,9 @@ def _modified_dietz(
         return 0.0, 0.0
 
     mdr = (pv_end - pv_start - total_flow) / denom
-    years = total_days / 365.25
-    annualized = (1 + mdr) ** (1 / years) - 1 if mdr > -1 else mdr
+    if mdr <= -1:
+        return -1.0, mdr
+    annualized = _annualized_pct_from_return_decimal(mdr, total_days) / 100.0
     return annualized, mdr
 
 
@@ -124,7 +191,13 @@ def compute_mwr(
 
     try:
         irr = brentq(npv, -0.999, 10.0, maxiter=200, xtol=1e-12)
-        period_return = (1 + irr) ** years - 1
+        log_growth = years * math.log1p(irr)
+        if log_growth >= math.log1p(_MAX_ANNUALIZED_DECIMAL):
+            period_return = _MAX_ANNUALIZED_DECIMAL
+        else:
+            period_return = math.expm1(log_growth)
+            if not math.isfinite(period_return):
+                period_return = 0.0
         return irr, period_return
     except (ValueError, RuntimeError):
         # Solver failed — fall back to Modified Dietz
@@ -136,7 +209,30 @@ def compute_cagr(pv_start: float, pv_end: float, days_elapsed: int) -> float:
     if days_elapsed <= 0 or pv_start <= 0 or pv_end <= 0:
         return 0.0
     years = days_elapsed / 365.25
-    return (pv_end / pv_start) ** (1 / years) - 1
+    if years <= 0:
+        return 0.0
+
+    growth = pv_end / pv_start
+    if growth <= 0:
+        return 0.0
+
+    try:
+        log_annual = math.log(growth) / years
+    except (ValueError, OverflowError, ZeroDivisionError):
+        return 0.0
+
+    max_log = math.log1p(_MAX_ANNUALIZED_DECIMAL)
+    if log_annual >= max_log:
+        return _MAX_ANNUALIZED_DECIMAL
+
+    try:
+        annualized = math.expm1(log_annual)
+    except OverflowError:
+        return _MAX_ANNUALIZED_DECIMAL
+
+    if not math.isfinite(annualized):
+        return 0.0
+    return min(max(annualized, -1.0), _MAX_ANNUALIZED_DECIMAL)
 
 
 def compute_annualized_return(twr_decimal: float, days_elapsed: int) -> float:
@@ -145,10 +241,7 @@ def compute_annualized_return(twr_decimal: float, days_elapsed: int) -> float:
     Annualizes the Time-Weighted Return — measures pure strategy
     performance independent of cash-flow timing.
     """
-    if days_elapsed <= 0:
-        return 0.0
-    years = days_elapsed / 365.25
-    return ((1 + twr_decimal) ** (1 / years) - 1) * 100
+    return _annualized_pct_from_return_decimal(twr_decimal, days_elapsed)
 
 
 def compute_annualized_return_cumulative(cum_ret_decimal: float, days_elapsed: int) -> float:
@@ -157,10 +250,7 @@ def compute_annualized_return_cumulative(cum_ret_decimal: float, days_elapsed: i
     Annualizes the cumulative return (profit / net_deposits) — reflects
     the real-world dollar growth rate of the investor's capital.
     """
-    if days_elapsed <= 0:
-        return 0.0
-    years = days_elapsed / 365.25
-    return ((1 + cum_ret_decimal) ** (1 / years) - 1) * 100
+    return _annualized_pct_from_return_decimal(cum_ret_decimal, days_elapsed)
 
 
 def compute_drawdown(pv_series: List[float]) -> Tuple[float, float]:
@@ -448,7 +538,11 @@ def _prepare_arrays(
         d = cf["date"] if isinstance(cf["date"], date) else date.fromisoformat(str(cf["date"]))
         ext_flows[d] = ext_flows.get(d, 0) + cf["amount"]
 
-    rf_daily = (1 + risk_free_rate) ** (1 / 252) - 1
+    normalized_rf = _sanitize_risk_free_rate(risk_free_rate)
+    rf_daily = (1 + normalized_rf) ** (1 / 252) - 1
+    if isinstance(rf_daily, complex) or not math.isfinite(rf_daily):
+        logger.warning("Computed invalid rf_daily=%r from risk_free_rate=%r; using 0.0", rf_daily, risk_free_rate)
+        rf_daily = 0.0
     return pv, dates, deposits, daily_rets, ext_flows, rf_daily
 
 
