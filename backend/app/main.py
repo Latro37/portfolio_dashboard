@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -18,6 +19,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+# Access logs are high-volume in local development (especially with quote polling
+# and websocket reconnects). Keep them off by default unless explicitly enabled.
+if os.getenv("PD_VERBOSE_ACCESS_LOGS", "").lower() not in {"1", "true", "yes", "on"}:
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
