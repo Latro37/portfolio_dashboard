@@ -61,10 +61,12 @@ def get_portfolio_cash_flows_data(
     }
     return [
         {
+            "id": row.id,
             "date": str(row.date),
             "type": row.type,
             "amount": row.amount,
             "description": row.description,
+            "is_manual": bool(row.is_manual),
             "account_id": row.account_id,
             "account_name": acct_names.get(row.account_id, row.account_id),
         }

@@ -128,10 +128,12 @@ export interface TransactionRow {
 }
 
 export interface CashFlowRow {
+  id: number;
   date: string;
   type: string;
   amount: number;
   description: string;
+  is_manual: boolean;
   account_id?: string;
   account_name?: string;
 }
@@ -436,6 +438,10 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
+  deleteManualCashFlow: (cashFlowId: number) =>
+    authFetch(`/cash-flows/manual/${cashFlowId}`, {
+      method: "DELETE",
     }).then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   getSymphonies: (accountId?: string) =>
     fetchJSON<SymphonyInfo[]>(`/symphonies${_qs(accountId)}`),

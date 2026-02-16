@@ -175,7 +175,7 @@ Three tabs below the main dashboard:
 
 - **All Metrics** — Complete list of 20+ computed metrics, grouped by category
 - **Transactions** — Paginated table of every trade (filterable by symbol)
-- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes a form to **manually add** deposits or withdrawals not captured by the API.
+- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes controls to **manually add or delete** deposits/withdrawals not captured by the API.
 
 ### Symphony Cards
 
@@ -534,7 +534,7 @@ Three tabs below the main dashboard:
 
 - **All Metrics** — Complete list of 20+ computed metrics, grouped by category
 - **Transactions** — Paginated table of every trade (filterable by symbol)
-- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes a form to **manually add** deposits or withdrawals not captured by the API.
+- **Non-Trade Activity** — Cash flows including deposits, withdrawals, fees, and dividends. Includes controls to **manually add or delete** deposits/withdrawals not captured by the API.
 
 ### Symphony Cards
 

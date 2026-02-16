@@ -63,6 +63,18 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
       await transactionsQuery.refetch();
     },
   });
+  const deleteManualCashFlowMutation = useMutation({
+    mutationFn: api.deleteManualCashFlow,
+    onSuccess: async () => {
+      if (resolvedSingleAccountId) {
+        await invalidateAfterManualCashFlow(queryClient, resolvedSingleAccountId);
+      } else {
+        await invalidateAfterManualCashFlow(queryClient, accountId ?? "");
+      }
+      await cashFlowsQuery.refetch();
+      await transactionsQuery.refetch();
+    },
+  });
 
   const handleAddManual = async () => {
     if (!resolvedSingleAccountId || !manualDate || !manualAmount) return;
@@ -79,6 +91,12 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     setManualAmount("");
     setManualDesc("");
     setShowManualForm(false);
+    onDataChange?.();
+  };
+
+  const handleDeleteManual = async (cashFlowId: number) => {
+    if (!Number.isFinite(cashFlowId)) return;
+    await deleteManualCashFlowMutation.mutateAsync(cashFlowId);
     onDataChange?.();
   };
 
@@ -110,5 +128,6 @@ export function useDetailTabsData({ accountId, onDataChange }: Args) {
     setManualDesc,
     resolvedSingleAccountId,
     handleAddManual,
+    handleDeleteManual,
   };
 }

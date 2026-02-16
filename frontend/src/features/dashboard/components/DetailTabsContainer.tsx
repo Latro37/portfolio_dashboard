@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, DollarSign, Plus, TrendingDown } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, DollarSign, Plus, Trash2, TrendingDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +32,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
     setManualDesc,
     resolvedSingleAccountId,
     handleAddManual,
+    handleDeleteManual,
   } = useDetailTabsData({
     accountId,
     onDataChange,
@@ -231,6 +232,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                     <th className="pb-2 pr-4">Type</th>
                     <th className="pb-2 pr-4">Description</th>
                     <th className="pb-2 text-right">Amount</th>
+                    <th className="pb-2 pl-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -246,7 +248,7 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                     const color =
                       cashFlow.amount >= 0 ? "text-emerald-400" : "text-red-400";
                     return (
-                      <tr key={i} className="border-b border-border/30">
+                      <tr key={cashFlow.id ?? i} className="border-b border-border/30">
                         <td className="py-2 pr-4 text-muted-foreground">{cashFlow.date}</td>
                         <td className="py-2 pr-4 text-xs text-muted-foreground">
                           {cashFlow.account_name ?? ""}
@@ -268,6 +270,19 @@ export function DetailTabs({ accountId, onDataChange }: Props) {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
                           })}
+                        </td>
+                        <td className="py-2 pl-3 text-right">
+                          {cashFlow.is_manual ? (
+                            <button
+                              type="button"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/50 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              onClick={() => handleDeleteManual(cashFlow.id)}
+                              aria-label="Delete manual entry"
+                              title="Delete manual entry"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                         </td>
                       </tr>
                     );

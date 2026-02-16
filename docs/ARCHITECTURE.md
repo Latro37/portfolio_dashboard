@@ -225,6 +225,7 @@ graph TD
 - `GET /api/transactions`
 - `GET /api/cash-flows`
 - `POST /api/cash-flows/manual`
+- `DELETE /api/cash-flows/manual/{cash_flow_id}`
 - `GET /api/sync/status`
 - `POST /api/sync`
 - `GET /api/symphony-export/status`
@@ -237,6 +238,7 @@ graph TD
 
 Notes:
 - `GET /api/config` returns client-safe settings and a setup status (`composer_config_ok`, `composer_config_error`) so the dashboard can show actionable configuration errors instead of spinning. It also includes `symphony_export.enabled` and first-start simulation flags (`first_start_test_mode`, `first_start_run_id`).
+- `GET /api/cash-flows` returns row identifiers and manual-source metadata (`id`, `is_manual`) so the dashboard can delete user-added manual entries safely.
 - On first sync, `POST /api/sync` blocks until non-trade activity is applied and portfolio history/metrics are recomputed, so first-view charts and metrics are stable.
 - Symphony structure export runs in a background job and is observable via `GET /api/symphony-export/status` (`idle|running|cancelling|complete|cancelled|error`). Users can request cancellation via `POST /api/symphony-export/cancel`.
 

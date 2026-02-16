@@ -93,6 +93,7 @@ def add_manual_cash_flow_data(
             type=cf_type,
             amount=amount,
             description=body.description or "Manual entry",
+            is_manual=1,
         )
     )
     db.commit()
@@ -108,6 +109,42 @@ def add_manual_cash_flow_data(
         logger.warning("Post-manual-entry recompute failed: %s", exc)
 
     return {"status": "ok", "date": str(body.date), "type": cf_type, "amount": amount}
+
+
+def delete_manual_cash_flow_data(
+    db: Session,
+    cash_flow_id: int,
+    *,
+    resolve_account_ids_fn: Callable[[Session, Optional[str]], list[str]],
+    get_client_for_account_fn: Callable[[Session, str], object],
+) -> dict:
+    """Delete a manual cash flow row and recompute derived portfolio metrics."""
+    row = db.query(CashFlow).filter(CashFlow.id == cash_flow_id).first()
+    if not row:
+        raise HTTPException(404, "Manual cash flow not found")
+
+    # Validate row account is visible in current scope.
+    resolve_account_ids_fn(db, row.account_id)
+
+    if not bool(row.is_manual):
+        raise HTTPException(400, "Only manual cash-flow entries can be deleted")
+
+    account_id = row.account_id
+    deleted_id = int(row.id)
+    db.delete(row)
+    db.commit()
+
+    # Recompute account-level portfolio history/metrics after mutation.
+    try:
+        client = get_client_for_account_fn(db, account_id)
+        from app.services.sync import _recompute_metrics, _sync_portfolio_history
+
+        _sync_portfolio_history(db, client, account_id)
+        _recompute_metrics(db, account_id)
+    except Exception as exc:
+        logger.warning("Post-manual-delete recompute failed: %s", exc)
+
+    return {"status": "ok", "id": deleted_id}
 
 
 def get_sync_status_data(db: Session, account_id: str) -> dict:

@@ -245,6 +245,72 @@ def test_manual_cash_flow_contract(client, auth_headers):
     assert payload["amount"] == -123.45
 
 
+def test_cash_flows_contract_includes_manual_metadata(client):
+    res = client.get("/api/cash-flows?account_id=test-account-001")
+    assert res.status_code == 200
+    payload = res.json()
+    assert isinstance(payload, list)
+    assert len(payload) >= 1
+    assert set(payload[0].keys()) == {
+        "id",
+        "date",
+        "type",
+        "amount",
+        "description",
+        "is_manual",
+        "account_id",
+        "account_name",
+    }
+    assert isinstance(payload[0]["id"], int)
+    assert isinstance(payload[0]["is_manual"], bool)
+
+
+def test_delete_manual_cash_flow_contract(client, auth_headers):
+    create_res = client.post(
+        "/api/cash-flows/manual",
+        json={
+            "account_id": "test-account-001",
+            "date": "2025-01-06",
+            "type": "deposit",
+            "amount": 10.0,
+            "description": "Manual correction to delete",
+        },
+        headers=auth_headers,
+    )
+    assert create_res.status_code == 200
+
+    rows_before = client.get("/api/cash-flows?account_id=test-account-001")
+    assert rows_before.status_code == 200
+    created = next(
+        row for row in rows_before.json() if row["description"] == "Manual correction to delete"
+    )
+    assert created["is_manual"] is True
+
+    delete_res = client.delete(
+        f"/api/cash-flows/manual/{created['id']}",
+        headers=auth_headers,
+    )
+    assert delete_res.status_code == 200
+    assert delete_res.json() == {"status": "ok", "id": created["id"]}
+
+    rows_after = client.get("/api/cash-flows?account_id=test-account-001")
+    assert rows_after.status_code == 200
+    assert all(row["id"] != created["id"] for row in rows_after.json())
+
+
+def test_delete_manual_cash_flow_rejects_non_manual_entry(client, auth_headers):
+    rows = client.get("/api/cash-flows?account_id=test-account-001")
+    assert rows.status_code == 200
+    non_manual = next(row for row in rows.json() if row["is_manual"] is False)
+
+    delete_res = client.delete(
+        f"/api/cash-flows/manual/{non_manual['id']}",
+        headers=auth_headers,
+    )
+    assert delete_res.status_code == 400
+    assert delete_res.json()["detail"] == "Only manual cash-flow entries can be deleted"
+
+
 def test_sync_requires_local_auth_token(client):
     res = client.post("/api/sync?account_id=all")
     assert res.status_code == 401

@@ -405,6 +405,7 @@ def _sync_cash_flows(db: Session, client: ComposerClient, account_id: str, since
             type=mapped_type,
             amount=r["amount"],
             description=r.get("description", ""),
+            is_manual=0,
         ))
         existing.add(key)
         new_count += 1

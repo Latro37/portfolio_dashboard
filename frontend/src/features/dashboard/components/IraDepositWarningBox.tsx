@@ -10,10 +10,10 @@ export function IraDepositWarningBox({ onClose }: Props) {
       <div className="flex items-start gap-2">
         <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-300" />
         <div className="pr-4">
-          <p className="font-medium">Manual IRA deposit warning</p>
+          <p className="font-medium">IRA deposit warning</p>
           <p className="mt-1 text-amber-100/90">
-            Composer does not always report IRA deposits (for example, Roth IRA contributions).
-            Add missing deposits manually in the Non-Trade Activity tab to keep performance metrics accurate.
+            Composer&apos;s API does not provide IRA deposit data. Add missing deposits manually in
+            the Non-Trade Activity tab to ensure performance metrics are accurate.
           </p>
         </div>
         <button
@@ -28,4 +28,3 @@ export function IraDepositWarningBox({ onClose }: Props) {
     </div>
   );
 }
-

@@ -30,6 +30,11 @@ class ManualCashFlowResponse(BaseModel):
     amount: float
 
 
+class DeleteManualCashFlowResponse(BaseModel):
+    status: str
+    id: int
+
+
 # --- Sync ---
 class SyncStatus(BaseModel):
     status: str  # idle / syncing / error
@@ -220,10 +225,12 @@ class TransactionListResponse(BaseModel):
 
 # --- Cash Flows ---
 class CashFlowRow(BaseModel):
+    id: int
     date: date
     type: str
     amount: float
     description: str = ""
+    is_manual: bool = False
     account_id: Optional[str] = None
     account_name: Optional[str] = None
 
