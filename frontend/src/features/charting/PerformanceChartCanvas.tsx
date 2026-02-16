@@ -67,6 +67,7 @@ const CHART_MARGIN_NO_LABELS = { ...CHART_MARGIN, right: 20 };
 const END_LABEL_GAP = 16;
 const END_LABEL_FONT_SIZE = 11;
 const END_LABEL_FONT_WEIGHT = 700;
+const END_LABEL_EDGE_PADDING = 1;
 const Y_AXIS_TICK_COUNT = 5;
 const AUTO_DOMAIN: [string, string] = ["auto", "auto"];
 
@@ -229,8 +230,9 @@ export function PerformanceChartCanvas({
     const [domainMin, domainMax] = yAxisDomain;
 
     const labelHalfHeight = END_LABEL_FONT_SIZE / 2;
-    const minY = CHART_MARGIN.top + 4 + labelHalfHeight;
-    const maxY = CHART_HEIGHT - CHART_MARGIN.bottom - 4 - labelHalfHeight;
+    const minY = CHART_MARGIN.top + END_LABEL_EDGE_PADDING + labelHalfHeight;
+    const maxY =
+      CHART_HEIGHT - CHART_MARGIN.bottom - END_LABEL_EDGE_PADDING - labelHalfHeight;
 
     const candidates = activeEndLabels
       .map((series) => {
@@ -283,10 +285,9 @@ export function PerformanceChartCanvas({
         return null;
       }
 
-      const labelHalfHeight = END_LABEL_FONT_SIZE / 2;
-      const minY = CHART_MARGIN.top + 4 + labelHalfHeight;
-      const maxY = CHART_HEIGHT - CHART_MARGIN.bottom - 4 - labelHalfHeight;
-      const y = Math.min(maxY, Math.max(minY, props.y + yOffset));
+      // Keep stacked offsets as-is; per-label clamping can collapse multiple labels onto
+      // the same boundary and reintroduce overlap.
+      const y = props.y + yOffset;
       return (
         <text
           x={props.x + 8}
