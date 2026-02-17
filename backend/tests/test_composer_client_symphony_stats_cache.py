@@ -4,7 +4,7 @@ import requests
 import pytest
 
 import app.composer_client as composer_client
-from app.composer_client import ComposerClient
+from app.composer_client import ComposerClient, SymphonyStatsRateLimitError
 
 
 class _DummyResponse:
@@ -49,7 +49,7 @@ def test_get_symphony_stats_reuses_recent_cache(monkeypatch: pytest.MonkeyPatch)
             {"symphonies": [{"id": "sym-1", "name": "Momentum"}]},
         )
 
-    times = iter([100.0, 101.0])
+    times = iter([100.0, 101.0, 102.0])
     monkeypatch.setattr(composer_client.requests, "get", _fake_get)
     monkeypatch.setattr(composer_client.time, "monotonic", lambda: next(times))
 
@@ -80,7 +80,9 @@ def test_get_symphony_stats_falls_back_to_cached_payload_after_429(
         call_count += 1
         return responses.pop(0)
 
-    times = iter([200.0, 220.0, 221.0])
+    # First fetch caches at t=201. Second call at t=220 forces a refetch
+    # (TTL is 15s), which then receives 429 and should fall back to cache.
+    times = iter([200.0, 201.0, 220.0, 221.0, 222.0])
     monkeypatch.setattr(composer_client.requests, "get", _fake_get)
     monkeypatch.setattr(composer_client.time, "monotonic", lambda: next(times))
 
@@ -97,7 +99,7 @@ def test_get_symphony_stats_falls_back_to_cached_payload_after_429(
     assert call_count == 2
 
 
-def test_get_symphony_stats_returns_empty_during_429_cooldown_without_cache(
+def test_get_symphony_stats_raises_during_429_cooldown_without_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     call_count = 0
@@ -111,15 +113,43 @@ def test_get_symphony_stats_returns_empty_during_429_cooldown_without_cache(
             text='{"errors":[{"status":429}]}',
         )
 
-    times = iter([300.0, 301.0])
+    times = iter([300.0, 301.0, 302.0])
     monkeypatch.setattr(composer_client.requests, "get", _fake_get)
     monkeypatch.setattr(composer_client.time, "monotonic", lambda: next(times))
 
     client = ComposerClient("key-3", "secret-3", base_url="https://unit.test")
-    first = client.get_symphony_stats("acct-3")
-    second = client.get_symphony_stats("acct-3")
+    with pytest.raises(SymphonyStatsRateLimitError):
+        client.get_symphony_stats("acct-3")
+    with pytest.raises(SymphonyStatsRateLimitError):
+        client.get_symphony_stats("acct-3")
 
-    assert first == []
-    assert second == []
     # Second call is suppressed by cooldown and does not hit Composer again.
+    assert call_count == 1
+
+
+def test_get_symphony_stats_uses_response_completion_time_for_cache_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    call_count = 0
+
+    def _fake_get(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _DummyResponse(
+            200,
+            {"symphonies": [{"id": "sym-4", "name": "Quality"}]},
+        )
+
+    # Simulate a slow response where completion is much later than request start.
+    # The second read should still be treated as fresh cache data.
+    times = iter([100.0, 130.0, 140.0, 141.0])
+    monkeypatch.setattr(composer_client.requests, "get", _fake_get)
+    monkeypatch.setattr(composer_client.time, "monotonic", lambda: next(times))
+
+    client = ComposerClient("key-4", "secret-4", base_url="https://unit.test")
+    first = client.get_symphony_stats("acct-4")
+    second = client.get_symphony_stats("acct-4")
+
+    assert first == [{"id": "sym-4", "name": "Quality"}]
+    assert second == first
     assert call_count == 1
