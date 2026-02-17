@@ -145,6 +145,12 @@ export interface SyncStatus {
   message: string;
 }
 
+export interface SyncTriggerResponse {
+  status: string;
+  synced_accounts?: number;
+  reason?: string;
+}
+
 export interface SymphonyExportJobStatus {
   status: string; // idle / running / cancelling / complete / cancelled / error
   job_id: string | null;
@@ -433,7 +439,10 @@ export const api = {
       .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
   triggerSync: (accountId?: string) =>
     authFetch(`/sync${_qs(accountId)}`, { method: "POST" })
-      .then((r) => { if (!r.ok) throw new Error(`Failed: ${r.status}`); return r.json(); }),
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed: ${r.status}`);
+        return r.json() as Promise<SyncTriggerResponse>;
+      }),
   addManualCashFlow: (body: {
     account_id: string;
     date: string;

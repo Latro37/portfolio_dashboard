@@ -28,6 +28,7 @@ type Args = {
   screenshotConfig: ScreenshotConfig | null;
   setScreenshotConfig: Dispatch<SetStateAction<ScreenshotConfig | null>>;
   refreshDashboardData: () => Promise<void>;
+  enableAutoPostClose: boolean;
 };
 
 type Result = {
@@ -43,6 +44,7 @@ export function usePostCloseSyncAndSnapshot({
   screenshotConfig,
   setScreenshotConfig,
   refreshDashboardData,
+  enableAutoPostClose,
 }: Args): Result {
   const queryClient = useQueryClient();
   const snapshotRef = useRef<HTMLDivElement>(null);
@@ -50,8 +52,29 @@ export function usePostCloseSyncAndSnapshot({
   const lastPostCloseErrorKeyRef = useRef<string | null>(null);
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const [snapshotData, setSnapshotData] = useState<DashboardSnapshotData | null>(null);
+  const waitForSyncIdle = useCallback(async () => {
+    if (!resolvedAccountId) return;
+
+    const timeoutAt = Date.now() + 5 * 60_000;
+    while (Date.now() < timeoutAt) {
+      const status = await api.getSyncStatus(resolvedAccountId).catch(() => null);
+      if (!status || status.status !== "syncing") {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    throw new Error("Timed out waiting for existing sync to finish");
+  }, [resolvedAccountId]);
+
   const syncMutation = useMutation({
-    mutationFn: () => api.triggerSync(resolvedAccountId),
+    mutationFn: async () => {
+      const result = await api.triggerSync(resolvedAccountId);
+      if (result.status === "already_syncing") {
+        await waitForSyncIdle();
+      }
+      return result;
+    },
     onSuccess: async () => {
       await invalidateAfterSync(queryClient, resolvedAccountId);
       await refreshDashboardData();
@@ -206,7 +229,7 @@ export function usePostCloseSyncAndSnapshot({
   }, [syncMutation]);
 
   useEffect(() => {
-    if (!resolvedAccountId) return;
+    if (!enableAutoPostClose || !resolvedAccountId) return;
 
     const doPostCloseUpdate = async () => {
       if (postCloseRunInFlightRef.current) return;
@@ -240,7 +263,7 @@ export function usePostCloseSyncAndSnapshot({
     doPostCloseUpdate();
     const intervalId = setInterval(doPostCloseUpdate, 60_000);
     return () => clearInterval(intervalId);
-  }, [resolvedAccountId, runSyncAndRefresh, triggerSnapshot]);
+  }, [enableAutoPostClose, resolvedAccountId, runSyncAndRefresh, triggerSnapshot]);
 
   return {
     snapshotRef,
