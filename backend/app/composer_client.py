@@ -23,6 +23,10 @@ _SYMPHONY_STATS_CACHE_MAX_ENTRIES = 128
 _symphony_stats_cache_lock = Lock()
 _symphony_stats_cache: Dict[Tuple[str, str, str], Dict[str, object]] = {}
 
+
+class SymphonyStatsRateLimitError(RuntimeError):
+    """Raised when symphony stats are rate-limited without a cached payload."""
+
 # Map Composer account_type strings to friendly display names
 ACCOUNT_TYPE_DISPLAY = {
     "INDIVIDUAL": "Taxable",
@@ -324,17 +328,20 @@ class ComposerClient:
                     if now < cooldown_until:
                         return payload
                 elif now < cooldown_until:
-                    return []
+                    raise SymphonyStatsRateLimitError(
+                        f"Symphony stats cooldown active for account {account_id}"
+                    )
 
         try:
             data = self._get_json(f"api/v0.1/portfolio/accounts/{account_id}/symphony-stats-meta")
             symphonies = data.get("symphonies", [])
             if not isinstance(symphonies, list):
                 symphonies = []
+            fetched_at = time.monotonic()
             with _symphony_stats_cache_lock:
                 _symphony_stats_cache[cache_key] = {
                     "payload": symphonies,
-                    "fetched_at": now,
+                    "fetched_at": fetched_at,
                     "cooldown_until": 0.0,
                 }
                 if len(_symphony_stats_cache) > _SYMPHONY_STATS_CACHE_MAX_ENTRIES:
@@ -356,37 +363,41 @@ class ComposerClient:
                 if retry_after is not None and retry_after > 0
                 else _SYMPHONY_STATS_RATE_LIMIT_COOLDOWN_SECONDS
             )
-            cooldown_until = now + cooldown_seconds
+            observed_at = time.monotonic()
+            cooldown_until = observed_at + cooldown_seconds
 
+            warm_cache = False
             with _symphony_stats_cache_lock:
                 cached = _symphony_stats_cache.get(cache_key)
                 cached_payload = cached.get("payload") if cached else None
+                warm_cache = isinstance(cached_payload, list)
                 cached_fetched_at = (
-                    float(cached.get("fetched_at", now))
-                    if cached and isinstance(cached.get("payload"), list)
-                    else now
+                    float(cached.get("fetched_at", observed_at))
+                    if cached and warm_cache
+                    else observed_at
                 )
-                if not isinstance(cached_payload, list):
-                    cached_payload = []
                 _symphony_stats_cache[cache_key] = {
                     "payload": cached_payload,
                     "fetched_at": cached_fetched_at,
                     "cooldown_until": cooldown_until,
                 }
 
-            if cached_payload:
+            if warm_cache:
                 logger.warning(
                     "Symphony stats rate-limited for account %s; using cached payload for %.1fs",
                     account_id,
                     cooldown_seconds,
                 )
-            else:
-                logger.warning(
-                    "Symphony stats rate-limited for account %s; returning empty payload for %.1fs",
-                    account_id,
-                    cooldown_seconds,
-                )
-            return cached_payload
+                return cached_payload
+
+            logger.warning(
+                "Symphony stats rate-limited for account %s without cache; raising for %.1fs",
+                account_id,
+                cooldown_seconds,
+            )
+            raise SymphonyStatsRateLimitError(
+                f"Symphony stats rate-limited for account {account_id}"
+            ) from exc
 
     def get_symphony_history(self, account_id: str, symphony_id: str) -> List[Dict]:
         """Fetch daily value history for a specific symphony.
