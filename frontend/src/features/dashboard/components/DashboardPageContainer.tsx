@@ -116,6 +116,8 @@ export default function DashboardPageContainer() {
     holdings,
     holdingsLastUpdated,
     symphonies,
+    summaryIsPlaceholderData,
+    performanceIsPlaceholderData,
     loading,
     error,
     setSummary,
@@ -215,7 +217,14 @@ export default function DashboardPageContainer() {
   const initialLiveOverlayScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!liveEnabled || !resolvedAccountId || !summary || symphonies.length === 0) {
+    if (
+      !liveEnabled ||
+      !resolvedAccountId ||
+      !summary ||
+      symphonies.length === 0 ||
+      summaryIsPlaceholderData ||
+      performanceIsPlaceholderData
+    ) {
       if (!liveEnabled) {
         initialLiveOverlayScopeRef.current = null;
       }
@@ -235,6 +244,8 @@ export default function DashboardPageContainer() {
     period,
     customStart,
     customEnd,
+    summaryIsPlaceholderData,
+    performanceIsPlaceholderData,
     applyLiveOverlay,
   ]);
 

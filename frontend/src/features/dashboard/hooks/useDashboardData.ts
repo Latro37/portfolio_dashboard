@@ -39,6 +39,8 @@ type Result = {
   holdings: HoldingsResponse | null;
   holdingsLastUpdated: Date | null;
   symphonies: SymphonyInfo[];
+  summaryIsPlaceholderData: boolean;
+  performanceIsPlaceholderData: boolean;
   loading: boolean;
   error: string | null;
   setSummary: Dispatch<SetStateAction<Summary | null>>;
@@ -200,6 +202,8 @@ export function useDashboardData({
   const holdingsLastUpdated =
     holdingsLastUpdatedOverride ??
     (holdingsQuery.data ? new Date(holdingsQuery.dataUpdatedAt) : null);
+  const summaryIsPlaceholderData = summaryQuery.isPlaceholderData;
+  const performanceIsPlaceholderData = performanceQuery.isPlaceholderData;
 
   const queryError = summaryQuery.error?.message ?? holdingsQuery.error?.message ?? null;
   const error = manualError ?? queryError;
@@ -337,6 +341,8 @@ export function useDashboardData({
     holdings,
     holdingsLastUpdated,
     symphonies,
+    summaryIsPlaceholderData,
+    performanceIsPlaceholderData,
     loading,
     error,
     setSummary,
