@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { HelpModal } from "@/components/HelpModal";
@@ -212,6 +212,31 @@ export default function DashboardPageContainer() {
 
   const { todayDollarChange, todayPctChange, totalValue: symphonyTotalValue } =
     useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
+  const initialLiveOverlayScopeRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!liveEnabled || !resolvedAccountId || !summary || symphonies.length === 0) {
+      if (!liveEnabled) {
+        initialLiveOverlayScopeRef.current = null;
+      }
+      return;
+    }
+
+    const scopeKey = [resolvedAccountId, period, customStart, customEnd].join("|");
+    if (initialLiveOverlayScopeRef.current === scopeKey) return;
+
+    initialLiveOverlayScopeRef.current = scopeKey;
+    void applyLiveOverlay(symphonies);
+  }, [
+    liveEnabled,
+    resolvedAccountId,
+    summary,
+    symphonies,
+    period,
+    customStart,
+    customEnd,
+    applyLiveOverlay,
+  ]);
 
   if (bootstrapLoading) {
     return <DashboardLoadingScreen />;
