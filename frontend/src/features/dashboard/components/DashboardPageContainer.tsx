@@ -150,6 +150,7 @@ export default function DashboardPageContainer() {
     screenshotConfig,
     setScreenshotConfig,
     refreshDashboardData: fetchData,
+    enableAutoPostClose: !isFirstStartTestMode,
   });
 
   const { liveEnabled, toggleLive } = useDashboardLiveToggle({

@@ -85,6 +85,7 @@ def get_settings() -> Settings:
 
 # Module-level cache for parsed config.json data
 _config_json_cache: Optional[dict] = None
+_accounts_log_signature: Optional[tuple[str, ...]] = None
 
 
 def _load_config_json() -> dict:
@@ -135,7 +136,11 @@ def load_accounts() -> List[AccountCredentials]:
         raise ValueError(
             "config.json entries must have 'name', 'api_key_id', and 'api_secret' fields."
         ) from None
-    logger.info("Loaded %d Composer account(s) from config.json", len(accounts))
+    global _accounts_log_signature
+    signature = tuple(sorted(a.name for a in accounts))
+    if _accounts_log_signature != signature:
+        logger.info("Loaded %d Composer account(s) from config.json", len(accounts))
+        _accounts_log_signature = signature
     return accounts
 
 
@@ -257,12 +262,13 @@ def _config_json_path() -> str:
 
 def _save_config_json(data: dict):
     """Write updated config back to config.json and invalidate cache."""
-    global _config_json_cache
+    global _config_json_cache, _accounts_log_signature
     path = _config_json_path()
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")
     _config_json_cache = data
+    _accounts_log_signature = None
 
 
 def load_symphony_export_config() -> Optional[dict]:

@@ -28,6 +28,7 @@ type Args = {
   screenshotConfig: ScreenshotConfig | null;
   setScreenshotConfig: Dispatch<SetStateAction<ScreenshotConfig | null>>;
   refreshDashboardData: () => Promise<void>;
+  enableAutoPostClose: boolean;
 };
 
 type Result = {
@@ -43,13 +44,37 @@ export function usePostCloseSyncAndSnapshot({
   screenshotConfig,
   setScreenshotConfig,
   refreshDashboardData,
+  enableAutoPostClose,
 }: Args): Result {
   const queryClient = useQueryClient();
   const snapshotRef = useRef<HTMLDivElement>(null);
+  const postCloseRunInFlightRef = useRef(false);
+  const lastPostCloseErrorKeyRef = useRef<string | null>(null);
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const [snapshotData, setSnapshotData] = useState<DashboardSnapshotData | null>(null);
+  const waitForSyncIdle = useCallback(async () => {
+    if (!resolvedAccountId) return;
+
+    const timeoutAt = Date.now() + 5 * 60_000;
+    while (Date.now() < timeoutAt) {
+      const status = await api.getSyncStatus(resolvedAccountId).catch(() => null);
+      if (!status || status.status !== "syncing") {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    throw new Error("Timed out waiting for existing sync to finish");
+  }, [resolvedAccountId]);
+
   const syncMutation = useMutation({
-    mutationFn: () => api.triggerSync(resolvedAccountId),
+    mutationFn: async () => {
+      const result = await api.triggerSync(resolvedAccountId);
+      if (result.status === "already_syncing") {
+        await waitForSyncIdle();
+      }
+      return result;
+    },
     onSuccess: async () => {
       await invalidateAfterSync(queryClient, resolvedAccountId);
       await refreshDashboardData();
@@ -186,8 +211,10 @@ export function usePostCloseSyncAndSnapshot({
         await api.uploadScreenshot(blob, dateStr);
         showToast("Screenshot saved");
       } catch (error) {
-        console.error("Screenshot capture failed:", error);
-        if (!autoMode) showToast("Screenshot failed", "error");
+        if (!autoMode) {
+          console.error("Screenshot capture failed:", error);
+          showToast("Screenshot failed", "error");
+        }
         if (autoMode) throw error;
       } finally {
         setSnapshotVisible(false);
@@ -202,27 +229,41 @@ export function usePostCloseSyncAndSnapshot({
   }, [syncMutation]);
 
   useEffect(() => {
-    if (!resolvedAccountId) return;
+    if (!enableAutoPostClose || !resolvedAccountId) return;
 
     const doPostCloseUpdate = async () => {
+      if (postCloseRunInFlightRef.current) return;
       if (!isAfterClose()) return;
       const today = todayET();
       const lastCloseUpdate = localStorage.getItem("last_post_close_update");
       if (lastCloseUpdate === today) return;
 
+      postCloseRunInFlightRef.current = true;
       try {
         await runSyncAndRefresh();
         await triggerSnapshot(true);
         localStorage.setItem("last_post_close_update", today);
+        lastPostCloseErrorKeyRef.current = null;
       } catch (error) {
-        console.error("Post-close update failed, will retry:", error);
+        const message = error instanceof Error ? error.message : String(error);
+        const errorKey = `${today}:${message}`;
+        if (lastPostCloseErrorKeyRef.current !== errorKey) {
+          if (error instanceof TypeError && /failed to fetch/i.test(message)) {
+            console.warn(`Post-close update network call failed, will retry: ${message}`);
+          } else {
+            console.error("Post-close update failed, will retry:", error);
+          }
+          lastPostCloseErrorKeyRef.current = errorKey;
+        }
+      } finally {
+        postCloseRunInFlightRef.current = false;
       }
     };
 
     doPostCloseUpdate();
     const intervalId = setInterval(doPostCloseUpdate, 60_000);
     return () => clearInterval(intervalId);
-  }, [resolvedAccountId, runSyncAndRefresh, triggerSnapshot]);
+  }, [enableAutoPostClose, resolvedAccountId, runSyncAndRefresh, triggerSnapshot]);
 
   return {
     snapshotRef,
