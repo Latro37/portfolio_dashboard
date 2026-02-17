@@ -3,8 +3,11 @@
 import csv
 import io
 import logging
+import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from email.utils import parsedate_to_datetime
+from threading import Lock
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -13,6 +16,12 @@ from app.config import get_settings, AccountCredentials
 logger = logging.getLogger(__name__)
 _DEFAULT_HTTP_TIMEOUT = 30
 _COMPOSER_ORIGIN = "public-api"
+_SYMPHONY_STATS_CACHE_TTL_SECONDS = 15.0
+_SYMPHONY_STATS_RATE_LIMIT_COOLDOWN_SECONDS = 15.0
+_SYMPHONY_STATS_CACHE_MAX_ENTRIES = 128
+
+_symphony_stats_cache_lock = Lock()
+_symphony_stats_cache: Dict[Tuple[str, str, str], Dict[str, object]] = {}
 
 # Map Composer account_type strings to friendly display names
 ACCOUNT_TYPE_DISPLAY = {
@@ -50,6 +59,31 @@ class ComposerClient:
     def __repr__(self) -> str:
         """Prevent credentials from appearing in logs/tracebacks."""
         return f"ComposerClient(base_url={self.base_url!r})"
+
+    def _symphony_stats_cache_key(self, account_id: str) -> Tuple[str, str, str]:
+        return (
+            self.base_url,
+            str(self.headers.get("x-api-key-id", "")),
+            account_id,
+        )
+
+    @staticmethod
+    def _parse_retry_after_seconds(value: Optional[str]) -> Optional[float]:
+        if not value:
+            return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            return max(0.0, float(raw))
+        try:
+            retry_dt = parsedate_to_datetime(raw)
+            if retry_dt.tzinfo is None:
+                retry_dt = retry_dt.replace(tzinfo=timezone.utc)
+            now_utc = datetime.now(timezone.utc)
+            return max(0.0, (retry_dt - now_utc).total_seconds())
+        except Exception:
+            return None
 
     @classmethod
     def from_credentials(cls, creds: AccountCredentials, base_url: str = None):
@@ -275,10 +309,84 @@ class ComposerClient:
         Returns list of symphony dicts with id, name, value, net_deposits,
         simple_return, time_weighted_return, holdings, etc.
         """
-        data = self._get_json(f"api/v0.1/portfolio/accounts/{account_id}/symphony-stats-meta")
-        symphonies = data.get("symphonies", [])
-        logger.info("Symphony stats: %d symphonies for account %s", len(symphonies), account_id)
-        return symphonies
+        now = time.monotonic()
+        cache_key = self._symphony_stats_cache_key(account_id)
+
+        with _symphony_stats_cache_lock:
+            cached = _symphony_stats_cache.get(cache_key)
+            if cached:
+                payload = cached.get("payload")
+                fetched_at = float(cached.get("fetched_at", 0.0))
+                cooldown_until = float(cached.get("cooldown_until", 0.0))
+                if isinstance(payload, list):
+                    if now - fetched_at <= _SYMPHONY_STATS_CACHE_TTL_SECONDS:
+                        return payload
+                    if now < cooldown_until:
+                        return payload
+                elif now < cooldown_until:
+                    return []
+
+        try:
+            data = self._get_json(f"api/v0.1/portfolio/accounts/{account_id}/symphony-stats-meta")
+            symphonies = data.get("symphonies", [])
+            if not isinstance(symphonies, list):
+                symphonies = []
+            with _symphony_stats_cache_lock:
+                _symphony_stats_cache[cache_key] = {
+                    "payload": symphonies,
+                    "fetched_at": now,
+                    "cooldown_until": 0.0,
+                }
+                if len(_symphony_stats_cache) > _SYMPHONY_STATS_CACHE_MAX_ENTRIES:
+                    oldest_key = min(
+                        _symphony_stats_cache.keys(),
+                        key=lambda key: float(_symphony_stats_cache[key].get("fetched_at", 0.0)),
+                    )
+                    _symphony_stats_cache.pop(oldest_key, None)
+            logger.info("Symphony stats: %d symphonies for account %s", len(symphonies), account_id)
+            return symphonies
+        except requests.exceptions.HTTPError as exc:
+            response = exc.response
+            if response is None or response.status_code != 429:
+                raise
+
+            retry_after = self._parse_retry_after_seconds(response.headers.get("Retry-After"))
+            cooldown_seconds = (
+                retry_after
+                if retry_after is not None and retry_after > 0
+                else _SYMPHONY_STATS_RATE_LIMIT_COOLDOWN_SECONDS
+            )
+            cooldown_until = now + cooldown_seconds
+
+            with _symphony_stats_cache_lock:
+                cached = _symphony_stats_cache.get(cache_key)
+                cached_payload = cached.get("payload") if cached else None
+                cached_fetched_at = (
+                    float(cached.get("fetched_at", now))
+                    if cached and isinstance(cached.get("payload"), list)
+                    else now
+                )
+                if not isinstance(cached_payload, list):
+                    cached_payload = []
+                _symphony_stats_cache[cache_key] = {
+                    "payload": cached_payload,
+                    "fetched_at": cached_fetched_at,
+                    "cooldown_until": cooldown_until,
+                }
+
+            if cached_payload:
+                logger.warning(
+                    "Symphony stats rate-limited for account %s; using cached payload for %.1fs",
+                    account_id,
+                    cooldown_seconds,
+                )
+            else:
+                logger.warning(
+                    "Symphony stats rate-limited for account %s; returning empty payload for %.1fs",
+                    account_id,
+                    cooldown_seconds,
+                )
+            return cached_payload
 
     def get_symphony_history(self, account_id: str, symphony_id: str) -> List[Dict]:
         """Fetch daily value history for a specific symphony.
@@ -475,3 +583,9 @@ class ComposerClient:
             return float(value) if value and str(value).strip() else default
         except (ValueError, TypeError):
             return default
+
+
+def _clear_symphony_stats_cache_for_tests() -> None:
+    """Clear in-memory symphony stats cache for deterministic unit tests."""
+    with _symphony_stats_cache_lock:
+        _symphony_stats_cache.clear()
