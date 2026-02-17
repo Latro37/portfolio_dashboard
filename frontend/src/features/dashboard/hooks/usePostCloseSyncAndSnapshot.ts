@@ -46,6 +46,8 @@ export function usePostCloseSyncAndSnapshot({
 }: Args): Result {
   const queryClient = useQueryClient();
   const snapshotRef = useRef<HTMLDivElement>(null);
+  const postCloseRunInFlightRef = useRef(false);
+  const lastPostCloseErrorKeyRef = useRef<string | null>(null);
   const [snapshotVisible, setSnapshotVisible] = useState(false);
   const [snapshotData, setSnapshotData] = useState<DashboardSnapshotData | null>(null);
   const syncMutation = useMutation({
@@ -186,8 +188,10 @@ export function usePostCloseSyncAndSnapshot({
         await api.uploadScreenshot(blob, dateStr);
         showToast("Screenshot saved");
       } catch (error) {
-        console.error("Screenshot capture failed:", error);
-        if (!autoMode) showToast("Screenshot failed", "error");
+        if (!autoMode) {
+          console.error("Screenshot capture failed:", error);
+          showToast("Screenshot failed", "error");
+        }
         if (autoMode) throw error;
       } finally {
         setSnapshotVisible(false);
@@ -205,17 +209,31 @@ export function usePostCloseSyncAndSnapshot({
     if (!resolvedAccountId) return;
 
     const doPostCloseUpdate = async () => {
+      if (postCloseRunInFlightRef.current) return;
       if (!isAfterClose()) return;
       const today = todayET();
       const lastCloseUpdate = localStorage.getItem("last_post_close_update");
       if (lastCloseUpdate === today) return;
 
+      postCloseRunInFlightRef.current = true;
       try {
         await runSyncAndRefresh();
         await triggerSnapshot(true);
         localStorage.setItem("last_post_close_update", today);
+        lastPostCloseErrorKeyRef.current = null;
       } catch (error) {
-        console.error("Post-close update failed, will retry:", error);
+        const message = error instanceof Error ? error.message : String(error);
+        const errorKey = `${today}:${message}`;
+        if (lastPostCloseErrorKeyRef.current !== errorKey) {
+          if (error instanceof TypeError && /failed to fetch/i.test(message)) {
+            console.warn(`Post-close update network call failed, will retry: ${message}`);
+          } else {
+            console.error("Post-close update failed, will retry:", error);
+          }
+          lastPostCloseErrorKeyRef.current = errorKey;
+        }
+      } finally {
+        postCloseRunInFlightRef.current = false;
       }
     };
 
