@@ -4,7 +4,9 @@ import { isUsEquityTradingDay, type TradingDayEvidence } from "./tradingCalendar
 type BenchmarkState = {
   map: Map<string, BenchmarkSeriesPoint>;
   baseGrowth: number;
+  baseMwr: number;
   peak: number;
+  hasMwr: boolean;
   lastReturn?: number;
   lastDrawdown?: number;
   lastMwr?: number;
@@ -39,6 +41,44 @@ export function calcGradientOffset(points: ChartSeriesPoint[], key: string): num
   return max / (max - min);
 }
 
+function finiteNumber(value: unknown): number | null {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function rebasePerformanceWindow(points: ChartSeriesPoint[]): ChartSeriesPoint[] {
+  if (!points.length) return points;
+
+  const firstTwr = finiteNumber(points[0].time_weighted_return);
+  const firstMwr = finiteNumber(points[0].money_weighted_return);
+  const twrBase = firstTwr != null ? 1 + firstTwr / 100 : null;
+  const mwrBase = firstMwr != null ? 1 + firstMwr / 100 : null;
+
+  let peakGrowth = 1;
+  return points.map((point) => {
+    const nextPoint: ChartSeriesPoint = { ...point };
+
+    if (twrBase != null) {
+      const twr = finiteNumber(point.time_weighted_return) ?? 0;
+      const rebasedTwr =
+        twrBase !== 0 ? ((1 + twr / 100) / twrBase - 1) * 100 : twr;
+      const growth = 1 + rebasedTwr / 100;
+      peakGrowth = Math.max(peakGrowth, growth);
+      const rebasedDd = peakGrowth > 0 ? (growth / peakGrowth - 1) * 100 : 0;
+      nextPoint.time_weighted_return = rebasedTwr;
+      nextPoint.current_drawdown = rebasedDd;
+    }
+
+    if (mwrBase != null) {
+      const mwr = finiteNumber(point.money_weighted_return) ?? 0;
+      nextPoint.money_weighted_return =
+        mwrBase !== 0 ? ((1 + mwr / 100) / mwrBase - 1) * 100 : mwr;
+    }
+
+    return nextPoint;
+  });
+}
+
 export function mergeBenchmarkSeries(
   basePoints: ChartSeriesPoint[],
   benchmarks: BenchmarkSeries[],
@@ -49,18 +89,25 @@ export function mergeBenchmarkSeries(
 
   const states: BenchmarkState[] = benchmarks.map((bench) => {
     const map = new Map<string, BenchmarkSeriesPoint>(bench.data.map((pt) => [pt.date, pt]));
+    const hasMwr = bench.data.some((pt) => pt.mwr_pct !== 0);
     let baseGrowth: number | null = null;
+    let baseMwr: number | null = null;
     for (const point of basePoints) {
       const bPoint = map.get(point.date);
       if (bPoint) {
         baseGrowth = 1 + bPoint.return_pct / 100;
+        if (hasMwr && bPoint.mwr_pct !== 0) {
+          baseMwr = 1 + bPoint.mwr_pct / 100;
+        }
         break;
       }
     }
     return {
       map,
       baseGrowth: baseGrowth ?? 1,
+      baseMwr: baseMwr ?? 1,
       peak: 1,
+      hasMwr,
     };
   });
 
@@ -77,7 +124,10 @@ export function mergeBenchmarkSeries(
         state.peak = Math.max(state.peak, growth);
         state.lastReturn = rebasedReturn;
         state.lastDrawdown = state.peak > 0 ? (growth / state.peak - 1) * 100 : 0;
-        state.lastMwr = bPoint.mwr_pct !== 0 ? bPoint.mwr_pct : rebasedReturn;
+        state.lastMwr =
+          state.hasMwr && bPoint.mwr_pct !== 0 && state.baseMwr !== 0
+            ? ((1 + bPoint.mwr_pct / 100) / state.baseMwr - 1) * 100
+            : rebasedReturn;
       }
 
       merged[keyNames.returnKey(token)] = state.lastReturn;

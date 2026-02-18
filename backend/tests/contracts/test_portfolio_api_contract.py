@@ -132,6 +132,23 @@ def test_performance_contract(client):
     }
 
 
+def test_performance_custom_range_rebases_series(client):
+    res = client.get(
+        "/api/performance?account_id=test-account-001&start_date=2025-01-03&end_date=2025-01-04"
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert len(payload) == 2
+
+    first = payload[0]
+    assert first["date"] == "2025-01-03"
+    assert first["time_weighted_return"] == 0.0
+    assert first["money_weighted_return"] == 0.0
+    assert first["current_drawdown"] == 0.0
+
+    assert payload[1]["time_weighted_return"] > 0.0
+
+
 def test_trading_sessions_contract(client):
     res = client.get(
         "/api/trading-sessions?exchange=XNYS&start_date=1994-04-25&end_date=1994-04-29"
