@@ -805,6 +805,103 @@ def _infer_net_deposits_from_history(history: list) -> list[float]:
     return net_deposits
 
 
+def _last_weekday_on_or_before(target: date) -> date:
+    """Return the most recent weekday on or before target."""
+    current = target
+    while current.weekday() >= 5:
+        current -= timedelta(days=1)
+    return current
+
+
+def _count_weekdays_between(start_exclusive: date, end_inclusive: date) -> int:
+    """Count weekdays in (start_exclusive, end_inclusive]."""
+    if end_inclusive <= start_exclusive:
+        return 0
+
+    count = 0
+    current = start_exclusive + timedelta(days=1)
+    while current <= end_inclusive:
+        if current.weekday() < 5:
+            count += 1
+        current += timedelta(days=1)
+    return count
+
+
+def _backfill_missing_symphony_days(
+    db: Session,
+    client: ComposerClient,
+    account_id: str,
+    symphony_id: str,
+    *,
+    up_to_date: date,
+    min_missing_weekdays: int,
+) -> tuple[int, bool]:
+    """Backfill missing symphony days only when downtime likely introduced gaps.
+
+    Returns tuple: (inserted_rows, history_fetched).
+    """
+    last_stored_date = (
+        db.query(func.max(SymphonyDailyPortfolio.date))
+        .filter_by(account_id=account_id, symphony_id=symphony_id)
+        .scalar()
+    )
+
+    should_fetch_history = last_stored_date is None
+    if not should_fetch_history and last_stored_date is not None:
+        missing_weekdays = _count_weekdays_between(last_stored_date, up_to_date)
+        should_fetch_history = missing_weekdays >= min_missing_weekdays
+
+    if not should_fetch_history:
+        return 0, False
+
+    try:
+        history = client.get_symphony_history(account_id, symphony_id)
+    except Exception as e:
+        logger.warning("Failed incremental catch-up for symphony %s: %s", symphony_id, e)
+        return 0, True
+
+    if not history:
+        return 0, True
+
+    net_deps = _infer_net_deposits_from_history(history)
+    existing_dates = {
+        row[0]
+        for row in (
+            db.query(SymphonyDailyPortfolio.date)
+            .filter(
+                SymphonyDailyPortfolio.account_id == account_id,
+                SymphonyDailyPortfolio.symphony_id == symphony_id,
+                SymphonyDailyPortfolio.date <= up_to_date,
+            )
+            .all()
+        )
+    }
+
+    inserted_rows = 0
+    for idx, point in enumerate(history):
+        try:
+            point_date = date.fromisoformat(point["date"])
+        except Exception:
+            continue
+
+        if point_date > up_to_date or point_date in existing_dates:
+            continue
+
+        db.add(
+            SymphonyDailyPortfolio(
+                account_id=account_id,
+                symphony_id=symphony_id,
+                date=point_date,
+                portfolio_value=point["value"],
+                net_deposits=round(net_deps[idx], 2),
+            )
+        )
+        existing_dates.add(point_date)
+        inserted_rows += 1
+
+    return inserted_rows, True
+
+
 def _sync_symphony_daily_backfill(db: Session, client: ComposerClient, account_id: str):
     """Fetch full daily history for each active symphony and store all rows."""
     try:
@@ -860,11 +957,11 @@ def _sync_symphony_daily_backfill(db: Session, client: ComposerClient, account_i
 
 
 def _sync_symphony_daily_incremental(db: Session, client: ComposerClient, account_id: str):
-    """Store today's symphony values using symphony-stats-meta (1 API call)."""
+    """Store today's symphony values and backfill missed weekday gaps when needed."""
     today = date.today()
-    if today.weekday() >= 5:
-        logger.info("Skipping symphony daily on weekend for %s", account_id)
-        return
+    is_weekend = today.weekday() >= 5
+    up_to_date = _last_weekday_on_or_before(today)
+    min_missing_weekdays = 1 if is_weekend else 2
 
     try:
         symphonies = client.get_symphony_stats(account_id)
@@ -872,14 +969,32 @@ def _sync_symphony_daily_incremental(db: Session, client: ComposerClient, accoun
         logger.warning("Failed to fetch symphony stats for incremental %s: %s", account_id, e)
         return
 
-    new_count = 0
+    today_new_count = 0
+    catchup_new_count = 0
+    history_fetches = 0
     for s in symphonies:
         sym_id = s.get("id", "")
         if not sym_id:
             continue
 
-        value = s.get("value", 0)
-        net_dep = s.get("net_deposits", 0)
+        inserted, history_fetched = _backfill_missing_symphony_days(
+            db,
+            client,
+            account_id,
+            sym_id,
+            up_to_date=up_to_date,
+            min_missing_weekdays=min_missing_weekdays,
+        )
+        catchup_new_count += inserted
+        if history_fetched:
+            history_fetches += 1
+            time.sleep(0.5)
+
+        if is_weekend:
+            continue
+
+        value = float(s.get("value") or 0.0)
+        net_dep = float(s.get("net_deposits") or 0.0)
 
         existing = db.query(SymphonyDailyPortfolio).filter_by(
             account_id=account_id, symphony_id=sym_id, date=today
@@ -895,11 +1010,26 @@ def _sync_symphony_daily_incremental(db: Session, client: ComposerClient, accoun
                 portfolio_value=round(value, 2),
                 net_deposits=round(net_dep, 2),
             ))
-            new_count += 1
+            today_new_count += 1
 
     db.commit()
-    logger.info("Symphony daily incremental for %s: %d new rows for %d symphonies",
-                account_id, new_count, len(symphonies))
+    if is_weekend:
+        logger.info(
+            "Symphony daily incremental for %s (weekend catch-up): %d new history rows across %d symphonies (%d history fetches)",
+            account_id,
+            catchup_new_count,
+            len(symphonies),
+            history_fetches,
+        )
+    else:
+        logger.info(
+            "Symphony daily incremental for %s: %d new today rows and %d catch-up rows across %d symphonies (%d history fetches)",
+            account_id,
+            today_new_count,
+            catchup_new_count,
+            len(symphonies),
+            history_fetches,
+        )
 
 
 def _recompute_symphony_metrics(db: Session, account_id: str):
