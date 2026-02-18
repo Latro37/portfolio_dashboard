@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mergeBenchmarksByTicker, mergeBenchmarksIndexed } from "./benchmark";
-import { calcGradientOffset, filterTradingDays } from "./transforms";
+import { calcGradientOffset, filterTradingDays, rebasePerformanceWindow } from "./transforms";
 import type { BenchmarkSeries, ChartSeriesPoint } from "./types";
 
 describe("chart transforms", () => {
@@ -59,8 +59,31 @@ describe("chart transforms", () => {
     expect(Number(merged[2]["bench_0_return"])).toBeCloseTo(9.0909, 4);
     expect(Number(merged[3]["bench_0_drawdown"])).toBeCloseTo(-16.6667, 4);
     expect(Number(merged[4]["bench_0_drawdown"])).toBeCloseTo(-16.6667, 4);
-    expect(Number(merged[1]["bench_0_mwr"])).toBe(11);
+    expect(Number(merged[1]["bench_0_mwr"])).toBe(0);
     expect(Number(merged[2]["bench_0_mwr"])).toBeCloseTo(9.0909, 4);
+  });
+
+  it("rebases benchmark MWR from the first visible point", () => {
+    const base: ChartSeriesPoint[] = [
+      { date: "2025-01-02" },
+      { date: "2025-01-03" },
+      { date: "2025-01-06" },
+    ];
+    const benchmarks: BenchmarkSeries[] = [
+      {
+        ticker: "SPY",
+        label: "SPY",
+        color: "#fff",
+        data: [
+          { date: "2025-01-03", return_pct: 10, drawdown_pct: 0, mwr_pct: 20 },
+          { date: "2025-01-06", return_pct: 25, drawdown_pct: 0, mwr_pct: 30 },
+        ],
+      },
+    ];
+
+    const merged = mergeBenchmarksIndexed(base, benchmarks);
+    expect(Number(merged[1]["bench_0_mwr"])).toBe(0);
+    expect(Number(merged[2]["bench_0_mwr"])).toBeCloseTo(8.3333, 4);
   });
 
   it("merges benchmark series using ticker keys for snapshot mode", () => {
@@ -83,5 +106,35 @@ describe("chart transforms", () => {
     expect(calcGradientOffset([{ date: "a", value: -2 }, { date: "b", value: -1 }], "value")).toBe(0);
     expect(calcGradientOffset([{ date: "a", value: 2 }, { date: "b", value: 1 }], "value")).toBe(1);
     expect(calcGradientOffset([{ date: "a", value: -1 }, { date: "b", value: 3 }], "value")).toBe(0.75);
+  });
+
+  it("rebases portfolio twr/mwr/drawdown from first visible point", () => {
+    const input: ChartSeriesPoint[] = [
+      {
+        date: "2026-01-20",
+        time_weighted_return: 4.2,
+        money_weighted_return: 3.1,
+        current_drawdown: -2.0,
+      },
+      {
+        date: "2026-01-21",
+        time_weighted_return: 5.4,
+        money_weighted_return: 4.0,
+        current_drawdown: -1.0,
+      },
+      {
+        date: "2026-01-22",
+        time_weighted_return: 2.0,
+        money_weighted_return: 1.2,
+        current_drawdown: -4.5,
+      },
+    ];
+
+    const rebased = rebasePerformanceWindow(input);
+    expect(Number(rebased[0].time_weighted_return)).toBe(0);
+    expect(Number(rebased[0].money_weighted_return)).toBe(0);
+    expect(Number(rebased[0].current_drawdown)).toBe(0);
+    expect(Number(rebased[1].time_weighted_return)).toBeGreaterThan(0);
+    expect(Number(rebased[2].current_drawdown)).toBeLessThan(0);
   });
 });

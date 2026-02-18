@@ -138,6 +138,7 @@ export function mergeLiveData(
   if (!filteredLiveData.length) return filteredLiveData as LiveChartPoint[];
 
   const liveBaseFactor = 1 + filteredLiveData[0].time_weighted_return / 100;
+  const liveMwrBaseFactor = 1 + filteredLiveData[0].money_weighted_return / 100;
   const btByDate: Record<string, number> = {};
   const btDdByDate: Record<string, number> = {};
   for (const point of filteredBacktestData) {
@@ -159,12 +160,17 @@ export function mergeLiveData(
       liveBaseFactor !== 0
         ? ((1 + point.time_weighted_return / 100) / liveBaseFactor - 1) * 100
         : point.time_weighted_return;
+    const rebasedMwr =
+      liveMwrBaseFactor !== 0
+        ? ((1 + point.money_weighted_return / 100) / liveMwrBaseFactor - 1) * 100
+        : point.money_weighted_return;
     const growth = 1 + rebasedTwr / 100;
     peakGrowth = Math.max(peakGrowth, growth);
     const rebasedDd = peakGrowth > 0 ? (growth / peakGrowth - 1) * 100 : 0;
     return {
       ...point,
       time_weighted_return: rebasedTwr,
+      money_weighted_return: rebasedMwr,
       current_drawdown: rebasedDd,
       backtestTwr:
         btByDate[point.date] != null && btBaseFactor != null && btBaseFactor !== 0
