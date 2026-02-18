@@ -661,6 +661,26 @@ python start.py --first-start-test
 
 This mode wipes and recreates an isolated sandbox before startup, uses a separate database, and keeps local write output isolated from normal runs.
 
+### Can I test the app without providing my Composer API key?
+Yes, you can seed a separate test database with synthetic data instead of using your real Composer API key.
+
+First, point your shell at the test DB, then seed synthetic data. This creates/updates `data/portfolio_test.db` with synthetic data representative of the user type set by `--profile`:
+
+```bash
+cd backend
+$env:PD_TEST_MODE="1"
+$env:PD_DATABASE_URL="sqlite:///data/portfolio_test.db"
+python -m scripts.seed_test_data --profile basic
+# or
+python -m scripts.seed_test_data --profile power
+```
+
+Then enable test mode by starting with `--test`:
+
+```bash
+python start.py --test
+```
+
 ### How do I add another Composer account?
 Add another entry to the `composer_accounts` array in `config.json` and restart the app. See [Multiple accounts](#configuring-configjson).
 
