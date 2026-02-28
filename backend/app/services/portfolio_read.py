@@ -210,22 +210,26 @@ def get_portfolio_performance_data(
     results = query.all()
 
     if len(account_ids) == 1:
-        has_metric_rows = any(m is not None for _, m in results)
-        if not has_metric_rows and results:
-            daily_series = [
-                {
-                    "date": str(p.date),
-                    "portfolio_value": p.portfolio_value,
-                    "net_deposits": p.net_deposits,
-                }
-                for p, _ in results
-            ]
-            cf_dicts = load_cash_flow_events(
-                db=db,
-                account_ids=account_ids,
-                date_start=date_start,
-                date_end=date_end,
-            )
+        if not results:
+            return []
+
+        daily_series = [
+            {
+                "date": str(p.date),
+                "portfolio_value": p.portfolio_value,
+                "net_deposits": p.net_deposits,
+            }
+            for p, _ in results
+        ]
+        cf_dicts = load_cash_flow_events(
+            db=db,
+            account_ids=account_ids,
+            date_start=date_start,
+            date_end=date_end,
+        )
+
+        # Any missing metric row can produce zero-filled points; recompute to preserve correctness.
+        if any(m is None for _, m in results):
             return compute_performance_series(daily_series, cf_dicts)
 
         points = [
@@ -233,54 +237,41 @@ def get_portfolio_performance_data(
                 "date": str(p.date),
                 "portfolio_value": p.portfolio_value,
                 "net_deposits": p.net_deposits,
-                "cumulative_return_pct": m.cumulative_return_pct if m else 0,
-                "daily_return_pct": m.daily_return_pct if m else 0,
-                "time_weighted_return": m.time_weighted_return if m else 0,
+                "cumulative_return_pct": m.cumulative_return_pct,
+                "daily_return_pct": m.daily_return_pct,
+                "time_weighted_return": m.time_weighted_return,
                 "money_weighted_return": getattr(
                     m, "money_weighted_return_period", m.money_weighted_return
-                ) if m else 0,
-                "current_drawdown": m.current_drawdown if m else 0,
+                ),
+                "current_drawdown": m.current_drawdown,
             }
             for p, m in results
         ]
-        return _rebase_performance_window(points)
+        rebased = _rebase_performance_window(points)
+        return _overlay_window_mwr(rebased, daily_series, cf_dicts)
 
-    fields = [
-        "portfolio_value",
-        "net_deposits",
-        "cumulative_return_pct",
-        "daily_return_pct",
-        "time_weighted_return",
-        "money_weighted_return",
-        "current_drawdown",
-    ]
-    zeros = {field: 0.0 for field in fields}
+    if not results:
+        return []
+
+    zeros = {"portfolio_value": 0.0, "net_deposits": 0.0}
 
     per_account: dict[str, dict[str, dict]] = defaultdict(dict)
-    for p, m in results:
+    for p, _ in results:
         ds = str(p.date)
         per_account[p.account_id][ds] = {
             "portfolio_value": p.portfolio_value,
             "net_deposits": p.net_deposits,
-            "cumulative_return_pct": m.cumulative_return_pct if m else 0,
-            "daily_return_pct": m.daily_return_pct if m else 0,
-            "time_weighted_return": m.time_weighted_return if m else 0,
-            "money_weighted_return": getattr(
-                m, "money_weighted_return_period", m.money_weighted_return
-            ) if m else 0,
-            "current_drawdown": m.current_drawdown if m else 0,
         }
 
     all_dates = sorted({ds for account in per_account.values() for ds in account})
 
     aggregated: List[Dict] = []
+    aggregated_daily_rows: List[Dict] = []
     last_known: dict[str, dict] = {aid: dict(zeros) for aid in per_account}
     prev_pv = None
     prev_nd = None
     peak_pv = 0.0
     twr_cum = 1.0
-    last_mwr: dict[str, float] = {aid: 0.0 for aid in per_account}
-    last_pv: dict[str, float] = {aid: 0.0 for aid in per_account}
 
     for ds in all_dates:
         sum_pv = 0.0
@@ -290,8 +281,6 @@ def get_portfolio_performance_data(
                 last_known[aid] = per_account[aid][ds]
             sum_pv += last_known[aid]["portfolio_value"]
             sum_nd += last_known[aid]["net_deposits"]
-            last_mwr[aid] = last_known[aid]["money_weighted_return"]
-            last_pv[aid] = last_known[aid]["portfolio_value"]
 
         cum_ret = ((sum_pv - sum_nd) / sum_nd * 100) if sum_nd else 0
         if prev_pv is not None and prev_pv > 0:
@@ -306,12 +295,6 @@ def get_portfolio_performance_data(
         peak_pv = max(peak_pv, twr_cum)
         drawdown = ((twr_cum / peak_pv - 1) * 100) if peak_pv > 0 else 0
 
-        total_weight = sum(last_pv.values())
-        if total_weight > 0:
-            mwr = sum(last_mwr[a] * last_pv[a] for a in per_account) / total_weight
-        else:
-            mwr = 0
-
         aggregated.append(
             {
                 "date": ds,
@@ -320,25 +303,37 @@ def get_portfolio_performance_data(
                 "cumulative_return_pct": round(cum_ret, 4),
                 "daily_return_pct": round(daily_ret, 4),
                 "time_weighted_return": round(twr, 4),
-                "money_weighted_return": round(mwr, 4),
+                "money_weighted_return": 0.0,
                 "current_drawdown": round(drawdown, 4),
+            }
+        )
+        aggregated_daily_rows.append(
+            {
+                "date": ds,
+                "portfolio_value": sum_pv,
+                "net_deposits": sum_nd,
             }
         )
         prev_pv = sum_pv
         prev_nd = sum_nd
 
-    return _rebase_performance_window(aggregated)
+    rebased = _rebase_performance_window(aggregated)
+    cf_dicts = load_cash_flow_events(
+        db=db,
+        account_ids=account_ids,
+        date_start=date_start,
+        date_end=date_end,
+    )
+    return _overlay_window_mwr(rebased, aggregated_daily_rows, cf_dicts)
 
 
 def _rebase_performance_window(points: List[Dict]) -> List[Dict]:
-    """Normalize TWR/MWR/drawdown to the first visible point in the window."""
+    """Normalize TWR and drawdown to the first visible point in the window."""
     if not points:
         return points
 
     first_twr = float(points[0].get("time_weighted_return") or 0)
-    first_mwr = float(points[0].get("money_weighted_return") or 0)
     twr_base = 1 + first_twr / 100
-    mwr_base = 1 + first_mwr / 100
 
     peak_growth = 1.0
     rebased: List[Dict] = []
@@ -350,15 +345,26 @@ def _rebase_performance_window(points: List[Dict]) -> List[Dict]:
         peak_growth = max(peak_growth, growth)
         rebased_drawdown = (growth / peak_growth - 1) * 100 if peak_growth > 0 else 0
 
-        mwr = float(next_point.get("money_weighted_return") or 0)
-        rebased_mwr = ((1 + mwr / 100) / mwr_base - 1) * 100 if mwr_base != 0 else mwr
-
         if idx == 0:
             next_point["daily_return_pct"] = 0.0
 
         next_point["time_weighted_return"] = round(rebased_twr, 4)
-        next_point["money_weighted_return"] = round(rebased_mwr, 4)
         next_point["current_drawdown"] = round(rebased_drawdown, 4)
         rebased.append(next_point)
 
     return rebased
+
+
+def _overlay_window_mwr(points: List[Dict], daily_series: List[Dict], cf_dicts: List[Dict]) -> List[Dict]:
+    """Replace MWR values with in-window IRR recomputation from cash flows."""
+    if not points:
+        return points
+
+    recomputed = compute_performance_series(daily_series, cf_dicts)
+    with_mwr: List[Dict] = []
+    for idx, point in enumerate(points):
+        next_point = dict(point)
+        if idx < len(recomputed):
+            next_point["money_weighted_return"] = recomputed[idx].get("money_weighted_return", 0.0)
+        with_mwr.append(next_point)
+    return with_mwr
