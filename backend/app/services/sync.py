@@ -884,6 +884,9 @@ def _backfill_missing_symphony_days(
         except Exception:
             continue
 
+        if point_date.weekday() >= 5:
+            continue
+
         if point_date > up_to_date or point_date in existing_dates:
             continue
 

@@ -174,3 +174,49 @@ def test_incremental_backfills_missing_weekday_on_weekend_without_today_write(
     assert [str(row.date) for row in rows] == ["2024-01-11", "2024-01-12"]
     assert client.history_calls == [sym_id]
 
+
+def test_incremental_catchup_skips_weekend_points_on_weekday_sync(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _freeze_today(monkeypatch, real_date(2024, 1, 9))  # Tuesday
+    account_id = "acct-4"
+    sym_id = "sym-4"
+
+    db_session.add(
+        SymphonyDailyPortfolio(
+            account_id=account_id,
+            symphony_id=sym_id,
+            date=real_date(2024, 1, 5),  # Friday
+            portfolio_value=400.0,
+            net_deposits=400.0,
+        )
+    )
+    db_session.commit()
+
+    client = _StubClient(
+        stats=[{"id": sym_id, "value": 440.0, "net_deposits": 400.0}],
+        histories={
+            sym_id: [
+                {"date": "2024-01-05", "value": 400.0, "deposit_adjusted_value": 400.0},
+                {"date": "2024-01-06", "value": 401.0, "deposit_adjusted_value": 401.0},
+                {"date": "2024-01-07", "value": 402.0, "deposit_adjusted_value": 402.0},
+                {"date": "2024-01-08", "value": 430.0, "deposit_adjusted_value": 430.0},
+                {"date": "2024-01-09", "value": 435.0, "deposit_adjusted_value": 435.0},
+            ]
+        },
+    )
+
+    sync._sync_symphony_daily_incremental(db_session, client, account_id)
+
+    rows = (
+        db_session.query(SymphonyDailyPortfolio)
+        .filter_by(account_id=account_id, symphony_id=sym_id)
+        .order_by(SymphonyDailyPortfolio.date)
+        .all()
+    )
+    assert [str(row.date) for row in rows] == ["2024-01-05", "2024-01-08", "2024-01-09"]
+    assert all(row.date.weekday() < 5 for row in rows)
+    assert rows[-1].portfolio_value == 440.0
+    assert client.history_calls == [sym_id]
+
