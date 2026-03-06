@@ -31,7 +31,10 @@ import { useDashboardSyncAction } from "@/features/dashboard/hooks/useDashboardS
 import { useSymphonyExportProgressToast } from "@/features/dashboard/hooks/useSymphonyExportProgressToast";
 import { useSyncCompletionRefresh } from "@/features/dashboard/hooks/useSyncCompletionRefresh";
 import type { DashboardPeriod } from "@/features/dashboard/types";
-import { summarizeSymphonyDailyChange } from "@/features/dashboard/utils";
+import {
+  summarizePortfolioDailyChange,
+  summarizeSymphonyValue,
+} from "@/features/dashboard/utils";
 import { PerformanceChart } from "@/features/charting/components/PerformanceChartContainer";
 import { SettingsModal } from "@/features/settings/components/SettingsModalContainer";
 import { TradePreview } from "@/features/trade-preview/components/TradePreviewContainer";
@@ -213,8 +216,14 @@ export default function DashboardPageContainer() {
     finnhubConfigured,
   );
 
-  const { todayDollarChange, todayPctChange, totalValue: symphonyTotalValue } =
-    useMemo(() => summarizeSymphonyDailyChange(symphonies), [symphonies]);
+  const { todayDollarChange, todayPctChange } = useMemo(
+    () => summarizePortfolioDailyChange(performance, summary),
+    [performance, summary],
+  );
+  const symphonyTotalValue = useMemo(
+    () => summarizeSymphonyValue(symphonies),
+    [symphonies],
+  );
   const initialLiveOverlayScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
