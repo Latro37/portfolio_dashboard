@@ -119,7 +119,7 @@ If the app hasn't been opened for several days, the next sync automatically **fi
 The top section shows:
 - **Portfolio Value** — Your current total portfolio value in dollars
 - **Total return** — Dollar and percentage gain/loss since inception
-- **Today's change** — Dollar and percentage change for the current day
+- **Today's change** — Deposit-adjusted portfolio dollar and percentage change for the current day (account-level, not summed symphony allocation deltas)
 - **Live / Update toggle** — "Live" enables real-time intraday value updates during market hours. "Update" triggers a data sync.
 - **Camera button** (📷) — Manually capture a portfolio snapshot image
 - **Gear button** (⚙) — Open settings
@@ -479,7 +479,7 @@ If the app hasn't been opened for several days, the next sync automatically **fi
 The top section shows:
 - **Portfolio Value** — Your current total portfolio value in dollars
 - **Total return** — Dollar and percentage gain/loss since inception
-- **Today's change** — Dollar and percentage change for the current day
+- **Today's change** — Deposit-adjusted portfolio dollar and percentage change for the current day (account-level, not summed symphony allocation deltas)
 - **Live / Update toggle** — "Live" enables real-time intraday value updates during market hours. "Update" triggers a data sync.
 - **Camera button** (📷) — Manually capture a portfolio snapshot image
 - **Gear button** (⚙) — Open settings

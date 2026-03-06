@@ -1,4 +1,4 @@
-import type { SymphonyInfo } from "@/lib/api";
+import type { PerformancePoint, Summary, SymphonyInfo } from "@/lib/api";
 import type { DashboardPeriod } from "@/features/dashboard/types";
 
 export type DashboardRangeParams = {
@@ -21,26 +21,34 @@ export function resolveDashboardRange(
   return { period };
 }
 
-export function summarizeSymphonyDailyChange(symphonies: SymphonyInfo[]) {
-  if (!symphonies.length) {
+export function summarizePortfolioDailyChange(
+  performance: PerformancePoint[],
+  summary: Summary | null,
+) {
+  if (performance.length < 2) {
     return {
       todayDollarChange: undefined,
-      todayPctChange: undefined,
-      totalValue: undefined,
+      todayPctChange: summary?.daily_return_pct,
     };
   }
 
-  const totalValue = symphonies.reduce((sum, symphony) => sum + symphony.value, 0);
-  const totalDayDollar = symphonies.reduce(
-    (sum, symphony) => sum + symphony.last_dollar_change,
-    0,
-  );
-  const priorValue = totalValue - totalDayDollar;
-  const todayPctChange = priorValue > 0 ? (totalDayDollar / priorValue) * 100 : 0;
+  const last = performance[performance.length - 1];
+  const prev = performance[performance.length - 2];
+  const netDepositDelta = last.net_deposits - prev.net_deposits;
+  const todayDollarChange =
+    last.portfolio_value - prev.portfolio_value - netDepositDelta;
+  const todayPctChange =
+    prev.portfolio_value > 0
+      ? (todayDollarChange / prev.portfolio_value) * 100
+      : (summary?.daily_return_pct ?? 0);
 
   return {
-    totalValue,
-    todayDollarChange: totalDayDollar,
+    todayDollarChange,
     todayPctChange,
   };
+}
+
+export function summarizeSymphonyValue(symphonies: SymphonyInfo[]) {
+  if (!symphonies.length) return undefined;
+  return symphonies.reduce((sum, symphony) => sum + symphony.value, 0);
 }
