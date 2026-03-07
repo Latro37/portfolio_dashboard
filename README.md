@@ -108,7 +108,7 @@ Subsequent syncs are **incremental** — only new data since the last sync is fe
 
 The app also runs an **automatic sync after market close** (4:00 PM ET) if you leave the page open. A `localStorage` flag prevents duplicate syncs.
 
-If the app hasn't been opened for several days, the next sync automatically **fills in all missing portfolio days** — no portfolio data is lost from downtime. Note that per-symphony daily values are only recorded for the current day during incremental syncs, so symphony-level charts may have gaps for days the app wasn't running.
+If the app hasn't been opened for several days, the next sync automatically **fills in all missing portfolio days** and backfills missed weekday symphony days for active symphonies, so downtime does not leave gaps in performance charts.
 
 ---
 
@@ -468,7 +468,7 @@ Subsequent syncs are **incremental** — only new data since the last sync is fe
 
 The app also runs an **automatic sync after market close** (4:00 PM ET) if you leave the page open. A `localStorage` flag prevents duplicate syncs.
 
-If the app hasn't been opened for several days, the next sync automatically **fills in all missing portfolio days** — no portfolio data is lost from downtime. Note that per-symphony daily values are only recorded for the current day during incremental syncs, so symphony-level charts may have gaps for days the app wasn't running.
+If the app hasn't been opened for several days, the next sync automatically **fills in all missing portfolio days** and backfills missed weekday symphony days for active symphonies, so downtime does not leave gaps in performance charts.
 
 ---
 
@@ -645,7 +645,7 @@ Backtests are cached for up to 24 hours. If you edited the symphony recently, th
 You need a Finnhub API key configured in `config.json`. See [Optional: Real-Time Ticker Quotes](#optional-real-time-ticker-quotes). The free tier is sufficient.
 
 ### I was away for a week — is my data missing?
-Portfolio-level data (values, transactions, cash flows, holdings) is fully backfilled on the next sync — the Composer API returns your complete history. Per-symphony daily values, however, are only captured for the current day during incremental syncs, so the symphony-level performance charts may show gaps for days the app wasn't running. This does not affect the main portfolio chart or metrics.
+Portfolio-level data (values, transactions, cash flows, holdings) is fully backfilled on the next sync — the Composer API returns your complete history. Active symphonies are also backfilled for missed weekdays on the next sync, so symphony-level performance charts stay continuous after downtime.
 
 ### Can I add deposits that the API doesn't capture?
 Yes. Roth IRA contributions are not captured by the API, so you can add them manually. Go to the **Non-Trade Activity** tab and use the manual entry form to add deposits or withdrawals with a date and amount. If you need to correct an entry, use the delete control on manual rows in the same table. The next sync will recalculate all metrics with the corrected deposit totals.
