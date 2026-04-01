@@ -51,7 +51,7 @@ A local dashboard for tracking, analyzing, and benchmarking your [Composer](http
 
 Get up and running in under 5 minutes.
 
-**Prerequisites:** Python 3.10+ and Node.js 18.18+ (or 20+) installed on your machine.
+**Prerequisites:** Python 3.11-3.14 and Node.js 18.18+ (or 20+) installed on your machine.
 
 **Steps:**
 
@@ -228,7 +228,7 @@ A more thorough walkthrough for users who want to take advantage of all features
 
 | Requirement | How to check | Where to get it |
 |-------------|-------------|-----------------|
-| Python 3.10+ | `python --version` | [python.org](https://www.python.org/downloads/) |
+| Python 3.11-3.14 | `python --version` | [python.org](https://www.python.org/downloads/) |
 | Node.js 18.18+ (or 20+) | `node --version` | [nodejs.org](https://nodejs.org/) |
 | Composer account | You have one if you trade on Composer | [composer.trade](https://www.composer.trade/) |
 
@@ -360,6 +360,7 @@ This checks prerequisites, installs dependencies, starts both the backend and fr
 
 Notes:
 - `start.py` creates/uses a backend virtualenv at `backend/.venv` by default (avoids global `pip install`). Use `--no-venv` to use your current Python environment.
+- If `backend/.venv` was created with a different Python interpreter, has a missing base interpreter, or has a broken package manager, `start.py` rebuilds it automatically before installing dependencies.
 - If `config.json` is missing/invalid in non-test mode, the app still starts and the dashboard shows setup instructions instead of spinning forever.
 
 Common overrides:

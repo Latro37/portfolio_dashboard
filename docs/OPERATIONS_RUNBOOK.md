@@ -6,7 +6,7 @@ Operational procedures for local development, test execution, and safe recovery.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11-3.14
 - Node.js 18+
 - Dependencies installed (`backend/requirements.txt`, `frontend/package.json`)
 
@@ -17,6 +17,10 @@ Operational procedures for local development, test execution, and safe recovery.
 ```bash
 python start.py
 ```
+
+Notes:
+- `start.py` manages `backend/.venv` automatically by default.
+- If `backend/.venv` was created with another Python version or its package manager is broken, the launcher rebuilds it before reinstalling backend dependencies.
 
 ### Stop all local processes
 

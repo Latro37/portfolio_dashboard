@@ -3,7 +3,7 @@
 Starts both the Python backend (FastAPI) and the Next.js frontend.
 
 Usage:
-  python start.py [--test] [--backend-port 8000] [--frontend-port 3000] [--no-venv]
+  python start.py [--test] [--first-start-test] [--backend-port 8000] [--frontend-port 3000] [--no-venv]
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ import webbrowser
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(ROOT, "backend")
 FRONTEND_DIR = os.path.join(ROOT, "frontend")
+SUPPORTED_MIN_PYTHON = (3, 11)
+SUPPORTED_MAX_PYTHON = (3, 14)
 
 processes: list[subprocess.Popen] = []
 
@@ -50,14 +52,23 @@ signal.signal(signal.SIGTERM, cleanup)
 # ------------------------------------------------------------------
 
 
+def _format_python_version(version: tuple[int, int]) -> str:
+    return f"{version[0]}.{version[1]}"
+
+
 def check_python():
-    """Verify Python version is 3.10+."""
-    major, minor = sys.version_info[:2]
-    if major < 3 or (major == 3 and minor < 10):
-        print(f"ERROR: Python 3.10+ is required (you have {major}.{minor}).")
-        print("Download the latest version from: https://www.python.org/downloads/")
+    """Verify Python version is within the supported launcher window."""
+    version = sys.version_info[:2]
+    if not (SUPPORTED_MIN_PYTHON <= version <= SUPPORTED_MAX_PYTHON):
+        print(
+            "ERROR: Python "
+            f"{_format_python_version(SUPPORTED_MIN_PYTHON)}-"
+            f"{_format_python_version(SUPPORTED_MAX_PYTHON)} is required "
+            f"(you have {_format_python_version(version)})."
+        )
+        print("Download a supported version from: https://www.python.org/downloads/")
         sys.exit(1)
-    print(f"  Python {major}.{minor} ............. OK")
+    print(f"  Python {_format_python_version(version)} ............. OK")
 
 
 def resolve_node_and_npm() -> tuple[str, str]:
@@ -136,6 +147,84 @@ def _venv_python_path(venv_dir: str) -> str:
     return os.path.join(venv_dir, "bin", "python")
 
 
+def _launcher_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    temp_dir = os.path.join(ROOT, "build", "launcher-tmp")
+    os.makedirs(temp_dir, exist_ok=True)
+    env["TMP"] = temp_dir
+    env["TEMP"] = temp_dir
+    return env
+
+
+def _read_pyvenv_cfg(venv_dir: str) -> dict[str, str]:
+    cfg_path = os.path.join(venv_dir, "pyvenv.cfg")
+    if not os.path.exists(cfg_path):
+        return {}
+
+    values: dict[str, str] = {}
+    with open(cfg_path, encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip().lower()] = value.strip()
+    return values
+
+
+def _pip_command(target_python: str) -> list[str]:
+    if os.path.normcase(os.path.abspath(target_python)) == os.path.normcase(os.path.abspath(sys.executable)):
+        return [target_python, "-m", "pip"]
+    return [sys.executable, "-m", "pip", "--python", target_python]
+
+
+def _backend_venv_rebuild_reason(venv_dir: str, py: str) -> str | None:
+    if not os.path.exists(venv_dir):
+        return "it does not exist yet"
+    if not os.path.exists(py):
+        return "its Python executable is missing"
+
+    cfg = _read_pyvenv_cfg(venv_dir)
+    recorded_version = cfg.get("version", "")
+    recorded_executable = cfg.get("executable", "")
+    current_version = _format_python_version(sys.version_info[:2])
+
+    if recorded_version and not recorded_version.startswith(f"{current_version}."):
+        return (
+            f"it was created with Python {recorded_version}, "
+            f"but start.py is running under Python {current_version}"
+        )
+
+    if recorded_executable and not os.path.exists(recorded_executable):
+        return f"its base interpreter no longer exists ({recorded_executable})"
+
+    try:
+        subprocess.run(
+            [py, "-c", "import sys; print(sys.executable)"],
+            capture_output=True,
+            check=True,
+            text=True,
+            env=_launcher_subprocess_env(),
+        )
+    except Exception:
+        return "it is not runnable"
+
+    return None
+
+
+def _create_backend_venv(venv_dir: str, *, reason: str) -> str:
+    py = _venv_python_path(venv_dir)
+    action = "Rebuilding" if os.path.exists(venv_dir) else "Creating"
+    print(f"{action} backend virtual environment (backend/.venv) because {reason}...")
+
+    cmd = [sys.executable, "-m", "venv", "--without-pip"]
+    if os.path.exists(venv_dir):
+        cmd.append("--clear")
+    cmd.append(venv_dir)
+    subprocess.run(cmd, check=True, env=_launcher_subprocess_env())
+    return py
+
+
 def ensure_backend_python(*, no_venv: bool) -> str:
     """Return python executable to use for backend (venv by default)."""
     if no_venv:
@@ -143,22 +232,35 @@ def ensure_backend_python(*, no_venv: bool) -> str:
 
     venv_dir = os.path.join(BACKEND_DIR, ".venv")
     py = _venv_python_path(venv_dir)
-    if not os.path.exists(py):
-        print("Creating backend virtual environment (backend/.venv)...")
+    rebuild_reason = _backend_venv_rebuild_reason(venv_dir, py)
+    if rebuild_reason:
         try:
-            subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
+            py = _create_backend_venv(venv_dir, reason=rebuild_reason)
         except subprocess.CalledProcessError:
             print("ERROR: Failed to create a virtual environment.")
             if os.name != "nt":
                 print("Tip (Linux): you may need to install the venv package (e.g. python3-venv).")
             sys.exit(1)
 
-    # Ensure pip exists in the venv (some environments disable ensurepip).
+    # Validate that the launcher can manage packages in the target interpreter.
     try:
-        subprocess.run([py, "-m", "pip", "--version"], capture_output=True, check=True, text=True)
+        subprocess.run(
+            _pip_command(py) + ["--version"],
+            capture_output=True,
+            check=True,
+            text=True,
+            env=_launcher_subprocess_env(),
+        )
     except Exception:
         try:
-            subprocess.run([py, "-m", "ensurepip", "--upgrade"], check=True)
+            py = _create_backend_venv(venv_dir, reason="package manager validation failed")
+            subprocess.run(
+                _pip_command(py) + ["--version"],
+                capture_output=True,
+                check=True,
+                text=True,
+                env=_launcher_subprocess_env(),
+            )
         except subprocess.CalledProcessError:
             print("ERROR: pip is not available in the backend venv.")
             sys.exit(1)
@@ -168,8 +270,8 @@ def ensure_backend_python(*, no_venv: bool) -> str:
 
 def install_deps(*, backend_python: str, npm_cmd: str):
     """Install dependencies if needed."""
-    def _run_with_elapsed(cmd: list[str], *, cwd: str, progress_label: str):
-        proc = subprocess.Popen(cmd, cwd=cwd)
+    def _run_with_elapsed(cmd: list[str], *, cwd: str, progress_label: str, env: dict[str, str] | None = None):
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env)
         started = time.time()
         last_report = 0
         while proc.poll() is None:
@@ -186,9 +288,10 @@ def install_deps(*, backend_python: str, npm_cmd: str):
         print("Checking Python dependencies...")
         try:
             _run_with_elapsed(
-                [backend_python, "-m", "pip", "install", "-r", req, "-q"],
+                _pip_command(backend_python) + ["install", "-r", req, "-q"],
                 cwd=BACKEND_DIR,
                 progress_label="Checking Python dependencies",
+                env=_launcher_subprocess_env(),
             )
             print("  Python dependencies ........ OK")
         except subprocess.CalledProcessError:
