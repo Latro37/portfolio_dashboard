@@ -52,3 +52,31 @@ def test_benchmark_cache_enforces_max_entries(
 
     assert len(benchmark_read._benchmark_cache) == 2
     assert all(cache_key[0] in {"BBB", "CCC"} for cache_key in benchmark_read._benchmark_cache.keys())
+
+
+def test_benchmark_history_falls_back_to_polygon_when_finnhub_access_is_denied(
+    db_session: Session,
+):
+    benchmark_read._benchmark_cache.clear()
+
+    result = benchmark_read.get_benchmark_history_data(
+        db=db_session,
+        ticker="SPY",
+        start_date="2025-01-02",
+        end_date="2025-01-03",
+        account_id=None,
+        get_daily_closes_stooq_fn=lambda *_args, **_kwargs: [],
+        get_daily_closes_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            benchmark_read.FinnhubAccessError("no candle entitlement")
+        ),
+        get_daily_closes_polygon_fn=lambda *_args, **_kwargs: [
+            (date(2025, 1, 2), 100.0),
+            (date(2025, 1, 3), 102.0),
+        ],
+        get_latest_price_fn=lambda _sym: None,
+    )
+
+    assert result["ticker"] == "SPY"
+    assert len(result["data"]) == 2
+    assert result["data"][0]["return_pct"] == 0.0
+    assert result["data"][1]["return_pct"] == 2.0
