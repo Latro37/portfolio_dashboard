@@ -19,6 +19,7 @@ from app.services.finnhub_market_data import (
     FinnhubError,
     PolygonAccessError,
     PolygonError,
+    PolygonNotConfiguredError,
     get_daily_closes,
     get_daily_closes_polygon,
     get_daily_closes_stooq,
@@ -113,6 +114,8 @@ def get_benchmark_history_data(
     if not closes:
         try:
             closes = get_daily_closes_polygon_fn(ticker, start_dt, end_dt)
+        except PolygonNotConfiguredError:
+            logger.info("Polygon benchmark fallback is not configured for %s", ticker)
         except PolygonAccessError as exc:
             polygon_error = str(exc)
             logger.warning("Polygon access denied for %s candles: %s", ticker, exc)
