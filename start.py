@@ -173,9 +173,7 @@ def _read_pyvenv_cfg(venv_dir: str) -> dict[str, str]:
 
 
 def _pip_command(target_python: str) -> list[str]:
-    if os.path.normcase(os.path.abspath(target_python)) == os.path.normcase(os.path.abspath(sys.executable)):
-        return [target_python, "-m", "pip"]
-    return [sys.executable, "-m", "pip", "--python", target_python]
+    return [target_python, "-m", "pip"]
 
 
 def _backend_venv_rebuild_reason(venv_dir: str, py: str) -> str | None:
@@ -217,12 +215,39 @@ def _create_backend_venv(venv_dir: str, *, reason: str) -> str:
     action = "Rebuilding" if os.path.exists(venv_dir) else "Creating"
     print(f"{action} backend virtual environment (backend/.venv) because {reason}...")
 
-    cmd = [sys.executable, "-m", "venv", "--without-pip"]
+    cmd = [sys.executable, "-m", "venv"]
     if os.path.exists(venv_dir):
         cmd.append("--clear")
     cmd.append(venv_dir)
     subprocess.run(cmd, check=True, env=_launcher_subprocess_env())
     return py
+
+
+def _ensure_backend_pip(py: str) -> None:
+    try:
+        subprocess.run(
+            _pip_command(py) + ["--version"],
+            capture_output=True,
+            check=True,
+            text=True,
+            env=_launcher_subprocess_env(),
+        )
+        return
+    except Exception:
+        pass
+
+    subprocess.run(
+        [py, "-m", "ensurepip", "--upgrade"],
+        check=True,
+        env=_launcher_subprocess_env(),
+    )
+    subprocess.run(
+        _pip_command(py) + ["--version"],
+        capture_output=True,
+        check=True,
+        text=True,
+        env=_launcher_subprocess_env(),
+    )
 
 
 def ensure_backend_python(*, no_venv: bool) -> str:
@@ -242,26 +267,14 @@ def ensure_backend_python(*, no_venv: bool) -> str:
                 print("Tip (Linux): you may need to install the venv package (e.g. python3-venv).")
             sys.exit(1)
 
-    # Validate that the launcher can manage packages in the target interpreter.
+    # Ensure package management stays local to the backend interpreter.
     try:
-        subprocess.run(
-            _pip_command(py) + ["--version"],
-            capture_output=True,
-            check=True,
-            text=True,
-            env=_launcher_subprocess_env(),
-        )
+        _ensure_backend_pip(py)
     except Exception:
         try:
-            py = _create_backend_venv(venv_dir, reason="package manager validation failed")
-            subprocess.run(
-                _pip_command(py) + ["--version"],
-                capture_output=True,
-                check=True,
-                text=True,
-                env=_launcher_subprocess_env(),
-            )
-        except subprocess.CalledProcessError:
+            py = _create_backend_venv(venv_dir, reason="pip bootstrap validation failed")
+            _ensure_backend_pip(py)
+        except Exception:
             print("ERROR: pip is not available in the backend venv.")
             sys.exit(1)
 
