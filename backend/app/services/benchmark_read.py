@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 _benchmark_cache: "OrderedDict[Tuple[str, str, str, str], Tuple[float, list]]" = OrderedDict()
 _BENCHMARK_TTL = 3600  # 1 hour
 _BENCHMARK_CACHE_MAX = 256
+_POLYGON_BENCHMARK_FAILURE_DETAIL = "Polygon benchmark data unavailable"
 
 
 def _get_cached_benchmark(cache_key: Tuple[str, str, str, str]) -> Optional[list]:
@@ -142,7 +143,10 @@ def get_benchmark_history_data(
         if finnhub_error and polygon_error:
             raise HTTPException(
                 502,
-                f"Benchmark data unavailable for '{ticker}': Finnhub: {finnhub_error}; Polygon: {polygon_error}",
+                (
+                    f"Benchmark data unavailable for '{ticker}': "
+                    f"Finnhub: {finnhub_error}; Polygon: {_POLYGON_BENCHMARK_FAILURE_DETAIL}"
+                ),
             )
         if finnhub_error:
             raise HTTPException(
@@ -152,7 +156,7 @@ def get_benchmark_history_data(
         if polygon_error:
             raise HTTPException(
                 502,
-                f"Polygon benchmark data unavailable for '{ticker}': {polygon_error}",
+                f"{_POLYGON_BENCHMARK_FAILURE_DETAIL} for '{ticker}'",
             )
         raise HTTPException(400, f"No valid price data for '{ticker}'")
 

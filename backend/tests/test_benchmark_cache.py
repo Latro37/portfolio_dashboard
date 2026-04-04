@@ -131,3 +131,62 @@ def test_benchmark_history_preserves_finnhub_failure_when_polygon_is_not_configu
 
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail == "Finnhub benchmark data unavailable for 'SPY': no candle entitlement"
+
+
+def test_benchmark_history_sanitizes_polygon_failure_detail(
+    db_session: Session,
+):
+    benchmark_read._benchmark_cache.clear()
+
+    with pytest.raises(HTTPException) as exc_info:
+        benchmark_read.get_benchmark_history_data(
+            db=db_session,
+            ticker="SPY",
+            start_date="2025-01-02",
+            end_date="2025-01-03",
+            account_id=None,
+            get_daily_closes_stooq_fn=lambda *_args, **_kwargs: [],
+            get_daily_closes_fn=lambda *_args, **_kwargs: [],
+            get_daily_closes_polygon_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                benchmark_read.PolygonError(
+                    "Polygon request failed: https://api.polygon.io?...&apiKey=secret-key"
+                )
+            ),
+            get_latest_price_fn=lambda _sym: None,
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "Polygon benchmark data unavailable for 'SPY'"
+    assert "secret-key" not in exc_info.value.detail
+
+
+def test_benchmark_history_sanitizes_polygon_failure_when_finnhub_also_fails(
+    db_session: Session,
+):
+    benchmark_read._benchmark_cache.clear()
+
+    with pytest.raises(HTTPException) as exc_info:
+        benchmark_read.get_benchmark_history_data(
+            db=db_session,
+            ticker="SPY",
+            start_date="2025-01-02",
+            end_date="2025-01-03",
+            account_id=None,
+            get_daily_closes_stooq_fn=lambda *_args, **_kwargs: [],
+            get_daily_closes_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                benchmark_read.FinnhubError("upstream timeout")
+            ),
+            get_daily_closes_polygon_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                benchmark_read.PolygonError(
+                    "Polygon request failed: https://api.polygon.io?...&apiKey=secret-key"
+                )
+            ),
+            get_latest_price_fn=lambda _sym: None,
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == (
+        "Benchmark data unavailable for 'SPY': "
+        "Finnhub: upstream timeout; Polygon: Polygon benchmark data unavailable"
+    )
+    assert "secret-key" not in exc_info.value.detail
