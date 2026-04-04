@@ -17,7 +17,11 @@ from app.services.date_filters import parse_iso_date
 from app.services.finnhub_market_data import (
     FinnhubAccessError,
     FinnhubError,
+    PolygonAccessError,
+    PolygonError,
+    PolygonNotConfiguredError,
     get_daily_closes,
+    get_daily_closes_polygon,
     get_daily_closes_stooq,
     get_latest_price,
 )
@@ -28,6 +32,7 @@ logger = logging.getLogger(__name__)
 _benchmark_cache: "OrderedDict[Tuple[str, str, str, str], Tuple[float, list]]" = OrderedDict()
 _BENCHMARK_TTL = 3600  # 1 hour
 _BENCHMARK_CACHE_MAX = 256
+_POLYGON_BENCHMARK_FAILURE_DETAIL = "Polygon benchmark data unavailable"
 
 
 def _get_cached_benchmark(cache_key: Tuple[str, str, str, str]) -> Optional[list]:
@@ -57,6 +62,7 @@ def get_benchmark_history_data(
     account_id: Optional[str],
     get_daily_closes_stooq_fn: Callable[[str, date, date], List[Tuple[date, float]]] = get_daily_closes_stooq,
     get_daily_closes_fn: Callable[[str, date, date], List[Tuple[date, float]]] = get_daily_closes,
+    get_daily_closes_polygon_fn: Callable[[str, date, date], List[Tuple[date, float]]] = get_daily_closes_polygon,
     get_latest_price_fn: Callable[[str], Optional[float]] = get_latest_price,
 ):
     """Fetch benchmark history and compute TWR, drawdown, and MWR."""
@@ -105,6 +111,19 @@ def get_benchmark_history_data(
             finnhub_error = str(exc)
             logger.warning("Finnhub candle request failed for %s: %s", ticker, exc)
 
+    polygon_error: Optional[str] = None
+    if not closes:
+        try:
+            closes = get_daily_closes_polygon_fn(ticker, start_dt, end_dt)
+        except PolygonNotConfiguredError:
+            logger.info("Polygon benchmark fallback is not configured for %s", ticker)
+        except PolygonAccessError as exc:
+            polygon_error = str(exc)
+            logger.warning("Polygon access denied for %s candles: %s", ticker, exc)
+        except PolygonError as exc:
+            polygon_error = str(exc)
+            logger.warning("Polygon candle request failed for %s: %s", ticker, exc)
+
     if not closes:
         db_rows = (
             db.query(BenchmarkData)
@@ -121,10 +140,23 @@ def get_benchmark_history_data(
             logger.info("Benchmark %s: using %d rows from DB fallback", ticker, len(closes))
 
     if not closes:
+        if finnhub_error and polygon_error:
+            raise HTTPException(
+                502,
+                (
+                    f"Benchmark data unavailable for '{ticker}': "
+                    f"Finnhub: {finnhub_error}; Polygon: {_POLYGON_BENCHMARK_FAILURE_DETAIL}"
+                ),
+            )
         if finnhub_error:
             raise HTTPException(
                 502,
                 f"Finnhub benchmark data unavailable for '{ticker}': {finnhub_error}",
+            )
+        if polygon_error:
+            raise HTTPException(
+                502,
+                f"{_POLYGON_BENCHMARK_FAILURE_DETAIL} for '{ticker}'",
             )
         raise HTTPException(400, f"No valid price data for '{ticker}'")
 

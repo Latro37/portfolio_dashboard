@@ -130,6 +130,7 @@ def client(monkeypatch: pytest.MonkeyPatch, session_factory):
     # Force benchmark route to use DB fallback (deterministic, offline).
     monkeypatch.setattr(portfolio_router, "get_daily_closes_stooq", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(portfolio_router, "get_daily_closes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(portfolio_router, "get_daily_closes_polygon", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(portfolio_router, "get_latest_price", lambda *_args, **_kwargs: None)
 
     app = FastAPI()

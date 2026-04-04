@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.services.finnhub_market_data import (
     get_daily_closes,
+    get_daily_closes_polygon,
     get_daily_closes_stooq,
     get_latest_price,
 )
@@ -371,6 +372,7 @@ def get_benchmark_history(
         account_id=account_id,
         get_daily_closes_stooq_fn=get_daily_closes_stooq,
         get_daily_closes_fn=get_daily_closes,
+        get_daily_closes_polygon_fn=get_daily_closes_polygon,
         get_latest_price_fn=get_latest_price,
     )
 

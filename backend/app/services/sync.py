@@ -18,7 +18,10 @@ from app.services.holdings import reconstruct_holdings
 from app.services.finnhub_market_data import (
     FinnhubAccessError,
     FinnhubError,
+    PolygonAccessError,
+    PolygonError,
     get_daily_closes,
+    get_daily_closes_polygon,
     get_daily_closes_stooq,
 )
 from app.services.metrics import compute_all_metrics, compute_latest_metrics
@@ -620,7 +623,7 @@ def _sync_benchmark(db: Session, account_id: str):
     """Fetch benchmark daily closes and store.
 
     Incremental: only fetches from the last stored benchmark date onward.
-    Provider order: Stooq (free historical) -> Finnhub candles fallback.
+    Provider order: Stooq (free historical) -> Finnhub candles fallback -> Polygon aggregates.
     """
     settings = get_settings()
     ticker = settings.benchmark_ticker
@@ -649,9 +652,16 @@ def _sync_benchmark(db: Session, account_id: str):
             rows = get_daily_closes(ticker, start_date, end_date)
         except FinnhubAccessError as e:
             logger.warning("Failed to fetch benchmark data (Finnhub access): %s", e)
-            return
         except FinnhubError as e:
             logger.warning("Failed to fetch benchmark data (Finnhub error): %s", e)
+    if not rows:
+        try:
+            rows = get_daily_closes_polygon(ticker, start_date, end_date)
+        except PolygonAccessError as e:
+            logger.warning("Failed to fetch benchmark data (Polygon access): %s", e)
+            return
+        except PolygonError as e:
+            logger.warning("Failed to fetch benchmark data (Polygon error): %s", e)
             return
     if not rows:
         return

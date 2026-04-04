@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
 _STOOQ_DAILY_URL = "https://stooq.com/q/d/l/"
 _POLYGON_SPLITS_URL = "https://api.polygon.io/v3/reference/splits"
+_POLYGON_AGGS_URL = "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
 
 
 class FinnhubError(RuntimeError):
@@ -181,6 +182,89 @@ def get_splits_polygon(symbol: str, start_date: date, end_date: date) -> List[Tu
     out.sort(key=lambda x: x[0])
     logger.debug("Polygon splits %s: %d events", symbol, len(out))
     return out
+
+
+def get_daily_closes_polygon(symbol: str, start_date: date, end_date: date) -> List[Tuple[date, float]]:
+    """Return daily closes from Polygon grouped daily aggregates for [start_date, end_date]."""
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return []
+
+    key = load_polygon_key()
+    if not key:
+        raise PolygonNotConfiguredError("Polygon API key is not configured.")
+
+    url = _POLYGON_AGGS_URL.format(
+        ticker=symbol,
+        start=start_date.isoformat(),
+        end=end_date.isoformat(),
+    )
+    try:
+        resp = requests.get(
+            url,
+            params={
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 50000,
+                "apiKey": key,
+            },
+            timeout=20,
+        )
+    except requests.RequestException as e:
+        raise PolygonError(f"Polygon request failed: {e}") from e
+
+    payload = None
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+
+    if resp.status_code in (401, 403):
+        msg = "Polygon denied access to this resource."
+        if isinstance(payload, dict):
+            msg = str(payload.get("error") or payload.get("message") or msg)
+        raise PolygonAccessError(msg)
+    if not resp.ok:
+        msg = f"Polygon returned HTTP {resp.status_code}"
+        if isinstance(payload, dict):
+            msg = str(payload.get("error") or payload.get("message") or msg)
+        raise PolygonError(msg)
+    if not isinstance(payload, dict):
+        raise PolygonError("Unexpected Polygon aggregate response format.")
+
+    status = str(payload.get("status", "")).upper()
+    if status == "NOT_FOUND":
+        return []
+    if status not in ("OK", "DELAYED"):
+        err_msg = str(
+            payload.get("error")
+            or payload.get("message")
+            or f"Polygon aggregate status: {status}"
+        )
+        if "access" in err_msg.lower() or "permission" in err_msg.lower():
+            raise PolygonAccessError(err_msg)
+        raise PolygonError(err_msg)
+
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+
+    rows_by_date: Dict[date, float] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        try:
+            ts = int(item["t"])
+            close_val = float(item["c"])
+            d = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).date()
+        except Exception:
+            continue
+        if start_date <= d <= end_date:
+            rows_by_date[d] = close_val
+
+    rows = sorted(rows_by_date.items(), key=lambda x: x[0])
+    logger.debug("Polygon candles %s: %d rows", symbol, len(rows))
+    return rows
 
 
 def _request_json(path: str, params: Dict[str, object], timeout: int = 20):
