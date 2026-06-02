@@ -18,6 +18,7 @@ import { isMarketOpen, isWithinTradingSession } from "@/lib/marketHours";
 import { useSymphonyBacktestState } from "@/features/symphony-detail/hooks/useSymphonyBacktestState";
 import { useSymphonyLivePerformanceState } from "@/features/symphony-detail/hooks/useSymphonyLivePerformanceState";
 import { useSymphonyTradePreviewState } from "@/features/symphony-detail/hooks/useSymphonyTradePreviewState";
+import { buildLivePerformanceOverlay } from "@/features/symphony-detail/hooks/symphonyLiveOverlay";
 import { SymphonyDetailPeriod } from "@/features/symphony-detail/types";
 
 type Args = {
@@ -142,15 +143,14 @@ export function useSymphonyDetailData({
     if (!isMarketOpen()) return;
 
     const livePv = symphony.value;
+    const liveNd = symphony.net_deposits;
     const base = baseLiveDataRef.current;
-    const storedNetDeposits =
-      base.length > 0 ? base[base.length - 1].net_deposits : symphony.net_deposits;
 
     getSymphonySummaryLiveQueryFn({
       symphonyId: symphony.id,
       accountId: symphony.account_id,
       livePv,
-      liveNd: storedNetDeposits,
+      liveNd,
       period: selectedPeriod,
       startDate: effectiveStart,
       endDate: customEnd || undefined,
@@ -166,36 +166,7 @@ export function useSymphonyDetailData({
     if (base.length === 0) return;
 
     const today = new Date().toISOString().slice(0, 10);
-    const lastPoint = base[base.length - 1];
-    const prevPortfolioValue = lastPoint.portfolio_value;
-    const dailyReturnPct =
-      prevPortfolioValue > 0 ? ((livePv - prevPortfolioValue) / prevPortfolioValue) * 100 : 0;
-    const cumulativeReturnPct =
-      storedNetDeposits > 0 ? ((livePv - storedNetDeposits) / storedNetDeposits) * 100 : 0;
-    const prevTwr = lastPoint.time_weighted_return || 0;
-    const liveTwr = ((1 + prevTwr / 100) * (1 + dailyReturnPct / 100) - 1) * 100;
-    const twrPeak = Math.max(
-      ...base.map((point) => 1 + (point.time_weighted_return || 0) / 100),
-      1 + liveTwr / 100,
-    );
-    const liveDrawdown = twrPeak > 0 ? ((1 + liveTwr / 100) / twrPeak - 1) * 100 : 0;
-
-    const todayPoint: PerformancePoint = {
-      date: today,
-      portfolio_value: livePv,
-      net_deposits: storedNetDeposits,
-      cumulative_return_pct: cumulativeReturnPct,
-      daily_return_pct: dailyReturnPct,
-      time_weighted_return: liveTwr,
-      money_weighted_return: lastPoint.money_weighted_return || 0,
-      current_drawdown: Math.min(liveDrawdown, 0),
-    };
-
-    if (lastPoint.date === today) {
-      setLiveData([...base.slice(0, -1), todayPoint]);
-      return;
-    }
-    setLiveData([...base, todayPoint]);
+    setLiveData(buildLivePerformanceOverlay({ base, livePv, liveNd, today }));
   }, [
     symphony.id,
     symphony.account_id,

@@ -111,6 +111,18 @@ def _build_symphony_cash_flows(rows: List[SymphonyDailyPortfolio]) -> List[Dict]
     return cash_flows
 
 
+def _cash_flow_date(cash_flow: Dict) -> date:
+    value = cash_flow["date"]
+    return value if isinstance(value, date) else date.fromisoformat(str(value))
+
+
+def _replace_cash_flow_for_date(cash_flows: List[Dict], flow_date: date, amount: float) -> List[Dict]:
+    next_flows = [flow for flow in cash_flows if _cash_flow_date(flow) != flow_date]
+    if abs(amount) > 0.50:
+        next_flows.append({"date": flow_date, "amount": amount})
+    return next_flows
+
+
 def _symphony_performance_live(
     db: Session,
     symphony_id: str,
@@ -296,6 +308,9 @@ def get_symphony_summary_live_data(
     cf = list(cf_dicts)
 
     if series and str(series[-1]["date"]) == today_str:
+        previous_nd = series[-2]["net_deposits"] if len(series) >= 2 else live_nd
+        deposit_delta = live_nd - previous_nd
+        cf = _replace_cash_flow_for_date(cf, today, deposit_delta)
         series[-1]["portfolio_value"] = live_pv
         series[-1]["net_deposits"] = live_nd
     else:
